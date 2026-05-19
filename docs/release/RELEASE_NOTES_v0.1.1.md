@@ -7,8 +7,9 @@ https://raw.githubusercontent.com/dunknowcoding/ArduinoNRF/main/package_arduinon
 ```
 
 If you already installed `0.1.0`, open Arduino IDE 2.x's **Tools → Board →
-Boards Manager**, search for "Arduino NRF52 Boards", and click **Update**
-to pull `0.1.1`.
+Boards Manager**, search for "ArduinoNRF" (renamed in 0.1.2 from the
+prior generic "Arduino NRF52 Boards" to avoid clash with Arduino-official
+nRF52 platforms), and click **Update** to pull `0.1.1`.
 
 ## Highlights
 
