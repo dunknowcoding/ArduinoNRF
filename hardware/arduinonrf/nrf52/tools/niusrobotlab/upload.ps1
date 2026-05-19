@@ -2297,6 +2297,20 @@ try {
                 Write-Stage -Percent 100 -Label 'Firmware streamed over Adafruit serial DFU (post-verify skipped)'
                 exit 0
             }
+            # Auto-skip post-verify when runtime + bootloader share VID:PID
+            # (the typical Adafruit-fork clone configuration where
+            # runtime_usb_pid == upload.usb_pid). The PnP transition the
+            # post-verify waits for cannot fire because Windows sees the
+            # same composite identity throughout; the wait would just burn
+            # tens of seconds before timing out. The DFU streaming above
+            # already confirmed success at the protocol level; if the host
+            # also wants a "board is now in user mode" confirmation it can
+            # set NIUS_FORCE_POST_VERIFY=1 to opt back in.
+            if ($runtimeSharesUploadIdentity -and $env:NIUS_FORCE_POST_VERIFY -ne '1') {
+                Write-NiusHostLine ('[nius] Same-PID runtime/bootloader ({0}); skipping PnP post-verify (set NIUS_FORCE_POST_VERIFY=1 to override)' -f $UsbPid)
+                Write-Stage -Percent 100 -Label 'Firmware streamed over Adafruit serial DFU (same-PID post-verify auto-skipped)'
+                exit 0
+            }
             Write-Stage -Percent 94 -Label 'Checking whether the board left bootloader mode'
             $postUploadState = Wait-ForAdafruitRuntimeTransition -BootloaderVid $UsbVid -BootloaderPid $UsbPid -RuntimeVid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Vid } else { '' }) -RuntimePid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Pid } else { '' })
             if (-not $postUploadState.Success) {
