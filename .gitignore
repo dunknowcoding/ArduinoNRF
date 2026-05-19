@@ -9,6 +9,12 @@
 .nius-verify-cache/
 build/
 
+# Platform release archives are produced by
+# tools/release/build_platform_archive.py and uploaded to GitHub Releases.
+# Do not commit them into the tree — the canonical hosting is the release
+# page that package_arduinonrf_index.json points to.
+dist/
+
 # ============================================================
 # Build / upload / validation logs (regenerated each run)
 # ============================================================

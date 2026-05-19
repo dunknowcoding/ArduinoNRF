@@ -3,18 +3,18 @@
     {
       "name": "arduinonrf",
       "maintainer": "NiusRobotLab",
-      "websiteURL": "https://example.invalid/arduinonrf",
-      "email": "noreply@example.invalid",
+      "websiteURL": "https://github.com/dunknowcoding/ArduinoNRF",
+      "email": "dunknowcoding@users.noreply.github.com",
       "platforms": [
         {
           "name": "Arduino NRF52 Boards",
           "architecture": "nrf52",
           "version": "0.1.0",
           "category": "Contributed",
-          "url": "https://example.invalid/arduinonrf/arduinonrf-0.1.0.zip",
+          "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.1.0/arduinonrf-0.1.0.zip",
           "archiveFileName": "arduinonrf-0.1.0.zip",
-          "checksum": "SHA-256:66c031a38986ce906aa53b30222100286864490fb974d9c97673622a319d13ba",
-          "size": "99527",
+          "checksum": "SHA-256:dd89f759af4df9e0f5a53178e922af1c1fbcd96c98176a6ce213238bc6ae1733",
+          "size": "170008",
           "boards": [
             {
               "name": "AliExpress ProMicro nRF52840"
@@ -48,7 +48,7 @@
             }
           ],
           "help": {
-            "online": "https://example.invalid/arduinonrf/docs"
+            "online": "https://github.com/dunknowcoding/ArduinoNRF/blob/main/docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md"
           },
           "toolsDependencies": [
             {
@@ -71,7 +71,7 @@
       ],
       "tools": [],
       "help": {
-        "online": "https://example.invalid/arduinonrf/docs"
+        "online": "https://github.com/dunknowcoding/ArduinoNRF#readme"
       }
     }
   ]
