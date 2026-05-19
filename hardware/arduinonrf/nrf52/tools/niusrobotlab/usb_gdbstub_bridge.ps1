@@ -128,6 +128,13 @@ try {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $TcpPort)
     $listener.Start()
 
+    # Emit a banner that doubles as a cortex-debug "openocd" serverReady
+    # marker. cortex-debug's default serverReady regex for servertype=openocd
+    # matches "Listening on port" — printing this line lets the same bridge
+    # be launched directly by arduino-cli / Arduino IDE 2 as the debug
+    # server (no separate terminal needed). The longer descriptive line
+    # below is for humans running the bridge manually.
+    Write-Host ("Listening on port {0} for gdb connections" -f $TcpPort)
     Write-Host ("USB CDC GDB stub bridge listening on tcp://127.0.0.1:{0} and forwarding to {1} @ {2} baud" -f $TcpPort, $SerialPort, $BaudRate)
     Write-Host 'Waiting for a GDB client connection...'
 

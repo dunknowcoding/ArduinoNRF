@@ -229,9 +229,27 @@ promicro_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 promicro_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
 # When the USB CDC GDB stub profile is selected, route Arduino IDE 2's
 # debugger to our PowerShell TCP-serial bridge instead of OpenOCD/SWD.
-promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server=usbgdbstub
-promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.servertype=external
+#
+# arduino-cli's `Debug` command only accepts a built-in set of server-type
+# names (openocd, jlink, stutil, pyocd, bmp) — `usbgdbstub` here would be
+# rejected with "GDB server 'usbgdbstub' is not supported". So we pretend
+# to be openocd: keep `debug.server=openocd` (the same as other profiles)
+# and override `debug.server.openocd.path` to point at our wrapper. The
+# wrapper spawns usb_gdbstub_bridge.ps1, which prints
+# "Listening on port 3335 for gdb connections" right after its TCP socket
+# is ready — that line matches cortex-debug's default openocd serverReady
+# regex, so cortex-debug treats the bridge as a started server and then
+# connects GDB to localhost:3335. One-click Debug in Arduino IDE 2 with
+# no separate "start bridge" terminal.
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server=openocd
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.path={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_server.cmd
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.path.windows={runtime.platform.path}\tools\niusrobotlab\usb_gdbstub_server.cmd
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.scripts_dir=
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.scripts_dir.windows=
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.scripts.0=
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.servertype=openocd
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.gdbTarget=localhost:3335
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.gdbPort=3335
 # The stub does not implement OpenOCD `monitor` extensions. Override the
 # default post-attach / restart command sequence so cortex-debug doesn't fire
 # them. The target is already halted at the BKPT in setup() when GDB attaches,

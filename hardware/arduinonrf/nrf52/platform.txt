@@ -1,5 +1,5 @@
 name=Arduino NRF52 Boards
-version=0.1.0
+version=0.1.1
 
 compiler.path={runtime.tools.arm-none-eabi-gcc.path}/bin/
 compiler.c.cmd=arm-none-eabi-gcc
@@ -87,15 +87,23 @@ debug.usbgdbstub.bridge.describe.pattern=powershell -NoProfile -ExecutionPolicy 
 debug.usbgdbstub.bridge.listports.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -ListPorts
 debug.usbgdbstub.bridge.launch.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -Board "{build.variant}" -SerialPort "{serial.port}" -TcpPort 3335 -BaudRate {debug.usbgdbstub.baudrate}
 
-# debug.server.usbgdbstub.* — selected automatically when the buildprofile
-# `usbgdbstub` menu option is active (see boards.txt). Arduino IDE 2 expects
-# *some* debug.server entry; cortex-debug is then forced into servertype
-# `external` (see boards.txt overrides), which simply connects to the bridge
-# at gdbTarget=localhost:3335 without spawning a server.
+# debug.server.usbgdbstub.* — unused at the arduino-cli level. arduino-cli's
+# Debug command only accepts a fixed set of server-type names (openocd,
+# jlink, stutil, pyocd, bmp); a custom value here would be rejected with
+# "GDB server 'usbgdbstub' is not supported". The buildprofile=usbgdbstub
+# menu in boards.txt instead keeps `debug.server=openocd` and overrides
+# `debug.server.openocd.path` to point at usb_gdbstub_server.cmd, which
+# spawns usb_gdbstub_bridge.ps1. The bridge prints
+# "Listening on port 3335 for gdb connections" right after its TCP socket
+# is ready — matching cortex-debug's default openocd serverReady regex,
+# so cortex-debug spawns it as the debug server and then connects GDB to
+# localhost:3335. One-click Debug in Arduino IDE 2 with no separate
+# "start bridge" terminal.
 #
-# The bridge process itself must be running on the host *before* the IDE
-# debug button is pressed. Launch it manually with:
-#   powershell -ExecutionPolicy Bypass -File <platform>/tools/niusrobotlab/usb_gdbstub_bridge.ps1 -SerialPort COM3
+# These keys are left in place (empty) so the platform reads cleanly with
+# arduino-cli's verbose debug --info even when usbgdbstub-specific lookups
+# fall back here. The bridge.{describe,listports,launch}.pattern entries
+# above remain available for manual command-line debugging.
 debug.server.usbgdbstub.path=
 debug.server.usbgdbstub.scripts_dir=
 debug.server.usbgdbstub.script=
