@@ -1,8 +1,0 @@
-board_manager:
-  additional_urls: []
-directories:
-  user: F:\Arduino\driver\ArduinoNRF
-  data: F:\Arduino\driver\ArduinoNRF\.arduino15-install-test
-  downloads: F:\Arduino\driver\ArduinoNRF\.arduino15-install-test\staging
-library:
-  enable_unsafe_install: false

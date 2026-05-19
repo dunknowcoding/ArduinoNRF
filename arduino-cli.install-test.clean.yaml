@@ -1,8 +1,0 @@
-board_manager:
-  additional_urls: []
-directories:
-  user: F:\Arduino\driver\ArduinoNRF\.arduino-cli-user-test
-  data: F:\Arduino\driver\ArduinoNRF\.arduino15-install-test-clean
-  downloads: F:\Arduino\driver\ArduinoNRF\.arduino15-install-test-clean\staging
-library:
-  enable_unsafe_install: false
