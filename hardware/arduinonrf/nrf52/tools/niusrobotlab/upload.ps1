@@ -55,11 +55,35 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if ($ArduinoIdeVerboseUpload -eq 'true' -or $ArduinoIdeVerboseUpload -eq '1') {
+# Force UTF-8 for our own stdout / stderr so the Unicode box-drawing and
+# block characters in the banner / progress bar render correctly. PS 5.1
+# defaults to the console codepage which on Chinese Windows is usually
+# GBK — without this override the █ / ░ / ─ chars come out as mojibake.
+try {
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+}
+catch {
+}
+
+$script:NiusVerboseFromIde = ($ArduinoIdeVerboseUpload -eq 'true' -or $ArduinoIdeVerboseUpload -eq '1')
+if ($script:NiusVerboseFromIde) {
     $VerbosePreference = 'Continue'
 }
 
-$script:NiusMirrorUploadLinesToStderr = ($env:NIUS_DISABLE_UPLOAD_STDERR_MIRROR -ne '1')
+# Stdout block-buffering inside `& powershell.exe` children causes stage
+# updates to appear in big bursts only when the buffer flushes. We mirror
+# every Write-NiusHostLine to stderr (line-buffered) so progress is live
+# in plain terminals.
+#
+# Arduino IDE 2 captures BOTH stdout and stderr from arduino-cli children
+# and prints them into the same Output panel, so under IDE 2's verbose
+# upload that mirror would render every line twice (the duplicate output
+# users reported). Skip the mirror when IDE 2 verbose is the caller (or
+# when the user explicitly disables it via NIUS_DISABLE_UPLOAD_STDERR_MIRROR=1).
+$script:NiusMirrorUploadLinesToStderr =
+    ($env:NIUS_DISABLE_UPLOAD_STDERR_MIRROR -ne '1') -and
+    (-not $script:NiusVerboseFromIde)
 
 . (Join-Path $PSScriptRoot 'usb_port_helpers.ps1')
 
@@ -102,16 +126,15 @@ function Write-NiusHostLine {
 function Write-Banner {
     param([string]$BoardName)
 
-    Write-NiusHostLine '================================================================'
-    Write-NiusHostLine ' _   _ _           ____       _           _   _       _         '
-    Write-NiusHostLine '| \ | (_)_   _ ___|  _ \ ___ | |__   ___ | |_| | __ _| |__      '
-    Write-NiusHostLine '|  \| | | | | / __| |_) / _ \|  _ \ / _ \| __| |/ _` |  _ \     '
-    Write-NiusHostLine '| |\  | | |_| \__ \  _ < (_) | |_) | (_) | |_| | (_| | |_) |    '
-    Write-NiusHostLine '|_| \_|_|\__,_|___/_| \_\___/|_.__/ \___/ \__|_|\__,_|_.__/     '
-    Write-NiusHostLine '                                                                '
-    Write-NiusHostLine '                 nRF52 Upload Console for Arduino               '
-    Write-NiusHostLine (' Target: {0}' -f $BoardName)
-    Write-NiusHostLine '================================================================'
+    # Compact 3-line branded banner. Unicode box-drawing chars render in
+    # Windows Terminal, Arduino IDE 2's Output panel, and VSCode's
+    # integrated terminal. The leading lightning-bolt is a visual cue
+    # that the upload is running.
+    $title = '  NiusRobotLab  ·  nRF52 Upload Console  ·  Target: {0}' -f $BoardName
+    $rule = '─' * 64
+    Write-NiusHostLine ('┌{0}┐' -f $rule)
+    Write-NiusHostLine ('│{0}│' -f $title.PadRight(64))
+    Write-NiusHostLine ('└{0}┘' -f $rule)
 }
 
 function Write-Section {
@@ -129,11 +152,12 @@ function Write-Stage {
     $clampedPercent = $Percent
     if ($clampedPercent -lt 0) { $clampedPercent = 0 }
     if ($clampedPercent -gt 100) { $clampedPercent = 100 }
-    $filled = [int]($clampedPercent * 24 / 100)
-    if ($filled -gt 24) { $filled = 24 }
-    $head = if ($filled -ge 24) { '' } else { '>' }
-    $core = ('=' * $filled) + $head
-    $bar = $core.PadRight(24, '.')
+    $width = 24
+    $filled = [int]($clampedPercent * $width / 100)
+    if ($filled -gt $width) { $filled = $width }
+    # Solid block for completed portion, light shade for the remaining
+    # portion — clean and easy to scan at a glance.
+    $bar = ('█' * $filled) + ('░' * ($width - $filled))
     $pulseFrames = @('SYNC', 'LINK', 'PUSH', 'DONE')
     $pulseIndex = [int](($clampedPercent % 100) * $pulseFrames.Count / 100)
     if ($pulseIndex -lt 0) {
@@ -143,7 +167,7 @@ function Write-Stage {
         $pulseIndex = $pulseFrames.Count - 1
     }
     $pulse = $pulseFrames[$pulseIndex]
-    Write-NiusHostLine ('[ {0} ] {1,3} pct  {2,-4}  {3}' -f $bar, $clampedPercent, $pulse, $Label)
+    Write-NiusHostLine ('▶ {0} {1,3}%  {2}  {3}' -f $bar, $clampedPercent, $pulse, $Label)
 }
 
 function Write-ProgressPulse {
