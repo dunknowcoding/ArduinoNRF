@@ -219,11 +219,28 @@ function Assert-ExitCode {
 function Assert-TextMatch {
     param($Result, [string]$Pattern, [string]$Label)
 
+    # Three text sources, in priority order:
+    #   1. $Result.Text          — only populated on inner-script exception
+    #   2. NiusVerifyTranscriptLog — Start-Transcript output (parent process)
+    #   3. hardware_upload_cli.log — captured arduino-cli stdout+stderr from
+    #      Invoke-ArduinoCliCaptureAllStreams (this is where upload.ps1's
+    #      grandchild-process Write-Host lines actually land — e.g. the V2
+    #      USER-CDC rejection banner). Start-Transcript on PS 5.1 does NOT
+    #      capture grandchild process stdout, so this file is the only
+    #      reliable source for upload-script text.
     $hay = [string]$Result.Text
     $tp = $script:NiusVerifyTranscriptLog
     if (-not [string]::IsNullOrWhiteSpace($tp) -and (Test-Path -LiteralPath $tp)) {
         try {
             $hay += [Environment]::NewLine + (Get-Content -LiteralPath $tp -Raw -ErrorAction Stop)
+        }
+        catch {
+        }
+    }
+    $cliLog = Join-Path $VerifyStateDir 'hardware_upload_cli.log'
+    if (Test-Path -LiteralPath $cliLog) {
+        try {
+            $hay += [Environment]::NewLine + (Get-Content -LiteralPath $cliLog -Raw -ErrorAction Stop)
         }
         catch {
         }

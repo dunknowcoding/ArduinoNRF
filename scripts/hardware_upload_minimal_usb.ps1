@@ -87,6 +87,15 @@ function Invoke-ArduinoCliCaptureAllStreams {
     "`r`n===== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Stage =====`r`n" | Out-File -LiteralPath $NiusHwCliLog -Append -Encoding utf8
 
     $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('nius-hw-cli-{0}.log' -f [Guid]::NewGuid().ToString('N'))
+    # arduino-cli writes its verbose upload-tool wrapper (the niusrobotlab
+    # banner + [nius] lines + USER-CDC rejection message) to stderr. PS 5.1
+    # wraps every native-exe stderr line as a NativeCommandError, and this
+    # script sets $ErrorActionPreference='Stop' at top-level, so without a
+    # localized Continue the very first banner character would terminate the
+    # pipeline before *> $tmp can fill the temp file. Localize Continue
+    # around the arduino-cli call only.
+    $savedErrPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         & arduino-cli @Arguments *> $tmp
         $code = $LASTEXITCODE
@@ -103,6 +112,7 @@ function Invoke-ArduinoCliCaptureAllStreams {
         return [int]$code
     }
     finally {
+        $ErrorActionPreference = $savedErrPref
         Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
     }
 }
@@ -230,9 +240,16 @@ try {
     }
     catch {
     }
-    & arduino-cli @ArduinoCliPrefix upload -p $Port --fqbn $fqbn -v $Sketch
-    if ($LASTEXITCODE -ne 0) {
-        throw "upload failed exit=$LASTEXITCODE"
+    # Use Invoke-ArduinoCliCaptureAllStreams (file-redirect via `*> tmp`) so
+    # the verify harness's Assert-TextMatch can read upload.ps1's rejection
+    # text (e.g. "Wrong COM for Adafruit serial DFU" on V2's USER-CDC path)
+    # from $NiusHwCliLog. Direct `& arduino-cli ...` passes the grandchild
+    # pwsh's Write-Host straight to the console where Start-Transcript on
+    # the parent does not capture it.
+    $uploadArgs = @($ArduinoCliPrefix + @('upload', '-p', $Port, '--fqbn', $fqbn, '-v', $Sketch))
+    $uploadExit = Invoke-ArduinoCliCaptureAllStreams -Stage 'upload' -Arguments $uploadArgs
+    if ($uploadExit -ne 0) {
+        throw "upload failed exit=$uploadExit"
     }
 
     if ($env:NIUS_SKIP_BOARD_LIST_AFTER_UPLOAD -eq '1') {
