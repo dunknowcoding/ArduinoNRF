@@ -1,0 +1,66 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+struct USBSetup {
+    uint8_t bmRequestType;
+    uint8_t bRequest;
+    uint16_t wValue;
+    uint16_t wIndex;
+    uint16_t wLength;
+};
+
+class PluggableUSBModule {
+public:
+    PluggableUSBModule(uint8_t numEndpoints, uint8_t numInterfaces, const uint8_t *endpointTypes);
+    virtual ~PluggableUSBModule() = default;
+
+    virtual int getInterface(uint8_t *interfaceCount) = 0;
+    virtual int getDescriptor(USBSetup &setup) = 0;
+    virtual int getSetupResponse(USBSetup &setup);
+    virtual bool setup(USBSetup &setup) = 0;
+    virtual uint8_t getShortName(char *name);
+    virtual void onEndpointComplete(uint8_t endpoint);
+
+protected:
+    bool appendDescriptor(const void *data, size_t length);
+    bool send(const void *data, size_t length);
+
+public:
+    PluggableUSBModule *next = nullptr;
+    uint8_t pluggedInterface = 0U;
+    uint8_t pluggedEndpoint = 0U;
+    uint8_t numEndpoints = 0U;
+    uint8_t numInterfaces = 0U;
+    const uint8_t *endpointType = nullptr;
+};
+
+class PluggableUSB_ {
+public:
+    bool plug(PluggableUSBModule *module);
+    int getInterface(uint8_t *interfaceCount);
+    int getDescriptor(USBSetup &setup);
+    int getSetupResponse(USBSetup &setup);
+    bool setup(USBSetup &setup);
+    uint8_t getShortName(char *name);
+    void beginDescriptorBuild(uint8_t *buffer, size_t capacity, size_t initialLength = 0U);
+    size_t endDescriptorBuild();
+    bool appendDescriptor(const void *data, size_t length);
+    bool send(PluggableUSBModule *module, const void *data, size_t length);
+    void endpointInComplete(uint8_t endpoint);
+    size_t descriptorLength() const;
+    uint8_t totalInterfaceCount() const;
+    uint8_t nextEndpoint() const;
+
+private:
+    PluggableUSBModule *rootNode_ = nullptr;
+    uint8_t lastInterface_ = 3U;
+    uint8_t lastEndpoint_ = 3U;
+    uint8_t *descriptorBuffer_ = nullptr;
+    size_t descriptorCapacity_ = 0U;
+    size_t descriptorLength_ = 0U;
+};
+
+PluggableUSB_ &PluggableUSB();

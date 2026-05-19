@@ -1,0 +1,63 @@
+#pragma once
+
+#include "../../cores/arduino/variant.h"
+
+static constexpr uint8_t D0 = 0;
+static constexpr uint8_t D1 = 1;
+static constexpr uint8_t D2 = 2;
+static constexpr uint8_t D3 = 3;
+static constexpr uint8_t D4 = 4;
+static constexpr uint8_t D5 = 5;
+static constexpr uint8_t D6 = 6;
+static constexpr uint8_t D7 = 7;
+static constexpr uint8_t D8 = 8;
+static constexpr uint8_t D9 = 9;
+static constexpr uint8_t D10 = 10;
+static constexpr uint8_t D11 = 11;
+static constexpr uint8_t D12 = 12;
+static constexpr uint8_t D13 = 13;
+static constexpr uint8_t D14 = 14;
+static constexpr uint8_t D15 = 15;
+static constexpr uint8_t D16 = 16;
+static constexpr uint8_t D17 = 17;
+static constexpr uint8_t D18 = 18;
+static constexpr uint8_t D19 = 19;
+static constexpr uint8_t D20 = 20;
+static constexpr uint8_t EXT_VCC = 21;
+static constexpr uint8_t LED_BUILTIN = 22;
+static constexpr uint8_t LED_RED = LED_BUILTIN;
+static constexpr uint8_t LED_GREEN = LED_BUILTIN;
+static constexpr uint8_t LED_BLUE = LED_BUILTIN;
+static constexpr uint8_t SDA = D6;
+static constexpr uint8_t SCL = D7;
+static constexpr uint8_t SS = D5;
+static constexpr uint8_t MOSI = D4;
+static constexpr uint8_t MISO = D3;
+static constexpr uint8_t SCK = D2;
+static constexpr uint8_t A0 = D15;
+static constexpr uint8_t A1 = D16;
+static constexpr uint8_t A2 = D17;
+
+static constexpr uint8_t P0_06 = D0;
+static constexpr uint8_t P0_08 = D1;
+static constexpr uint8_t P0_17 = D2;
+static constexpr uint8_t P0_20 = D3;
+static constexpr uint8_t P0_22 = D4;
+static constexpr uint8_t P0_24 = D5;
+static constexpr uint8_t P1_00 = D6;
+static constexpr uint8_t P0_11 = D7;
+static constexpr uint8_t P1_04 = D8;
+static constexpr uint8_t P1_06 = D9;
+static constexpr uint8_t P0_09 = D10;
+static constexpr uint8_t P0_10 = D11;
+static constexpr uint8_t P1_11 = D12;
+static constexpr uint8_t P1_13 = D13;
+static constexpr uint8_t P1_15 = D14;
+static constexpr uint8_t P0_02 = D15;
+static constexpr uint8_t P0_29 = D16;
+static constexpr uint8_t P0_31 = D17;
+static constexpr uint8_t P1_01 = D18;
+static constexpr uint8_t P1_02 = D19;
+static constexpr uint8_t P1_07 = D20;
+static constexpr uint8_t P0_13 = EXT_VCC;
+static constexpr uint8_t P0_15 = LED_BUILTIN;

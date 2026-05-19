@@ -1,0 +1,8 @@
+board_manager:
+  additional_urls: []
+directories:
+  user: F:\Arduino\driver\ArduinoNRF
+  data: C:\Users\felix\AppData\Local\Arduino15
+  downloads: C:\Users\felix\AppData\Local\Arduino15\staging
+library:
+  enable_unsafe_install: false

@@ -1,0 +1,120 @@
+name=Arduino NRF52 Boards
+version=0.1.0
+
+compiler.path={runtime.tools.arm-none-eabi-gcc.path}/bin/
+compiler.c.cmd=arm-none-eabi-gcc
+compiler.cpp.cmd=arm-none-eabi-g++
+compiler.ar.cmd=arm-none-eabi-ar
+compiler.objcopy.cmd=arm-none-eabi-objcopy
+compiler.size.cmd=arm-none-eabi-size
+
+build.flags.common=-DARDUINO={runtime.ide.version} -DARDUINO_ARCH_{build.arch} -DARDUINO_{build.board} -DF_CPU={build.f_cpu} -DNRF52_SERIES
+# Boards may append `{build.usbdesc_flags}` in `boards.txt`; default empty so unresolved tokens never appear on cores that omit it.
+build.usbdesc_flags=
+build.flags.cpu=-mcpu={build.mcu} -mthumb
+compiler.optimization_flags=-Os
+compiler.optimization_flags.release=-Os
+compiler.optimization_flags.debug=-Og
+compiler.optimization_flags.trace=-Og
+build.flags.optimize={compiler.optimization_flags} -ffunction-sections -fdata-sections
+build.flags.warn=
+
+compiler.c.flags=-std=gnu11 {build.flags.optimize} {build.flags.warn} {build.debug_flags} -MMD
+compiler.cpp.flags=-std=gnu++17 {build.flags.optimize} {build.flags.warn} {build.debug_flags} -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -MMD
+compiler.S.flags=-x assembler-with-cpp {build.flags.warn}
+compiler.ar.flags=rcs
+compiler.elf.flags=-Wl,--gc-sections -Wl,--cref -Wl,--check-sections -Wl,--warn-common -Wl,-Map,{build.path}/{build.project_name}.map --specs=nosys.specs
+compiler.objcopy.eep.flags=-O binary
+compiler.objcopy.hex.flags=-O ihex -R .eeprom
+
+compiler.includes=-I{build.variant.path} -I{build.core.path}
+
+tools.openocd.path={runtime.tools.openocd-0.11.0-arduino2.path}
+tools.openocd.cmd=bin/openocd
+tools.openocd.cmd.windows=bin/openocd.exe
+tools.openocd.upload.params.verbose=
+tools.openocd.upload.params.quiet=
+tools.openocd.upload.pattern="{path}/{cmd}" -s "{path}/share/openocd/scripts" -f "{runtime.platform.path}/tools/openocd/{build.openocdscript}" -c "init; halt; program {{{build.path}/{build.project_name}.hex}} verify reset exit"
+
+tools.dfuutil.path={runtime.tools.dfu-util.path}
+tools.dfuutil.cmd=bin/dfu-util
+tools.dfuutil.cmd.windows=dfu-util.exe
+tools.dfuutil.upload.params.verbose=-v
+tools.dfuutil.upload.params.quiet=
+tools.dfuutil.upload.pattern="{path}/{cmd}" {upload.verbose} -d {upload.usb_vid}:{upload.usb_pid} -a {upload.dfu_alt} -D "{build.path}/{build.project_name}.bin" -R
+
+tools.niusopenocd.upload.pattern="{runtime.tools.openocd-0.11.0-arduino2.path}/bin/openocd" -s "{runtime.tools.openocd-0.11.0-arduino2.path}/share/openocd/scripts" -f "{runtime.platform.path}/tools/openocd/{build.openocdscript}" -c "init; halt; program {{{build.path}/{build.project_name}.hex}} verify reset exit"
+# powershell.exe -Command (not -File) is required: -File mode collapses
+# empty quoted arguments before parameter binding, which breaks every
+# upload menu choice that leaves uf2_volume_label / uf2_model / uf2_board_id
+# blank. -Command preserves '' as an empty string token.
+tools.niusopenocd.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode openocd -Tool '{runtime.tools.openocd-0.11.0-arduino2.path}/bin/openocd.exe' -ScriptRoot '{runtime.tools.openocd-0.11.0-arduino2.path}/share/openocd/scripts' -Config '{runtime.platform.path}/tools/openocd/{build.openocdscript}' -Hex '{build.path}/{build.project_name}.hex' -Board '{build.variant}' {upload.verbose}"
+tools.niusopenocd.upload.params.verbose=-ArduinoIdeVerboseUpload 'true'
+tools.niusopenocd.upload.params.quiet=-ArduinoIdeVerboseUpload 'false'
+
+tools.niusdfu.upload.pattern="{runtime.tools.dfu-util.path}/bin/dfu-util" {upload.verbose} -d {upload.usb_vid}:{upload.usb_pid} -a {upload.dfu_alt} -D "{build.path}/{build.project_name}.bin" -R
+# Arduino CLI performs its own 1200-bps touch when upload.use_1200bps_touch=true, which races our
+# PowerShell open sequence on Windows. Keep boards.use_1200bps_touch=false for golang and always pass
+# -UseTouch1200 true here so upload.ps1 owns touch (115200 + 1200 + DTR drop + clone VID/PID logic).
+tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort '{upload.wait_for_upload_port}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
+tools.niusdfu.upload.params.verbose=-ArduinoIdeVerboseUpload 'true'
+tools.niusdfu.upload.params.quiet=-ArduinoIdeVerboseUpload 'false'
+
+debug.executable={build.path}/{build.project_name}.elf
+debug.toolchain=gcc
+debug.toolchain.path={compiler.path}
+debug.toolchain.prefix=arm-none-eabi
+debug.server=openocd
+debug.server.openocd.path={runtime.tools.openocd-0.11.0-arduino2.path}/bin/openocd
+debug.server.openocd.path.windows={runtime.tools.openocd-0.11.0-arduino2.path}\bin\openocd.exe
+debug.server.openocd.scripts_dir={runtime.tools.openocd-0.11.0-arduino2.path}/share/openocd/scripts/
+debug.server.openocd.scripts_dir.windows={runtime.tools.openocd-0.11.0-arduino2.path}\share\openocd\scripts\
+debug.server.openocd.scripts.0={runtime.platform.path}/tools/openocd/{build.openocdscript}
+debug.cortex-debug.custom.request=attach
+debug.cortex-debug.custom.postAttachCommands.0=set remote hardware-watchpoint-limit 2
+debug.cortex-debug.custom.postAttachCommands.1=monitor reset halt
+debug.cortex-debug.custom.postAttachCommands.2=monitor gdb_sync
+debug.cortex-debug.custom.postAttachCommands.3=c
+debug.cortex-debug.custom.overrideRestartCommands.0=monitor reset halt
+debug.cortex-debug.custom.overrideRestartCommands.1=monitor gdb_sync
+debug.cortex-debug.custom.overrideRestartCommands.2=c
+debug.usbgdbstub.transport=usb-cdc-gdbstub
+debug.usbgdbstub.gdb_target=localhost:3335
+debug.usbgdbstub.baudrate=115200
+debug.usbgdbstub.bridge.path={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_bridge.ps1
+debug.usbgdbstub.bridge.path.windows={runtime.platform.path}\tools\niusrobotlab\usb_gdbstub_bridge.ps1
+debug.usbgdbstub.bridge.describe.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -Describe -Board "{build.variant}" -TcpPort 3335 -BaudRate {debug.usbgdbstub.baudrate}
+debug.usbgdbstub.bridge.listports.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -ListPorts
+debug.usbgdbstub.bridge.launch.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -Board "{build.variant}" -SerialPort "{serial.port}" -TcpPort 3335 -BaudRate {debug.usbgdbstub.baudrate}
+
+# debug.server.usbgdbstub.* — selected automatically when the buildprofile
+# `usbgdbstub` menu option is active (see boards.txt). Arduino IDE 2 expects
+# *some* debug.server entry; cortex-debug is then forced into servertype
+# `external` (see boards.txt overrides), which simply connects to the bridge
+# at gdbTarget=localhost:3335 without spawning a server.
+#
+# The bridge process itself must be running on the host *before* the IDE
+# debug button is pressed. Launch it manually with:
+#   powershell -ExecutionPolicy Bypass -File <platform>/tools/niusrobotlab/usb_gdbstub_bridge.ps1 -SerialPort COM3
+debug.server.usbgdbstub.path=
+debug.server.usbgdbstub.scripts_dir=
+debug.server.usbgdbstub.script=
+
+recipe.hooks.sketch.prebuild.1.pattern=
+recipe.hooks.sketch.prebuild.2.pattern=
+
+recipe.preproc.macros.pattern="{compiler.path}{compiler.cpp.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.includes} {includes} -E -CC -x c++ "{source_file}" -o "{preprocessed_file_path}"
+recipe.preproc.includes.pattern="{compiler.path}{compiler.cpp.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.includes} {includes} -E -CC -x c++ "{source_file}" -o "{preprocessed_file_path}"
+recipe.c.o.pattern="{compiler.path}{compiler.c.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.c.flags} {compiler.includes} {includes} "{source_file}" -c -o "{object_file}"
+recipe.cpp.o.pattern="{compiler.path}{compiler.cpp.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.cpp.flags} {compiler.includes} {includes} "{source_file}" -c -o "{object_file}"
+recipe.S.o.pattern="{compiler.path}{compiler.c.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.S.flags} {compiler.includes} {includes} "{source_file}" -c -o "{object_file}"
+recipe.ar.pattern="{compiler.path}{compiler.ar.cmd}" {compiler.ar.flags} "{archive_file_path}" "{object_file}"
+recipe.c.combine.pattern="{compiler.path}{compiler.cpp.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.elf.flags} "-T{build.variant.path}/{build.ldscript}" -Wl,--defsym=__nrf_reserved_flash_bytes={build.storage_reserved_bytes} -Wl,--defsym=__nrf_storage_region_bytes={build.storage_reserved_bytes} -Wl,--defsym=__nrf_program_flash_bytes={upload.maximum_size} -Wl,--defsym=__nrf_app_start={build.bootloader_app_start} -o "{build.path}/{build.project_name}.elf" {object_files} "{archive_file_path}" -lm -lc -lgcc
+recipe.objcopy.hex.pattern="{compiler.path}{compiler.objcopy.cmd}" {compiler.objcopy.hex.flags} "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.hex"
+recipe.objcopy.bin.pattern="{compiler.path}{compiler.objcopy.cmd}" {compiler.objcopy.eep.flags} "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.bin"
+recipe.size.pattern="{compiler.path}{compiler.size.cmd}" -A "{build.path}/{build.project_name}.elf"
+recipe.size.regex=\.text\s+([0-9]+).*
+recipe.size.regex.data=(?:\.data|\.bss)\s+([0-9]+).*
+
+recipe.output.tmp_file={build.project_name}.hex
+recipe.output.save_file={build.project_name}.{build.variant}.hex

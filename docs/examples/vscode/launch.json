@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "nRF52840 USB CDC GDB stub",
+      "cwd": "${workspaceFolder}",
+      "executable": "${workspaceFolder}/build/Debug/sketch.ino.elf",
+      "request": "launch",
+      "type": "cortex-debug",
+      "servertype": "external",
+      "gdbPath": "arm-none-eabi-gdb",
+      "gdbTarget": "localhost:3335",
+      "postAttachCommands": [
+        "set remote hardware-watchpoint-limit 0"
+      ],
+      "overrideRestartCommands": [],
+      "preLaunchTask": "USB GDB stub bridge (TCP 3335)"
+    }
+  ]
+}

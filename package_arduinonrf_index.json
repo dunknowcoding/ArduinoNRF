@@ -1,0 +1,78 @@
+{
+  "packages": [
+    {
+      "name": "arduinonrf",
+      "maintainer": "NiusRobotLab",
+      "websiteURL": "https://example.invalid/arduinonrf",
+      "email": "noreply@example.invalid",
+      "platforms": [
+        {
+          "name": "Arduino NRF52 Boards",
+          "architecture": "nrf52",
+          "version": "0.1.0",
+          "category": "Contributed",
+          "url": "https://example.invalid/arduinonrf/arduinonrf-0.1.0.zip",
+          "archiveFileName": "arduinonrf-0.1.0.zip",
+          "checksum": "SHA-256:66c031a38986ce906aa53b30222100286864490fb974d9c97673622a319d13ba",
+          "size": "99527",
+          "boards": [
+            {
+              "name": "AliExpress ProMicro nRF52840"
+            },
+            {
+              "name": "nice!nano v2"
+            },
+            {
+              "name": "SuperMini nRF52840"
+            },
+            {
+              "name": "nRFMicro nRF52840"
+            },
+            {
+              "name": "Mini nRF52840"
+            },
+            {
+              "name": "XIAO-like nRF52840"
+            },
+            {
+              "name": "Generic nRF52840 Development Board"
+            },
+            {
+              "name": "Generic nRF52833 Development Board"
+            },
+            {
+              "name": "Pitaya Go nRF52840"
+            },
+            {
+              "name": "nRF52840 USB Dongle"
+            }
+          ],
+          "help": {
+            "online": "https://example.invalid/arduinonrf/docs"
+          },
+          "toolsDependencies": [
+            {
+              "packager": "arduino",
+              "name": "arm-none-eabi-gcc",
+              "version": "7-2017q4"
+            },
+            {
+              "packager": "arduino",
+              "name": "dfu-util",
+              "version": "0.10.0-arduino1"
+            },
+            {
+              "packager": "arduino",
+              "name": "openocd",
+              "version": "0.11.0-arduino2"
+            }
+          ]
+        }
+      ],
+      "tools": [],
+      "help": {
+        "online": "https://example.invalid/arduinonrf/docs"
+      }
+    }
+  ]
+}

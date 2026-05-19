@@ -1,0 +1,11 @@
+cmsis_dap.name=CMSIS-DAP (SWD)
+cmsis_dap.communication=swd
+cmsis_dap.program.tool=openocd
+
+jlink.name=SEGGER J-Link (SWD)
+jlink.communication=swd
+jlink.program.tool=openocd
+
+openocd.name=Generic OpenOCD Target
+openocd.communication=swd
+openocd.program.tool=openocd

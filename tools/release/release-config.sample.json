@@ -1,0 +1,13 @@
+{
+  "platform_root": "hardware/arduinonrf/nrf52",
+  "index": "package_arduinonrf_index.json",
+  "output_dir": "dist/release",
+  "version": "0.1.0",
+  "download_base": "https://downloads.example.com/arduinonrf",
+  "website_url": "https://example.com/arduinonrf",
+  "package_help_url": "https://example.com/arduinonrf/docs",
+  "platform_help_url": "https://example.com/arduinonrf/docs",
+  "maintainer": "NiusRobotLab",
+  "email": "release@example.com",
+  "allow_placeholder_urls": false
+}
