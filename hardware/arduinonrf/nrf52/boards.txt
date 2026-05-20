@@ -234,16 +234,20 @@ promicro_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_P
 # names (openocd, jlink, stutil, pyocd, bmp) — `usbgdbstub` here would be
 # rejected with "GDB server 'usbgdbstub' is not supported". So we pretend
 # to be openocd: keep `debug.server=openocd` (the same as other profiles)
-# and override `debug.server.openocd.path` to point at our wrapper. The
-# wrapper spawns usb_gdbstub_bridge.ps1, which prints
-# "Listening on port 3335 for gdb connections" right after its TCP socket
-# is ready — that line matches cortex-debug's default openocd serverReady
-# regex, so cortex-debug treats the bridge as a started server and then
-# connects GDB to localhost:3335. One-click Debug in Arduino IDE 2 with
-# no separate "start bridge" terminal.
+# and override `debug.server.openocd.path` to point at our launcher EXE.
+# It must be a real .exe, not a .cmd: cortex-debug spawns the server with
+# Node child_process.spawn() and no shell, and modern Node throws EINVAL on
+# .cmd/.bat (CVE-2024-27980), so a .cmd silently never runs (read ECONNRESET
+# / "Request cancelled"). usb_gdbstub_server.exe parses the gdb_port that
+# cortex-debug assigns (it owns the port; e.g. 50000) and spawns
+# usb_gdbstub_bridge.ps1 on it. The bridge prints
+# "Listening on port <N> for gdb connections" once its TCP socket is ready —
+# that matches cortex-debug's default openocd serverReady regex, so it then
+# connects GDB to localhost:<N>. One-click Debug in Arduino IDE 2 with no
+# separate "start bridge" terminal.
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server=openocd
-promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.path={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_server.cmd
-promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.path.windows={runtime.platform.path}\tools\niusrobotlab\usb_gdbstub_server.cmd
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.path={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_server.exe
+promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.path.windows={runtime.platform.path}\tools\niusrobotlab\usb_gdbstub_server.exe
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.scripts_dir=
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.scripts_dir.windows=
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.server.openocd.scripts.0=

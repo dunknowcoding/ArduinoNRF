@@ -92,12 +92,15 @@ debug.usbgdbstub.bridge.launch.pattern=powershell -NoProfile -ExecutionPolicy By
 # jlink, stutil, pyocd, bmp); a custom value here would be rejected with
 # "GDB server 'usbgdbstub' is not supported". The buildprofile=usbgdbstub
 # menu in boards.txt instead keeps `debug.server=openocd` and overrides
-# `debug.server.openocd.path` to point at usb_gdbstub_server.cmd, which
-# spawns usb_gdbstub_bridge.ps1. The bridge prints
-# "Listening on port 3335 for gdb connections" right after its TCP socket
+# `debug.server.openocd.path` to point at usb_gdbstub_server.exe (a real
+# .exe, NOT a .cmd: cortex-debug spawns the server via Node child_process
+# with no shell, and modern Node throws EINVAL on .cmd/.bat, so a .cmd would
+# never run -> read ECONNRESET). The launcher parses the gdb_port cortex-debug
+# assigns and spawns usb_gdbstub_bridge.ps1 on it. The bridge prints
+# "Listening on port <N> for gdb connections" right after its TCP socket
 # is ready — matching cortex-debug's default openocd serverReady regex,
 # so cortex-debug spawns it as the debug server and then connects GDB to
-# localhost:3335. One-click Debug in Arduino IDE 2 with no separate
+# localhost:<N>. One-click Debug in Arduino IDE 2 with no separate
 # "start bridge" terminal.
 #
 # These keys are left in place (empty) so the platform reads cleanly with

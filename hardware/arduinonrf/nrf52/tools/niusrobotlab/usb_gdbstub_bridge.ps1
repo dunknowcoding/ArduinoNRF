@@ -13,6 +13,60 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$script:NiusBridgeLog = Join-Path $env:TEMP 'nius_gdbstub_bridge.log'
+function Write-BridgeLog {
+    param([string]$Message)
+    try {
+        $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $Message
+        Add-Content -LiteralPath $script:NiusBridgeLog -Value $line -ErrorAction SilentlyContinue
+    }
+    catch {
+    }
+}
+
+Write-BridgeLog ('bridge start: Board={0} SerialPort={1} TcpPort={2} Baud={3} PreferServiceCdc={4} PID={5}' -f $Board, $SerialPort, $TcpPort, $BaudRate, [bool]$PreferServiceCdc, $PID)
+
+function Clear-NiusStaleBridges {
+    # A previous debug session that ended abnormally can leave another instance
+    # of this bridge holding the COM port; the new session would then fail with
+    # "access to the port is denied". Only one debug session is meaningful at a
+    # time, so terminate any other powershell running this exact script.
+    try {
+        $self = $PID
+        $others = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProcessId -ne $self -and $_.CommandLine -and ($_.CommandLine -match 'usb_gdbstub_bridge\.ps1') })
+        foreach ($p in $others) {
+            Write-BridgeLog ('terminating stale bridge PID {0} (was holding the port)' -f $p.ProcessId)
+            try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch { }
+        }
+    }
+    catch {
+    }
+}
+
+function Open-NiusSerialWithRetry {
+    # Windows can keep a COM handle reserved for a short moment after the
+    # previous owner dies, so retry briefly instead of failing the first time.
+    param(
+        [System.IO.Ports.SerialPort]$Serial,
+        [int]$Attempts = 10,
+        [int]$DelayMs = 300
+    )
+    for ($i = 1; $i -le $Attempts; $i++) {
+        try {
+            $Serial.Open()
+            return
+        }
+        catch {
+            if ($i -ge $Attempts) {
+                throw
+            }
+            Write-BridgeLog ('serial open attempt {0}/{1} failed ({2}); retrying in {3} ms' -f $i, $Attempts, $_.Exception.Message, $DelayMs)
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+}
+
 . (Join-Path $PSScriptRoot 'usb_port_helpers.ps1')
 
 function Get-AvailableSerialPorts {
@@ -117,20 +171,25 @@ $client = $null
 $networkStream = $null
 
 try {
+    Clear-NiusStaleBridges
+    Write-BridgeLog ('opening serial port {0} @ {1} baud' -f $SerialPort, $BaudRate)
     $serial = New-Object System.IO.Ports.SerialPort $SerialPort, $BaudRate, ([System.IO.Ports.Parity]::None), 8, ([System.IO.Ports.StopBits]::One)
     $serial.Handshake = [System.IO.Ports.Handshake]::None
     $serial.ReadTimeout = 50
     $serial.WriteTimeout = 50
     $serial.DtrEnable = $true
     $serial.RtsEnable = $true
-    $serial.Open()
+    Open-NiusSerialWithRetry -Serial $serial
+    Write-BridgeLog ('serial port {0} opened' -f $SerialPort)
 
+    Write-BridgeLog ('starting TCP listener on 127.0.0.1:{0}' -f $TcpPort)
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $TcpPort)
     $listener.Start()
+    Write-BridgeLog ('TCP listener up on 127.0.0.1:{0}; waiting for gdb' -f $TcpPort)
 
     # Emit a banner that doubles as a cortex-debug "openocd" serverReady
     # marker. cortex-debug's default serverReady regex for servertype=openocd
-    # matches "Listening on port" — printing this line lets the same bridge
+    # matches "Listening on port" - printing this line lets the same bridge
     # be launched directly by arduino-cli / Arduino IDE 2 as the debug
     # server (no separate terminal needed). The longer descriptive line
     # below is for humans running the bridge manually.
@@ -142,6 +201,7 @@ try {
     $client.NoDelay = $true
     $networkStream = $client.GetStream()
 
+    Write-BridgeLog 'GDB client connected; forwarding traffic'
     Write-Host 'GDB client connected. Forwarding traffic. Press Ctrl+C to stop.'
 
     $buffer = New-Object byte[] 4096
@@ -183,7 +243,12 @@ try {
         }
     }
 }
+catch {
+    Write-BridgeLog ('FATAL: {0}: {1}' -f $_.Exception.GetType().FullName, $_.Exception.Message)
+    throw
+}
 finally {
+    Write-BridgeLog 'bridge shutting down; releasing serial + socket'
     if ($networkStream -ne $null) {
         $networkStream.Dispose()
     }
