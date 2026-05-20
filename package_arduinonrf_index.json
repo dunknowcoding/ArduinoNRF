@@ -81,17 +81,17 @@
           "systems": [
             {
               "host": "i686-mingw32",
-              "url": "https://github.com/adafruit/Adafruit_nRF52_nrfutil/releases/download/0.5.3.post17/adafruit-nrfutil--0.5.3.post17-win.zip",
-              "archiveFileName": "adafruit-nrfutil--0.5.3.post17-win.zip",
-              "checksum": "SHA-256:62bdfc4ed862ada253c34617f14a0eef11086f2d3a2f1811c6f1dadf14a94ac7",
-              "size": "7613514"
+              "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.2/adafruit-nrfutil-0.5.3.post17-win.zip",
+              "archiveFileName": "adafruit-nrfutil-0.5.3.post17-win.zip",
+              "checksum": "SHA-256:ce01874ecd6cf0c2755a87dcb7e9029fc097e318d1f8ab9195d4a6838dd347cb",
+              "size": "7617434"
             },
             {
               "host": "x86_64-apple-darwin",
-              "url": "https://github.com/adafruit/Adafruit_nRF52_nrfutil/releases/download/0.5.3.post17/adafruit-nrfutil--0.5.3.post17-macos.zip",
-              "archiveFileName": "adafruit-nrfutil--0.5.3.post17-macos.zip",
-              "checksum": "SHA-256:4164e20269037809cef0126e837560b0e8b3850a679f84161241521840aad0d6",
-              "size": "7284606"
+              "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.2/adafruit-nrfutil-0.5.3.post17-macos.zip",
+              "archiveFileName": "adafruit-nrfutil-0.5.3.post17-macos.zip",
+              "checksum": "SHA-256:1c7366ada5dd79c8a066eff7d56c95ea6833b1357143facd4bcb2c6ba7b39c76",
+              "size": "7284629"
             }
           ]
         }
