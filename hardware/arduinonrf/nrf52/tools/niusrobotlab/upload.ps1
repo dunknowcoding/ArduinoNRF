@@ -138,16 +138,18 @@ function Write-NiusDetail {
 function Write-Banner {
     param([string]$BoardName)
 
-    # NiusRobotLab "cybermedium" figlet, pure ASCII so it renders identically
-    # in every host regardless of console codepage. Single-quoted literals keep
-    # backslash / pipe literal. Printed once, right after compile. The art is
-    # bracketed by the only two *** rules in the whole upload output; the
+    # NiusRobotLab "slant" figlet, pure ASCII so it renders identically in
+    # every host regardless of console codepage. Single-quoted literals keep
+    # backslash / backtick literal. Printed once, right after compile. The art
+    # is bracketed by the only two *** rules in the whole upload output; the
     # subtitle that follows uses a plain dash and no trailing rule.
-    Write-NiusHostLine '*****************************************************************'
-    Write-NiusHostLine '_  _ _ _  _ ____ ____ ____ ___  ____ ___ _    ____ ___'
-    Write-NiusHostLine '|\ | | |  | [__  |__/ |  | |__] |  |  |  |    |__| |__]'
-    Write-NiusHostLine '| \| | |__| ___] |  \ |__| |__] |__|  |  |___ |  | |__]'
-    Write-NiusHostLine '*****************************************************************'
+    Write-NiusHostLine '*******************************************************************'
+    Write-NiusHostLine '    _   ___            ____        __          __  __          __'
+    Write-NiusHostLine '   / | / (_)_  _______/ __ \____  / /_  ____  / /_/ /   ____ _/ /_'
+    Write-NiusHostLine '  /  |/ / / / / / ___/ /_/ / __ \/ __ \/ __ \/ __/ /   / __ `/ __ \'
+    Write-NiusHostLine ' / /|  / / /_/ (__  ) _, _/ /_/ / /_/ / /_/ / /_/ /___/ /_/ / /_/ /'
+    Write-NiusHostLine '/_/ |_/_/\__,_/____/_/ |_|\____/_.___/\____/\__/_____/\__,_/_.___/'
+    Write-NiusHostLine '*******************************************************************'
     Write-NiusHostLine ('   nRF52 Flash Console - Target: {0}' -f $BoardName)
     Write-NiusHostLine ''
 
