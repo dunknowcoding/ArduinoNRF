@@ -138,28 +138,26 @@ function Write-NiusDetail {
 function Write-Banner {
     param([string]$BoardName)
 
-    # NiusRobotLab "shadow" figlet (embossed / yin-yang effect), pure ASCII
-    # (only _ | \ / ( ) ` chars), so it renders identically in every host
-    # regardless of console codepage. Single-quoted literals keep backtick
-    # and backslash literal. Printed exactly once, right after compile,
-    # before the upload progress. Bracketed by *** rule lines so it stands
-    # apart from the surrounding compiler / IDE output.
+    # NiusRobotLab "cybermedium" figlet, pure ASCII so it renders identically
+    # in every host regardless of console codepage. Single-quoted literals keep
+    # backslash / pipe literal. Printed once, right after compile. The art is
+    # bracketed by the only two *** rules in the whole upload output; the
+    # subtitle that follows uses a plain dash and no trailing rule.
     Write-NiusHostLine '*****************************************************************'
-    Write-NiusHostLine '  \  |_)             _ \        |           |   |           |    '
-    Write-NiusHostLine '   \ | | |   |  __| |   |  _ \  __ \   _ \  __| |      _` | __ \ '
-    Write-NiusHostLine ' |\  | | |   |\__ \ __ <  (   | |   | (   | |   |     (   | |   |'
-    Write-NiusHostLine '_| \_|_|\__,_|____/_| \_\\___/ _.__/ \___/ \__|_____|\__,_|_.__/ '
+    Write-NiusHostLine '_  _ _ _  _ ____ ____ ____ ___  ____ ___ _    ____ ___'
+    Write-NiusHostLine '|\ | | |  | [__  |__/ |  | |__] |  |  |  |    |__| |__]'
+    Write-NiusHostLine '| \| | |__| ___] |  \ |__| |__] |__|  |  |___ |  | |__]'
     Write-NiusHostLine '*****************************************************************'
-    Write-NiusHostLine ('   nRF52 Flash Console   ***   Target: {0}' -f $BoardName)
-    Write-NiusHostLine '*****************************************************************'
+    Write-NiusHostLine ('   nRF52 Flash Console - Target: {0}' -f $BoardName)
+    Write-NiusHostLine ''
 
     # Mark the start of the user-visible upload run for the closing summary.
     $script:NiusUploadStartUtc = [datetime]::UtcNow
 }
 
 # Closing summary: the final 100% bar plus 2 lines of plain-language status
-# (total time, soft reset), framed by a *** rule so it stands apart from the
-# IDE's own "uploading done" chatter. Pure ASCII.
+# (total time, soft reset). The *** rules live only around the banner now, so
+# this block is set off by blank lines instead. Pure ASCII.
 function Write-NiusUploadComplete {
     param([string]$Note = '')
 
@@ -170,7 +168,7 @@ function Write-NiusUploadComplete {
         $sec = [Math]::Round(([datetime]::UtcNow - $script:NiusUploadStartUtc).TotalSeconds, 1)
         $elapsed = '{0}s' -f $sec
     }
-    Write-NiusHostLine '*****************************************************************'
+    Write-NiusHostLine ''
     if (-not [string]::IsNullOrWhiteSpace($elapsed)) {
         Write-NiusHostLine ('  Total upload time : {0}' -f $elapsed)
     }
@@ -178,7 +176,7 @@ function Write-NiusUploadComplete {
     if (-not [string]::IsNullOrWhiteSpace($Note)) {
         Write-NiusHostLine ('  {0}' -f $Note)
     }
-    Write-NiusHostLine '*****************************************************************'
+    Write-NiusHostLine ''
 }
 
 # Internal section header - verbose only.
@@ -205,8 +203,9 @@ function Write-Stage {
 
     # NiusRobotLab signature bar: a branded "NIUS" prefix, a comet head that
     # rides a dotted track, and an optional detail field (e.g. byte counts):
-    #   NIUS |==============>.......|  64%  Uploading  29.0/45.0 KB
-    # Pure ASCII so it renders identically regardless of console codepage.
+    #   NIUS  ==============>.......  64%  Uploading  29.0/45.0 KB
+    # No bracket decorations. Pure ASCII so it renders identically regardless
+    # of console codepage.
     $width = 22
     $filled = [int][Math]::Round($clampedPercent * $width / 100.0)
     if ($filled -gt $width) { $filled = $width }
@@ -221,7 +220,7 @@ function Write-Stage {
         $bar = (('=' * ($filled - 1)) + '>').PadRight($width, '.')
     }
     $script:NiusLastStagePercent = $clampedPercent
-    $line = '  NIUS |{0}| {1,3}%  {2}' -f $bar, $clampedPercent, $Label
+    $line = '  NIUS  {0}  {1,3}%  {2}' -f $bar, $clampedPercent, $Label
     if (-not [string]::IsNullOrWhiteSpace($Detail)) {
         $line = '{0}  {1}' -f $line, $Detail
     }
