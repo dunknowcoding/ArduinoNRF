@@ -191,11 +191,22 @@ try {
     # marker. cortex-debug's default serverReady regex for servertype=openocd
     # matches "Listening on port" - printing this line lets the same bridge
     # be launched directly by arduino-cli / Arduino IDE 2 as the debug
-    # server (no separate terminal needed). The longer descriptive line
-    # below is for humans running the bridge manually.
-    Write-Host ("Listening on port {0} for gdb connections" -f $TcpPort)
-    Write-Host ("USB CDC GDB stub bridge listening on tcp://127.0.0.1:{0} and forwarding to {1} @ {2} baud" -f $TcpPort, $SerialPort, $BaudRate)
-    Write-Host 'Waiting for a GDB client connection...'
+    # server (no separate terminal needed).
+    #
+    # CRITICAL: write via [Console]::Out and Flush(). When stdout is a pipe
+    # (cortex-debug spawns us, stdout is not a console), PowerShell's Write-Host
+    # is block-buffered and would not reach cortex-debug until the buffer fills
+    # or we exit -- but we immediately block on AcceptTcpClient(), so the
+    # serverReady line would never arrive and cortex-debug times out waiting
+    # for the GDB server. An explicit flush pushes it out right away.
+    # NOTE: wrap each "-f" expression in its own parens. Bare
+    # [Console]::Out.WriteLine("...{1}..." -f $a, $b) parses the commas as
+    # separate method arguments, so -f sees only $a and String.Format throws
+    # on the unfilled {1}/{2}. The extra parens make it a single string arg.
+    [Console]::Out.WriteLine(("Listening on port {0} for gdb connections" -f $TcpPort))
+    [Console]::Out.WriteLine(("USB CDC GDB stub bridge listening on tcp://127.0.0.1:{0} and forwarding to {1} @ {2} baud" -f $TcpPort, $SerialPort, $BaudRate))
+    [Console]::Out.WriteLine('Waiting for a GDB client connection...')
+    [Console]::Out.Flush()
 
     $client = $listener.AcceptTcpClient()
     $client.NoDelay = $true

@@ -166,12 +166,18 @@ internal static class NiusGdbStubServer
 
         IntPtr job = CreateKillOnCloseJob();
 
+        // Redirect + relay the bridge's stdout/stderr and flush each line.
+        // cortex-debug reads OUR stdout to match its openocd serverReady regex
+        // ("Listening on port N for gdb connections"). PowerShell block-buffers
+        // a piped stdout, and the bridge blocks on accept() right after the
+        // banner, so without an explicit relay+flush that line would never
+        // reach cortex-debug and it would time out waiting for the GDB server.
         var psi = new ProcessStartInfo
         {
             FileName = "powershell.exe",
             UseShellExecute = false,
-            RedirectStandardOutput = false,
-            RedirectStandardError = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
             Arguments = string.Format(
                 "-NoProfile -ExecutionPolicy Bypass -File \"{0}\" -Board promicro_nrf52840 -TcpPort {1} -BaudRate 115200 -PreferServiceCdc",
                 bridge, port)
@@ -181,7 +187,26 @@ internal static class NiusGdbStubServer
         Process proc;
         try
         {
-            proc = Process.Start(psi);
+            proc = new Process { StartInfo = psi };
+            proc.OutputDataReceived += delegate(object s, DataReceivedEventArgs e)
+            {
+                if (e.Data != null)
+                {
+                    Console.Out.WriteLine(e.Data);
+                    Console.Out.Flush();
+                }
+            };
+            proc.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e)
+            {
+                if (e.Data != null)
+                {
+                    Console.Error.WriteLine(e.Data);
+                    Console.Error.Flush();
+                }
+            };
+            proc.Start();
+            proc.BeginOutputReadLine();
+            proc.BeginErrorReadLine();
         }
         catch (Exception e)
         {
