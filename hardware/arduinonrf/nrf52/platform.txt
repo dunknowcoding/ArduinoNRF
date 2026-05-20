@@ -1,5 +1,5 @@
 name=ArduinoNRF
-version=0.0.1
+version=0.0.2
 
 compiler.path={runtime.tools.arm-none-eabi-gcc.path}/bin/
 compiler.c.cmd=arm-none-eabi-gcc
@@ -56,7 +56,7 @@ tools.niusdfu.upload.pattern="{runtime.tools.dfu-util.path}/bin/dfu-util" {uploa
 # Arduino CLI performs its own 1200-bps touch when upload.use_1200bps_touch=true, which races our
 # PowerShell open sequence on Windows. Keep boards.use_1200bps_touch=false for golang and always pass
 # -UseTouch1200 true here so upload.ps1 owns touch (115200 + 1200 + DTR drop + clone VID/PID logic).
-tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort '{upload.wait_for_upload_port}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
+tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -NrfutilExe '{runtime.tools.adafruit-nrfutil.path}/adafruit-nrfutil.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort '{upload.wait_for_upload_port}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
 tools.niusdfu.upload.params.verbose=-ArduinoIdeVerboseUpload 'true'
 tools.niusdfu.upload.params.quiet=-ArduinoIdeVerboseUpload 'false'
 

@@ -9,12 +9,12 @@
         {
           "name": "ArduinoNRF",
           "architecture": "nrf52",
-          "version": "0.0.1",
+          "version": "0.0.2",
           "category": "Contributed",
-          "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.1/arduinonrf-0.0.1.zip",
-          "archiveFileName": "arduinonrf-0.0.1.zip",
-          "checksum": "SHA-256:ab7bf3c120e528fb57dcda13ab8c87600b5f51383b55e7f93f95c8e656b0101b",
-          "size": "176662",
+          "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.2/arduinonrf-0.0.2.zip",
+          "archiveFileName": "arduinonrf-0.0.2.zip",
+          "checksum": "SHA-256:ddc19ed427e05465660535ec1bf5c08beeedc1a8abd2569a91611da90f112619",
+          "size": "176761",
           "boards": [
             {
               "name": "AliExpress ProMicro nRF52840"
@@ -65,11 +65,37 @@
               "packager": "arduino",
               "name": "openocd",
               "version": "0.11.0-arduino2"
+            },
+            {
+              "packager": "arduinonrf",
+              "name": "adafruit-nrfutil",
+              "version": "0.5.3.post17"
             }
           ]
         }
       ],
-      "tools": [],
+      "tools": [
+        {
+          "name": "adafruit-nrfutil",
+          "version": "0.5.3.post17",
+          "systems": [
+            {
+              "host": "i686-mingw32",
+              "url": "https://github.com/adafruit/Adafruit_nRF52_nrfutil/releases/download/0.5.3.post17/adafruit-nrfutil--0.5.3.post17-win.zip",
+              "archiveFileName": "adafruit-nrfutil--0.5.3.post17-win.zip",
+              "checksum": "SHA-256:62bdfc4ed862ada253c34617f14a0eef11086f2d3a2f1811c6f1dadf14a94ac7",
+              "size": "7613514"
+            },
+            {
+              "host": "x86_64-apple-darwin",
+              "url": "https://github.com/adafruit/Adafruit_nRF52_nrfutil/releases/download/0.5.3.post17/adafruit-nrfutil--0.5.3.post17-macos.zip",
+              "archiveFileName": "adafruit-nrfutil--0.5.3.post17-macos.zip",
+              "checksum": "SHA-256:4164e20269037809cef0126e837560b0e8b3850a679f84161241521840aad0d6",
+              "size": "7284606"
+            }
+          ]
+        }
+      ],
       "help": {
         "online": "https://github.com/dunknowcoding/ArduinoNRF#readme"
       }

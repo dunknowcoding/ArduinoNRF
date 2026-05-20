@@ -49,7 +49,13 @@ param(
     [AllowEmptyString()]
     [string]$SdReq = '',
     [AllowEmptyString()]
-    [string]$ArduinoIdeVerboseUpload = 'false'
+    [string]$ArduinoIdeVerboseUpload = 'false',
+    # Path to the bundled adafruit-nrfutil(.exe). platform.txt passes
+    # {runtime.tools.adafruit-nrfutil.path}/adafruit-nrfutil.exe so serial
+    # DFU uses the Boards-Manager-installed binary instead of a Python /
+    # Conda install on the user's PATH. Highest priority in resolution.
+    [AllowEmptyString()]
+    [string]$NrfutilExe = ''
 )
 
 Set-StrictMode -Version Latest
@@ -782,6 +788,15 @@ function Test-NiusResolvedPathUnderConda {
 }
 
 function Resolve-AdafruitNrfutil {
+    # Highest priority: the Boards-Manager-bundled binary passed by
+    # platform.txt via -NrfutilExe (no Python / Conda needed on the host).
+    if (-not [string]::IsNullOrWhiteSpace($NrfutilExe)) {
+        $bundled = $NrfutilExe.Trim().Trim('"')
+        if (Test-Path -LiteralPath $bundled) {
+            return (Resolve-Path -LiteralPath $bundled).Path
+        }
+    }
+
     # Machine-agnostic adafruit-nrfutil discovery. No developer-specific
     # paths: we look at an explicit override, then PATH, then the standard
     # python.org per-user Scripts directories. Conda installs are accepted
