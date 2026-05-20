@@ -13,8 +13,8 @@
           "category": "Contributed",
           "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.1/arduinonrf-0.0.1.zip",
           "archiveFileName": "arduinonrf-0.0.1.zip",
-          "checksum": "SHA-256:b2e91afb1826db98729acfa02cd2489205cf6f652297ad5f127e3ca04459f444",
-          "size": "190411",
+          "checksum": "SHA-256:bcf8dd60c989412069c47fe6eb06d89ae980a0dc75da8570803eb8ab3be4212d",
+          "size": "191578",
           "boards": [
             {
               "name": "AliExpress ProMicro nRF52840"
