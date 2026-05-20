@@ -138,18 +138,47 @@ function Write-NiusDetail {
 function Write-Banner {
     param([string]$BoardName)
 
-    # NiusRobotLab figlet, pure ASCII (only _ | \ / ( ) chars), so it
-    # renders identically in every host regardless of console codepage.
-    # Printed exactly once, right after compile, before upload progress.
-    Write-NiusHostLine '================================================================'
-    Write-NiusHostLine ' _   _ _           ____       _           _   _       _         '
-    Write-NiusHostLine '| \ | (_)_   _ ___|  _ \ ___ | |__   ___ | |_| | __ _| |__      '
-    Write-NiusHostLine '|  \| | | | | / __| |_) / _ \|  _ \ / _ \| __| |/ _` |  _ \     '
-    Write-NiusHostLine '| |\  | | |_| \__ \  _ < (_) | |_) | (_) | |_| | (_| | |_) |    '
-    Write-NiusHostLine '|_| \_|_|\__,_|___/_| \_\___/|_.__/ \___/ \__|_|\__,_|_.__/     '
-    Write-NiusHostLine '                 nRF52 Upload Console for Arduino               '
-    Write-NiusHostLine (' Target: {0}' -f $BoardName)
-    Write-NiusHostLine '================================================================'
+    # NiusRobotLab "shadow" figlet (embossed / yin-yang effect), pure ASCII
+    # (only _ | \ / ( ) ` chars), so it renders identically in every host
+    # regardless of console codepage. Single-quoted literals keep backtick
+    # and backslash literal. Printed exactly once, right after compile,
+    # before the upload progress. Bracketed by *** rule lines so it stands
+    # apart from the surrounding compiler / IDE output.
+    Write-NiusHostLine '*****************************************************************'
+    Write-NiusHostLine '  \  |_)             _ \        |           |   |           |    '
+    Write-NiusHostLine '   \ | | |   |  __| |   |  _ \  __ \   _ \  __| |      _` | __ \ '
+    Write-NiusHostLine ' |\  | | |   |\__ \ __ <  (   | |   | (   | |   |     (   | |   |'
+    Write-NiusHostLine '_| \_|_|\__,_|____/_| \_\\___/ _.__/ \___/ \__|_____|\__,_|_.__/ '
+    Write-NiusHostLine '*****************************************************************'
+    Write-NiusHostLine ('   nRF52 Flash Console   ***   Target: {0}' -f $BoardName)
+    Write-NiusHostLine '*****************************************************************'
+
+    # Mark the start of the user-visible upload run for the closing summary.
+    $script:NiusUploadStartUtc = [datetime]::UtcNow
+}
+
+# Closing summary: the final 100% bar plus 2 lines of plain-language status
+# (total time, soft reset), framed by a *** rule so it stands apart from the
+# IDE's own "uploading done" chatter. Pure ASCII.
+function Write-NiusUploadComplete {
+    param([string]$Note = '')
+
+    Write-Stage -Percent 100 -Label 'Upload complete'
+
+    $elapsed = ''
+    if ($script:NiusUploadStartUtc) {
+        $sec = [Math]::Round(([datetime]::UtcNow - $script:NiusUploadStartUtc).TotalSeconds, 1)
+        $elapsed = '{0}s' -f $sec
+    }
+    Write-NiusHostLine '*****************************************************************'
+    if (-not [string]::IsNullOrWhiteSpace($elapsed)) {
+        Write-NiusHostLine ('  Total upload time : {0}' -f $elapsed)
+    }
+    Write-NiusHostLine '  Soft reset        : done - board rebooted into new firmware'
+    if (-not [string]::IsNullOrWhiteSpace($Note)) {
+        Write-NiusHostLine ('  {0}' -f $Note)
+    }
+    Write-NiusHostLine '*****************************************************************'
 }
 
 # Internal section header - verbose only.
@@ -166,23 +195,37 @@ $script:NiusLastStagePercent = -1
 function Write-Stage {
     param(
         [int]$Percent,
-        [string]$Label
+        [string]$Label,
+        [string]$Detail = ''
     )
 
     $clampedPercent = $Percent
     if ($clampedPercent -lt 0) { $clampedPercent = 0 }
     if ($clampedPercent -gt 100) { $clampedPercent = 100 }
 
-    # esptool-style ASCII bar: [=========>          ]  45%  Label
-    $width = 20
-    $filled = [int]($clampedPercent * $width / 100)
+    # NiusRobotLab signature bar: a branded "NIUS" prefix, a comet head that
+    # rides a dotted track, and an optional detail field (e.g. byte counts):
+    #   NIUS |==============>.......|  64%  Uploading  29.0/45.0 KB
+    # Pure ASCII so it renders identically regardless of console codepage.
+    $width = 22
+    $filled = [int][Math]::Round($clampedPercent * $width / 100.0)
     if ($filled -gt $width) { $filled = $width }
     if ($filled -lt 0) { $filled = 0 }
-    $head = if ($filled -ge $width -or $filled -eq 0) { '' } else { '>' }
-    $core = ('=' * [Math]::Max(0, $filled - $head.Length)) + $head
-    $bar = $core.PadRight($width)
+    if ($filled -ge $width) {
+        $bar = '=' * $width
+    }
+    elseif ($filled -le 0) {
+        $bar = '.' * $width
+    }
+    else {
+        $bar = (('=' * ($filled - 1)) + '>').PadRight($width, '.')
+    }
     $script:NiusLastStagePercent = $clampedPercent
-    Write-NiusHostLine ('[{0}] {1,3}%  {2}' -f $bar, $clampedPercent, $Label)
+    $line = '  NIUS |{0}| {1,3}%  {2}' -f $bar, $clampedPercent, $Label
+    if (-not [string]::IsNullOrWhiteSpace($Detail)) {
+        $line = '{0}  {1}' -f $line, $Detail
+    }
+    Write-NiusHostLine $line
 }
 
 # Spinner during long quiet phases (e.g. nrfutil mid-transfer). This is
@@ -996,8 +1039,49 @@ function Invoke-AdafruitDfuDeploy {
         Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output $_.Exception.Message -Exe $tool)
     }
 
-    if ($script:NiusVerbose) { Write-Stage -Percent 80 -Label ('Streaming firmware over Adafruit serial DFU on {0}' -f $Port) }
-    Invoke-CommandChecked -Exe $tool -Arguments @('--verbose', 'dfu', 'serial', '-pkg', $zipPath, '-p', $Port, '-b', [string]$BaudRate, '-sb') -FailureKind 'adafruit-dfu' -ProgressPercent 90 -ProgressLabel 'Adafruit DFU active'
+    # Derive the real firmware size so the progress bar can track transferred
+    # bytes instead of guessing. adafruit-nrfutil sends one HCI data frame per
+    # DFU_PACKET_MAX_SIZE (512 B) chunk and echoes one '#' per frame, so
+    # frames = ceil(bytes / 512). A '#' count / frame count gives true %.
+    $fw = Get-NiusDfuFirmwareInfo -ZipPath $zipPath
+    $totalFrames = if ($fw) { [int]$fw.Frames } else { 0 }
+    $fwBytes = if ($fw) { [int]$fw.Bytes } else { 0 }
+
+    # Visible transfer start: byte bar begins at 0% here, then advances as
+    # nrfutil streams '#' frame markers (see Invoke-CommandChecked byteProgress).
+    $startDetail = if ($fwBytes -gt 0) { '0.0/{0} KB' -f [Math]::Round($fwBytes / 1024.0, 1) } else { '' }
+    Write-Stage -Percent 0 -Label 'Uploading' -Detail $startDetail
+    Invoke-CommandChecked -Exe $tool -Arguments @('--verbose', 'dfu', 'serial', '-pkg', $zipPath, '-p', $Port, '-b', [string]$BaudRate, '-sb') -FailureKind 'adafruit-dfu' -ProgressPercent 90 -ProgressLabel 'Uploading' -TotalFrames $totalFrames -FirmwareBytes $fwBytes
+}
+
+function Get-NiusDfuFirmwareInfo {
+    # Reads the application .bin entry from a genpkg DFU .zip and returns the
+    # firmware byte size and the number of 512 B DFU frames it will take.
+    # Returns $null if the zip can't be inspected (callers fall back to a
+    # frameless / time-based bar).
+    param([string]$ZipPath)
+
+    if ([string]::IsNullOrWhiteSpace($ZipPath) -or -not (Test-Path -LiteralPath $ZipPath)) {
+        return $null
+    }
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        try {
+            $bin = $zip.Entries | Where-Object { $_.FullName -match '\.bin$' } | Select-Object -First 1
+            if (-not $bin) { return $null }
+            $bytes = [int]$bin.Length
+            if ($bytes -le 0) { return $null }
+            $frames = [int][Math]::Ceiling($bytes / 512.0)
+            return [pscustomobject]@{ Bytes = $bytes; Frames = $frames }
+        }
+        finally {
+            $zip.Dispose()
+        }
+    }
+    catch {
+        return $null
+    }
 }
 
 function Invoke-CommandChecked {
@@ -1006,8 +1090,20 @@ function Invoke-CommandChecked {
         [string[]]$Arguments,
         [string]$FailureKind = 'generic',
         [int]$ProgressPercent = 50,
-        [string]$ProgressLabel = 'Working'
+        [string]$ProgressLabel = 'Working',
+        [int]$TotalFrames = 0,
+        [int]$FirmwareBytes = 0
     )
+
+    # When TotalFrames > 0 the caller is the Adafruit serial-DFU transfer and
+    # we render a real byte-based bar driven by the '#' frame markers nrfutil
+    # streams. Updates are throttled to 20% milestones so the IDE console gets
+    # ~6 lines (0/20/40/60/80/100) rather than a flood.
+    $byteProgress = ($FailureKind -eq 'adafruit-dfu' -and $TotalFrames -gt 0)
+    # Start at band 0: the caller already printed the 0% "Uploading" line, so
+    # the first bar emitted here is the first non-zero 20% milestone.
+    $lastShownBand = 0
+    $fwKb = [Math]::Round($FirmwareBytes / 1024.0, 1)
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $Exe
@@ -1080,6 +1176,7 @@ function Invoke-CommandChecked {
                 Lines = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
                 LastUtc = [datetime]::UtcNow
                 IdleResetOnAnyLine = [bool]$idleResetOnAnyLine
+                Hashes = 0
             })
 
         $idleSrcOut = 'nius-adf-out-' + ([Guid]::NewGuid().ToString('n'))
@@ -1091,6 +1188,12 @@ function Invoke-CommandChecked {
                 $sync = $Event.MessageData
                 [void]$sync.Lines.Add($ea.Data)
                 $trimmed = $ea.Data.TrimStart()
+                # adafruit-nrfutil echoes one '#' per 512 B DFU frame, newline
+                # every 40 frames. Count pure-'#' lines to drive the byte bar.
+                $hashOnly = $ea.Data.Trim()
+                if ($hashOnly.Length -gt 0 -and $hashOnly -match '^#+$') {
+                    $sync.Hashes += $hashOnly.Length
+                }
                 if ($sync.IdleResetOnAnyLine -or ($trimmed -notmatch '^(?i)(DEBUG|INFO)\s')) {
                     $sync.LastUtc = [datetime]::UtcNow
                 }
@@ -1145,7 +1248,25 @@ function Invoke-CommandChecked {
                     break
                 }
 
-                if (($tick % $progressPulseInterval) -eq 0) {
+                if ($byteProgress) {
+                    # Real byte-based bar: map streamed frames onto 0..98% and
+                    # only emit a line when we cross a new 20% band, so the IDE
+                    # console shows ~5-6 clean lines instead of a flood.
+                    $done = [int]$streamSync.Hashes
+                    $frac = if ($TotalFrames -gt 0) { $done / [double]$TotalFrames } else { 0 }
+                    if ($frac -lt 0) { $frac = 0 }
+                    if ($frac -gt 1) { $frac = 1 }
+                    $pct = [int][Math]::Floor($frac * 100)
+                    if ($pct -gt 98) { $pct = 98 }
+                    $band = [int][Math]::Floor($pct / 20)
+                    if ($band -gt $lastShownBand) {
+                        $lastShownBand = $band
+                        $sentKb = [Math]::Round(($frac * $FirmwareBytes) / 1024.0, 1)
+                        $detail = if ($fwKb -gt 0) { '{0}/{1} KB' -f $sentKb, $fwKb } else { '' }
+                        Write-Stage -Percent $pct -Label $ProgressLabel -Detail $detail
+                    }
+                }
+                elseif (($tick % $progressPulseInterval) -eq 0) {
                     Write-ProgressPulse -Percent $ProgressPercent -Label $ProgressLabel -Tick $tick
                 }
                 if ($FailureKind -eq 'adafruit-dfu' -and $tick -gt 0 -and ($tick % 80 -eq 0)) {
@@ -1738,6 +1859,10 @@ function Invoke-Touch1200Transition {
 
 function Get-NiusPostTouchSleepMilliseconds {
     # Buttonless boards: give USB detach / bootloader enumerate before nrfutil grabs COM.
+    # NOTE: this is now used as the *ceiling* of the adaptive settle wait
+    # (Wait-NiusBootloaderPortSettled), not a blind fixed sleep, so a fast
+    # board no longer pays the full window. Set NIUS_FORCE_FIXED_POST_TOUCH_SLEEP=1
+    # to fall back to a blind Start-Sleep of this duration.
     $ms = 3800
     $o = $env:NIUS_POST_TOUCH_SLEEP_MS
     if (-not [string]::IsNullOrWhiteSpace($o)) {
@@ -1747,6 +1872,59 @@ function Get-NiusPostTouchSleepMilliseconds {
         }
     }
     return $ms
+}
+
+function Wait-NiusBootloaderPortSettled {
+    # Adaptive replacement for the blind post-touch sleep.
+    #
+    # After a confirmed 1200 bps touch the board's runtime CDC detaches and the
+    # Adafruit serial-DFU CDC re-enumerates on the same COM name. The hazard is
+    # a race: the *dying* runtime port can still look openable for a few hundred
+    # ms before it drops, and grabbing it then makes nrfutil fail mid-transfer.
+    #
+    # Instead of always sleeping the full ceiling, we proceed as soon as the COM
+    # has been *continuously* openable for StableMs (so a flicker on the dying
+    # port resets the streak and we re-acquire on the real bootloader port),
+    # never returning before FloorMs (USB line-coding settle) and never waiting
+    # past CeilingMs. Typical fast boards settle in ~1 s instead of 3.8 s.
+    param(
+        [string]$PortName,
+        [int]$CeilingMs = 3800,
+        [int]$FloorMs = 400,
+        [int]$StableMs = 350
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PortName) -or $PortName.StartsWith('{')) {
+        # No concrete port to probe; fall back to a short blind settle.
+        Start-Sleep -Milliseconds ([Math]::Min($CeilingMs, 1500))
+        return
+    }
+    if ($CeilingMs -lt $FloorMs) { $FloorMs = $CeilingMs }
+
+    $start = Get-Date
+    $floorDeadline = $start.AddMilliseconds($FloorMs)
+    $ceilDeadline = $start.AddMilliseconds($CeilingMs)
+    $openSince = $null
+    while ((Get-Date) -lt $ceilDeadline) {
+        $state = Get-SerialPortUsableState -PortName $PortName
+        if ($state.Present -and $state.Openable) {
+            if ($null -eq $openSince) {
+                $openSince = Get-Date
+            }
+            elseif ((((Get-Date) - $openSince).TotalMilliseconds -ge $StableMs) -and ((Get-Date) -ge $floorDeadline)) {
+                $elapsed = [int]((Get-Date) - $start).TotalMilliseconds
+                Write-NiusDetail ('[nius] Bootloader COM {0} settled in {1} ms (adaptive; ceiling {2} ms).' -f $PortName, $elapsed, $CeilingMs) -ForegroundColor DarkGray
+                return
+            }
+        }
+        else {
+            # Detach / not-openable: reset the stability streak so we only
+            # accept the port once the re-enumeration has actually completed.
+            $openSince = $null
+        }
+        Start-Sleep -Milliseconds 120
+    }
+    Write-NiusDetail ('[nius] Bootloader COM {0} did not stabilize within ceiling {1} ms; proceeding anyway.' -f $PortName, $CeilingMs) -ForegroundColor DarkYellow
 }
 
 function Invoke-NiusAdafruitDfuRetouchWait {
@@ -2115,13 +2293,19 @@ try {
     if ($Mode -eq 'dfu') {
         Assert-InputArtifact -Path $Hex -Label 'hex'
 
+        # Single visible "Connecting" line; everything between here and the
+        # byte-progress bar (1200 bps touch, bootloader enumerate, COM settle)
+        # is internal and stays verbose-only so the console reads as
+        # Connecting -> [transfer bar] -> Upload complete.
+        Write-Stage -Percent 0 -Label 'Connecting'
+
         $autoMode = ($BootloaderMode -eq 'auto' -or $UsbVid -eq 'auto' -or $UsbPid -eq 'auto')
         if ($autoMode) {
-            Write-Stage -Percent 5 -Label 'Connecting'
+            Write-NiusDetail '[nius] Auto-detecting bootloader...' -ForegroundColor DarkGray
             $resolved = Resolve-AutoBootloader -DfuToolPath $toolPath -Attempts 2 -DelayMs 200
             if (-not $resolved.Resolved -and $UseTouch1200 -eq 'true') {
                 Stop-NiusLingeringAdafruitNrfutil -Phase touch
-                Write-Stage -Percent 10 -Label 'Entering bootloader'
+                Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
                 if (-not (Touch-SerialPort1200 -PortName $adafruitControlPort)) {
                     Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output ('Unable to trigger 1200 bps touch on {0}; the service/user CDC port may be missing or busy.' -f $adafruitControlPort) -Exe $toolPath)
                 }
@@ -2152,14 +2336,14 @@ try {
         $touchPrepared = $false
         $bootloaderTransitionConfirmed = $false
         if ($BootloaderMode -eq 'adafruit-dfu' -and $UseTouch1200 -eq 'true' -and $controlPortAlreadyBootloader) {
-            Write-Stage -Percent 10 -Label 'Entering bootloader'
+            Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
         } elseif ($UseTouch1200 -eq 'true') {
             Stop-NiusLingeringAdafruitNrfutil -Phase touch
             if ($runtimeSharesUploadIdentity -and $BootloaderMode -eq 'adafruit-dfu') {
-                Write-Stage -Percent 10 -Label 'Entering bootloader'
+                Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
             }
             else {
-                Write-Stage -Percent 10 -Label 'Entering bootloader'
+                Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
             }
             $touchTransitionResult = Invoke-Touch1200Transition `
                 -PortName $adafruitControlPort `
@@ -2189,7 +2373,7 @@ try {
                 }
             }
         } else {
-            Write-Stage -Percent 10 -Label 'Entering bootloader'
+            Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
         }
 
         # Wait for the board to enter bootloader after the 1200 bps touch.
@@ -2203,7 +2387,14 @@ try {
             }
         }
         if ($touchPrepared) {
-            Start-Sleep -Milliseconds (Get-NiusPostTouchSleepMilliseconds)
+            if ($env:NIUS_FORCE_FIXED_POST_TOUCH_SLEEP -eq '1') {
+                Start-Sleep -Milliseconds (Get-NiusPostTouchSleepMilliseconds)
+            }
+            else {
+                # Adaptive settle: proceed the moment the bootloader COM is
+                # stably openable instead of always burning the full window.
+                Wait-NiusBootloaderPortSettled -PortName $adafruitControlPort -CeilingMs (Get-NiusPostTouchSleepMilliseconds)
+            }
         }
         if ($touchPrepared -and $BootloaderMode -eq 'adafruit-dfu') {
             Write-NiusDetail '[nius] DFU: progress ~90% only means nrfutil is in serial DFU wait/transfer (host-side); MCU may still be in application if 1200/DTR reset did not arm yet).' -ForegroundColor DarkGray
@@ -2220,7 +2411,9 @@ try {
             }
             $wildcardAttempted = $normalizedSdReq -eq '0XFFFE'
 
-            Write-Stage -Percent 50 -Label 'Uploading'
+            # The byte-progress bar (driven from inside Invoke-AdafruitDfuDeploy)
+            # owns the visible 0..100 range; no coarse 50% pre-stage here.
+            Write-NiusDetail '[nius] Starting Adafruit serial DFU transfer...' -ForegroundColor DarkGray
             try {
                 Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq $SdReq
             } catch {
@@ -2288,7 +2481,7 @@ try {
             }
             if ($env:NIUS_SKIP_POST_VERIFY -eq '1') {
                 Write-NiusDetail '[nius] NIUS_SKIP_POST_VERIFY=1 - skipping bootloader/runtime PnP check (clone hosts where transfer succeeds but VID/PID transition is not detected)'
-                Write-Stage -Percent 100 -Label 'Upload complete'
+                Write-NiusUploadComplete
                 exit 0
             }
             # Auto-skip post-verify when runtime + bootloader share VID:PID
@@ -2302,7 +2495,7 @@ try {
             # set NIUS_FORCE_POST_VERIFY=1 to opt back in.
             if ($runtimeSharesUploadIdentity -and $env:NIUS_FORCE_POST_VERIFY -ne '1') {
                 Write-NiusDetail ('[nius] Same-PID runtime/bootloader ({0}); skipping PnP post-verify (set NIUS_FORCE_POST_VERIFY=1 to override)' -f $UsbPid)
-                Write-Stage -Percent 100 -Label 'Upload complete'
+                Write-NiusUploadComplete
                 exit 0
             }
             Write-Stage -Percent 94 -Label 'Verifying'
@@ -2335,7 +2528,7 @@ try {
                     Write-Stage -Percent 99 -Label 'Verifying'
                     $postFallbackState = Wait-ForAdafruitRuntimeTransition -BootloaderVid $UsbVid -BootloaderPid $UsbPid -RuntimeVid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Vid } else { '' }) -RuntimePid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Pid } else { '' })
                     if ($postFallbackState.Success) {
-                        Write-Stage -Percent 100 -Label 'Upload complete'
+                        Write-NiusUploadComplete
                         exit 0
                     }
 
@@ -2350,7 +2543,7 @@ try {
                 }
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'post-verify' -ExitCode 1 -Output $summary -Exe $toolPath)
             }
-            Write-Stage -Percent 100 -Label 'Upload complete'
+            Write-NiusUploadComplete
             exit 0
         }
 
@@ -2376,7 +2569,7 @@ try {
 
             Write-Stage -Percent 68 -Label 'Uploading'
             Invoke-Uf2Deploy -HexPath $Hex -FamilyId $Uf2FamilyId -DrivePath $detectedBootloader.Summary.Drive
-            Write-Stage -Percent 100 -Label 'Upload complete'
+            Write-NiusUploadComplete
             exit 0
         }
 
@@ -2386,7 +2579,7 @@ try {
 
         Write-Stage -Percent 68 -Label 'Uploading'
         Invoke-CommandChecked -Exe $toolPath -Arguments @('-v', '-d', ('{0}:{1}' -f $UsbVid, $UsbPid), '-a', $Alt, '-D', $Bin, '-R') -FailureKind 'dfu' -ProgressPercent 78 -ProgressLabel 'Nordic DFU transfer active'
-        Write-Stage -Percent 100 -Label 'Upload complete'
+        Write-NiusUploadComplete
         exit 0
     }
 
@@ -2394,7 +2587,7 @@ try {
     Write-Stage -Percent 10 -Label 'Connecting'
     Write-Stage -Percent 42 -Label 'Uploading'
     Invoke-CommandChecked -Exe $toolPath -Arguments @('-s', $ScriptRoot, '-f', $Config, '-c', ('init; halt; program {{{0}}} verify reset exit' -f $Hex)) -FailureKind 'openocd' -ProgressPercent 76 -ProgressLabel 'SWD flash transaction active'
-    Write-Stage -Percent 100 -Label 'Upload complete'
+    Write-NiusUploadComplete
 }
 catch {
     $failure = $_.Exception.Message
