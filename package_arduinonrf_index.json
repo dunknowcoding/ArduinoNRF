@@ -9,12 +9,12 @@
         {
           "name": "ArduinoNRF",
           "architecture": "nrf52",
-          "version": "0.0.3",
+          "version": "0.0.1",
           "category": "Contributed",
-          "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.3/arduinonrf-0.0.3.zip",
-          "archiveFileName": "arduinonrf-0.0.3.zip",
-          "checksum": "SHA-256:380b3af70a0f59cd5e998d24f200c58789a9c21ceb92f53dbe31a86f5be9b3fe",
-          "size": "176603",
+          "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.1/arduinonrf-0.0.1.zip",
+          "archiveFileName": "arduinonrf-0.0.1.zip",
+          "checksum": "SHA-256:c28f652c71aec57b74acff2d65c16ffb87219b32761a0c8236593f0af2b2a369",
+          "size": "190156",
           "boards": [
             {
               "name": "AliExpress ProMicro nRF52840"
@@ -81,17 +81,10 @@
           "systems": [
             {
               "host": "i686-mingw32",
-              "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.2/adafruit-nrfutil-0.5.3.post17-win.zip",
+              "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.1/adafruit-nrfutil-0.5.3.post17-win.zip",
               "archiveFileName": "adafruit-nrfutil-0.5.3.post17-win.zip",
               "checksum": "SHA-256:ce01874ecd6cf0c2755a87dcb7e9029fc097e318d1f8ab9195d4a6838dd347cb",
               "size": "7617434"
-            },
-            {
-              "host": "x86_64-apple-darwin",
-              "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.0.2/adafruit-nrfutil-0.5.3.post17-macos.zip",
-              "archiveFileName": "adafruit-nrfutil-0.5.3.post17-macos.zip",
-              "checksum": "SHA-256:1c7366ada5dd79c8a066eff7d56c95ea6833b1357143facd4bcb2c6ba7b39c76",
-              "size": "7284629"
             }
           ]
         }

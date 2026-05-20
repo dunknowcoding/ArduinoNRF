@@ -12,6 +12,7 @@ EXPECTED_TOOL_DEPENDENCIES = [
     ("arduino", "arm-none-eabi-gcc", "7-2017q4"),
     ("arduino", "dfu-util", "0.10.0-arduino1"),
     ("arduino", "openocd", "0.11.0-arduino2"),
+    ("arduinonrf", "adafruit-nrfutil", "0.5.3.post17"),
 ]
 
 
