@@ -1,11 +1,11 @@
-menu.storage=Storage backend
-menu.usbcdc=USB CDC
-menu.usbdesc=USB runtime DFU interface
-menu.uploadmode=Upload transport
-menu.bootloader=Bootloader mode
-menu.flashprofile=Flash profile
-menu.ramprofile=RAM profile
-menu.buildprofile=Build profile
+menu.storage=Storage
+menu.usbcdc=USB Serial (CDC)
+menu.usbdesc=USB DFU
+menu.uploadmode=Upload via
+menu.bootloader=Bootloader
+menu.flashprofile=Flash
+menu.ramprofile=SRAM
+menu.buildprofile=Build Options
 
 promicro_nrf52840.name=AliExpress ProMicro nRF52840
 promicro_nrf52840.upload.tool=niusdfu
@@ -65,15 +65,15 @@ promicro_nrf52840.menu.usbcdc.enabled=Enabled
 promicro_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
 promicro_nrf52840.menu.usbcdc.disabled=Disabled
 promicro_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-promicro_nrf52840.menu.usbdesc.standard=With application DFU
+promicro_nrf52840.menu.usbdesc.standard=Enabled
 promicro_nrf52840.menu.usbdesc.standard.build.usbdesc_flags=
-promicro_nrf52840.menu.usbdesc.no_app_dfu=Without application DFU
+promicro_nrf52840.menu.usbdesc.no_app_dfu=Disabled
 promicro_nrf52840.menu.usbdesc.no_app_dfu.build.usbdesc_flags=-DNRF_USB_RUNTIME_DISABLE_APP_DFU=1
-promicro_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only
+promicro_nrf52840.menu.flashprofile.internal1m=1 MB internal
 promicro_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-promicro_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+promicro_nrf52840.menu.ramprofile.sram256=256 KB
 promicro_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-promicro_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+promicro_nrf52840.menu.uploadmode.usb=USB bootloader
 promicro_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 promicro_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 promicro_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
@@ -87,7 +87,7 @@ promicro_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 promicro_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 promicro_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 promicro_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-promicro_nrf52840.menu.bootloader.auto=Auto-detect (recommended) [auto]
+promicro_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 promicro_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 promicro_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 promicro_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -100,7 +100,7 @@ promicro_nrf52840.menu.bootloader.auto.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.auto.upload.maximum_size=798720
 promicro_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.promicro=UF2 drive, S140 SoftDevice, app @ 0x26000 [promicro]
+promicro_nrf52840.menu.bootloader.promicro=UF2 drive, with BLE [promicro]
 promicro_nrf52840.menu.bootloader.promicro.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.promicro.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicro.upload.usb_pid=0x00B3
@@ -113,7 +113,7 @@ promicro_nrf52840.menu.bootloader.promicro.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.promicro.upload.maximum_size=798720
 promicro_nrf52840.menu.bootloader.promicro.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.promicro.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.promicrolegacy=UF2 drive, S140, app @ 0x27000 (legacy) [promicrolegacy]
+promicro_nrf52840.menu.bootloader.promicrolegacy=UF2 drive, with BLE, legacy [promicrolegacy]
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.usb_pid=0x00B3
@@ -126,7 +126,7 @@ promicro_nrf52840.menu.bootloader.promicrolegacy.upload.uf2_board_id=nRF52840-ni
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.maximum_size=794624
 promicro_nrf52840.menu.bootloader.promicrolegacy.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.promicrolegacy.build.bootloader_app_start=0x27000
-promicro_nrf52840.menu.bootloader.promicroserial=Serial DFU, S140 SoftDevice, app @ 0x26000 [promicroserial]
+promicro_nrf52840.menu.bootloader.promicroserial=Serial DFU, with BLE [promicroserial]
 promicro_nrf52840.menu.bootloader.promicroserial.upload.bootloader_mode=adafruit-dfu
 promicro_nrf52840.menu.bootloader.promicroserial.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicroserial.upload.usb_pid=0x00B3
@@ -141,7 +141,7 @@ promicro_nrf52840.menu.bootloader.promicroserial.upload.use_1200bps_touch=false
 promicro_nrf52840.menu.bootloader.promicroserial.upload.wait_for_upload_port=false
 promicro_nrf52840.menu.bootloader.promicroserial.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroserial.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.promicroserialnosd=Serial DFU, no SoftDevice, app @ 0x1000 [promicroserialnosd]
+promicro_nrf52840.menu.bootloader.promicroserialnosd=Serial DFU, no BLE [promicroserialnosd]
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.bootloader_mode=adafruit-dfu
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.usb_pid=0x00B3
@@ -158,7 +158,7 @@ promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.wait_for_upload_port
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_USBD_POLL_ONLY=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_app_start=0x1000
-promicro_nrf52840.menu.bootloader.promicroseriallegacy=Serial DFU, S140, app @ 0x27000 (legacy) [promicroseriallegacy]
+promicro_nrf52840.menu.bootloader.promicroseriallegacy=Serial DFU, with BLE, legacy [promicroseriallegacy]
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.bootloader_mode=adafruit-dfu
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.usb_pid=0x00B3
@@ -173,7 +173,7 @@ promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.use_1200bps_touch=
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.wait_for_upload_port=false
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.build.bootloader_app_start=0x27000
-promicro_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 bootloader [nicenano]
+promicro_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 [nicenano]
 promicro_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.nicenano.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.nicenano.upload.usb_pid=0x0029
@@ -185,7 +185,7 @@ promicro_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.nicenano.upload.maximum_size=798720
 promicro_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.nordicdfu=Nordic Open USB DFU [nordicdfu]
+promicro_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU [nordicdfu]
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -195,7 +195,7 @@ promicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 promicro_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 promicro_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-promicro_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 bootloader [xiaouf2]
+promicro_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 [xiaouf2]
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -205,7 +205,7 @@ promicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 promicro_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-promicro_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 bootloader [makerdiaryuf2]
+promicro_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 [makerdiaryuf2]
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -261,10 +261,10 @@ promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.postAtt
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.overrideRestartCommands.0=
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.overrideRestartCommands.1=
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.overrideRestartCommands.2=
-promicro_nrf52840.menu.storage.log=Log-structured wear leveling
+promicro_nrf52840.menu.storage.log=Wear-leveling
 promicro_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 promicro_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-promicro_nrf52840.menu.storage.legacy=Legacy single-page
+promicro_nrf52840.menu.storage.legacy=Single-page
 promicro_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 promicro_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 

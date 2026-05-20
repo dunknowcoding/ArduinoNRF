@@ -55,42 +55,32 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Force UTF-8 for our own stdout / stderr so the Unicode box-drawing and
-# block characters in the banner / progress bar render correctly. PS 5.1
-# defaults to the console codepage which on Chinese Windows is usually
-# GBK — without this override the █ / ░ / ─ chars come out as mojibake.
-try {
-    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-}
-catch {
-}
-
-$script:NiusVerboseFromIde = ($ArduinoIdeVerboseUpload -eq 'true' -or $ArduinoIdeVerboseUpload -eq '1')
-if ($script:NiusVerboseFromIde) {
+# Verbose mode: set by Arduino IDE 2's "verbose upload" preference (it passes
+# -ArduinoIdeVerboseUpload 'true' through platform.txt) or by the env var.
+# In quiet (default) mode the console shows only: the banner, the upload
+# progress bar, and the final result. All the [nius] internal diagnostics
+# (port resolution, same-PID notes, touch pulses, nrfutil path, etc.) are
+# gated behind verbose so the normal upload reads like a clean tool.
+$script:NiusVerbose = ($ArduinoIdeVerboseUpload -eq 'true' -or $ArduinoIdeVerboseUpload -eq '1' -or $env:NIUS_UPLOAD_VERBOSE -eq '1')
+if ($script:NiusVerbose) {
     $VerbosePreference = 'Continue'
 }
 
-# Stdout block-buffering inside `& powershell.exe` children causes stage
-# updates to appear in big bursts only when the buffer flushes. We mirror
-# every Write-NiusHostLine to stderr (line-buffered) so progress is live
-# in plain terminals.
-#
-# Arduino IDE 2 captures BOTH stdout and stderr from arduino-cli children
-# and prints them into the same Output panel, so under IDE 2's verbose
-# upload that mirror would render every line twice (the duplicate output
-# users reported). Skip the mirror when IDE 2 verbose is the caller (or
-# when the user explicitly disables it via NIUS_DISABLE_UPLOAD_STDERR_MIRROR=1).
-$script:NiusMirrorUploadLinesToStderr =
-    ($env:NIUS_DISABLE_UPLOAD_STDERR_MIRROR -ne '1') -and
-    (-not $script:NiusVerboseFromIde)
+# Do NOT mirror output to stderr by default. arduino-cli and Arduino IDE 2
+# capture BOTH stdout and stderr into the same Output panel, so mirroring
+# doubles every line (and the stderr copy renders red). The mirror only
+# helps in a plain terminal where stdout is block-buffered; opt in there
+# with NIUS_ENABLE_UPLOAD_STDERR_MIRROR=1.
+$script:NiusMirrorUploadLinesToStderr = ($env:NIUS_ENABLE_UPLOAD_STDERR_MIRROR -eq '1')
 
 . (Join-Path $PSScriptRoot 'usb_port_helpers.ps1')
 
 function Invoke-NiusConsoleFlush {
     try {
         [Console]::Out.Flush()
-        [Console]::Error.Flush()
+        if ($script:NiusMirrorUploadLinesToStderr) {
+            [Console]::Error.Flush()
+        }
     }
     catch {
     }
@@ -111,7 +101,6 @@ function Write-NiusHostLine {
         Write-Host $Message -ForegroundColor $ForegroundColor
     }
 
-    # Arduino IDE / VS Code + arduino-cli often pipe child stdout with block buffering; stderr is usually line-buffered so upload stages appear live.
     if ($script:NiusMirrorUploadLinesToStderr) {
         try {
             [Console]::Error.WriteLine($Message)
@@ -123,25 +112,50 @@ function Write-NiusHostLine {
     Invoke-NiusConsoleFlush
 }
 
+# Verbose-only detail line. In quiet mode these are suppressed entirely so
+# the normal upload output stays clean. Use this for every internal
+# [nius] diagnostic that an end user does not need to see.
+function Write-NiusDetail {
+    param(
+        [Parameter(Position = 0)]
+        [AllowEmptyString()]
+        [string]$Message = '',
+        $ForegroundColor = $null
+    )
+
+    if (-not $script:NiusVerbose) {
+        return
+    }
+    Write-NiusHostLine -Message $Message -ForegroundColor $ForegroundColor
+}
+
 function Write-Banner {
     param([string]$BoardName)
 
-    # Compact 3-line branded banner. Unicode box-drawing chars render in
-    # Windows Terminal, Arduino IDE 2's Output panel, and VSCode's
-    # integrated terminal. The leading lightning-bolt is a visual cue
-    # that the upload is running.
-    $title = '  NiusRobotLab  ·  nRF52 Upload Console  ·  Target: {0}' -f $BoardName
-    $rule = '─' * 64
-    Write-NiusHostLine ('┌{0}┐' -f $rule)
-    Write-NiusHostLine ('│{0}│' -f $title.PadRight(64))
-    Write-NiusHostLine ('└{0}┘' -f $rule)
+    # NiusRobotLab figlet, pure ASCII (only _ | \ / ( ) chars), so it
+    # renders identically in every host regardless of console codepage.
+    # Printed exactly once, right after compile, before upload progress.
+    Write-NiusHostLine '================================================================'
+    Write-NiusHostLine ' _   _ _           ____       _           _   _       _         '
+    Write-NiusHostLine '| \ | (_)_   _ ___|  _ \ ___ | |__   ___ | |_| | __ _| |__      '
+    Write-NiusHostLine '|  \| | | | | / __| |_) / _ \|  _ \ / _ \| __| |/ _` |  _ \     '
+    Write-NiusHostLine '| |\  | | |_| \__ \  _ < (_) | |_) | (_) | |_| | (_| | |_) |    '
+    Write-NiusHostLine '|_| \_|_|\__,_|___/_| \_\___/|_.__/ \___/ \__|_|\__,_|_.__/     '
+    Write-NiusHostLine '                 nRF52 Upload Console for Arduino               '
+    Write-NiusHostLine (' Target: {0}' -f $BoardName)
+    Write-NiusHostLine '================================================================'
 }
 
+# Internal section header - verbose only.
 function Write-Section {
     param([string]$Label)
 
-    Write-NiusHostLine ('[nius] {0}' -f $Label)
+    Write-NiusDetail ('[nius] {0}' -f $Label)
 }
+
+# Track the last progress line we emitted so milestone-based stages don't
+# spam the IDE 2 panel with near-identical lines.
+$script:NiusLastStagePercent = -1
 
 function Write-Stage {
     param(
@@ -152,24 +166,22 @@ function Write-Stage {
     $clampedPercent = $Percent
     if ($clampedPercent -lt 0) { $clampedPercent = 0 }
     if ($clampedPercent -gt 100) { $clampedPercent = 100 }
-    $width = 24
+
+    # esptool-style ASCII bar: [=========>          ]  45%  Label
+    $width = 20
     $filled = [int]($clampedPercent * $width / 100)
     if ($filled -gt $width) { $filled = $width }
-    # Solid block for completed portion, light shade for the remaining
-    # portion — clean and easy to scan at a glance.
-    $bar = ('█' * $filled) + ('░' * ($width - $filled))
-    $pulseFrames = @('SYNC', 'LINK', 'PUSH', 'DONE')
-    $pulseIndex = [int](($clampedPercent % 100) * $pulseFrames.Count / 100)
-    if ($pulseIndex -lt 0) {
-        $pulseIndex = 0
-    }
-    if ($pulseIndex -ge $pulseFrames.Count) {
-        $pulseIndex = $pulseFrames.Count - 1
-    }
-    $pulse = $pulseFrames[$pulseIndex]
-    Write-NiusHostLine ('▶ {0} {1,3}%  {2}  {3}' -f $bar, $clampedPercent, $pulse, $Label)
+    if ($filled -lt 0) { $filled = 0 }
+    $head = if ($filled -ge $width -or $filled -eq 0) { '' } else { '>' }
+    $core = ('=' * [Math]::Max(0, $filled - $head.Length)) + $head
+    $bar = $core.PadRight($width)
+    $script:NiusLastStagePercent = $clampedPercent
+    Write-NiusHostLine ('[{0}] {1,3}%  {2}' -f $bar, $clampedPercent, $Label)
 }
 
+# Spinner during long quiet phases (e.g. nrfutil mid-transfer). This is
+# verbose-only: in quiet mode the milestone Write-Stage lines are enough
+# and the spinner would just spam the IDE panel.
 function Write-ProgressPulse {
     param(
         [int]$Percent,
@@ -177,15 +189,18 @@ function Write-ProgressPulse {
         [int]$Tick
     )
 
+    if (-not $script:NiusVerbose) {
+        return
+    }
     $frames = @('[-]', '[\]', '[|]', '[/]')
     $frame = $frames[$Tick % $frames.Count]
     $clampedPercent = $Percent
     if ($clampedPercent -lt 0) { $clampedPercent = 0 }
     if ($clampedPercent -gt 100) { $clampedPercent = 100 }
-    $filled = [int]($clampedPercent * 24 / 100)
-    if ($filled -gt 24) { $filled = 24 }
-    $bar = ('#' * $filled).PadRight(24, '.')
-    Write-NiusHostLine ('{0} [ {1} ] {2,3} pct  {3}' -f $frame, $bar, $clampedPercent, $Label)
+    $filled = [int]($clampedPercent * 20 / 100)
+    if ($filled -gt 20) { $filled = 20 }
+    $bar = ('=' * $filled).PadRight(20)
+    Write-NiusHostLine ('{0} [{1}] {2,3}%  {3}' -f $frame, $bar, $clampedPercent, $Label)
 }
 
 function Get-ProgressPulseIntervalTicks {
@@ -371,14 +386,12 @@ function Resolve-PythonLaunch {
     }
 
     foreach ($cand in @(
-        'G:\Anaconda\envs\IronEngineWorld\python.exe',
         "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python310\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python39\python.exe",
         "$env:USERPROFILE\Anaconda3\python.exe",
-        'G:\Anaconda\python.exe',
         'C:\ProgramData\Anaconda3\python.exe'
     )) {
         if (Test-Path -LiteralPath $cand) {
@@ -419,7 +432,7 @@ function Resolve-PythonLaunch {
         }
     }
 
-    throw 'Python 3 was not found. UF2 upload mode needs Python for build_uf2.py — install Python 3 from python.org, set NIUS_UF2_PYTHON_EXE to python.exe, or ensure `py -3` / `python` / `python3` works.'
+    throw 'Python 3 was not found. UF2 upload mode needs Python for build_uf2.py  -  install Python 3 from python.org, set NIUS_UF2_PYTHON_EXE to python.exe, or ensure `py -3` / `python` / `python3` works.'
 }
 
 function Wait-ForUsbBootloader {
@@ -654,7 +667,7 @@ function Resolve-AutoBootloader {
                     $uf2 = Get-Uf2ProbeSummary -ExpectedLabel $expectedLabel -ExpectedModel $expectedModel -ExpectedBoardId $expectedBoardId
                 }
                 $resolvedKind = if ($uf2) { 'uf2' } else { $candidate.Kind }
-                Write-NiusHostLine ('[nius] auto-detect: matched {0} via {1} -- {2}{3}' -f $needle, $(if ($hitDfu) { 'dfu-util' } else { 'PnP' }), $candidate.Note, $(if ($uf2) { '; mounted UF2 volume preferred' } else { '' }))
+                Write-NiusDetail ('[nius] auto-detect: matched {0} via {1} -- {2}{3}' -f $needle, $(if ($hitDfu) { 'dfu-util' } else { 'PnP' }), $candidate.Note, $(if ($uf2) { '; mounted UF2 volume preferred' } else { '' }))
                 return [pscustomobject]@{
                     Resolved = $true
                     Source = $(if ($hitDfu) { 'dfu' } else { 'pnp' })
@@ -680,7 +693,7 @@ function Resolve-AutoBootloader {
         # via a mounted volume rather than a USB identity match.)
         $uf2Any = Get-Uf2ProbeSummary
         if ($uf2Any) {
-            Write-NiusHostLine ('[nius] auto-detect: matched UF2 volume {0} (label={1}, model={2}); VID/PID unknown, treating as Adafruit-fork UF2' -f $uf2Any.Drive, $uf2Any.Label, $uf2Any.Model)
+            Write-NiusDetail ('[nius] auto-detect: matched UF2 volume {0} (label={1}, model={2}); VID/PID unknown, treating as Adafruit-fork UF2' -f $uf2Any.Drive, $uf2Any.Label, $uf2Any.Model)
             return [pscustomobject]@{
                 Resolved = $true
                 Source = 'uf2-volume'
@@ -769,6 +782,11 @@ function Test-NiusResolvedPathUnderConda {
 }
 
 function Resolve-AdafruitNrfutil {
+    # Machine-agnostic adafruit-nrfutil discovery. No developer-specific
+    # paths: we look at an explicit override, then PATH, then the standard
+    # python.org per-user Scripts directories. Conda installs are accepted
+    # only as a last resort (their bundled nordicsemi often mismatches the
+    # serial DFU protocol) and can be force-allowed via env var.
     if (-not [string]::IsNullOrWhiteSpace($env:NIUS_ADAFRUIT_NRFUTIL_EXE)) {
         $explicit = $env:NIUS_ADAFRUIT_NRFUTIL_EXE.Trim().Trim('"')
         if (Test-Path -LiteralPath $explicit) {
@@ -776,80 +794,33 @@ function Resolve-AdafruitNrfutil {
         }
     }
 
-    # Preferred local Conda env for this repo host (UF2 Python matches this stack).
-    $ironEnvRoot = 'G:\Anaconda\envs\IronEngineWorld'
-    $ironPython = Join-Path $ironEnvRoot 'python.exe'
-    $ironAdafruitNrfutil = Join-Path $ironEnvRoot 'Scripts\adafruit-nrfutil.exe'
-    if (Test-Path -LiteralPath $ironAdafruitNrfutil) {
-        return (Resolve-Path -LiteralPath $ironAdafruitNrfutil).Path
-    }
-    if ((Test-Path -LiteralPath $ironPython)) {
-        Write-NiusHostLine ('[warn] IronEngineWorld env has python.exe but no Scripts\adafruit-nrfutil.exe; serial DFU will fall back to other installs (often base Anaconda + mismatched nordicsemi). Install into this env first:`n  & ''{0}'' -m pip install -U adafruit-nrfutil' -f $ironPython) -ForegroundColor Yellow
-    }
-
-    # Discovery order matters: `Get-Command` follows PATH and often returns Anaconda first.
-    # Logs showing `...\anaconda\...\nordicsemi\...` usually mean the wrong interpreter stack.
     $ordered = New-Object System.Collections.Generic.List[string]
 
-    foreach ($cand in @(
-        "$env:LOCALAPPDATA\Programs\Python\Python313\Scripts\adafruit-nrfutil.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts\adafruit-nrfutil.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts\adafruit-nrfutil.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python310\Scripts\adafruit-nrfutil.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python39\Scripts\adafruit-nrfutil.exe"
-    )) {
+    # python.org per-user installs (most common non-conda layout on Windows).
+    foreach ($ver in @('313', '312', '311', '310', '39')) {
+        $cand = "$env:LOCALAPPDATA\Programs\Python\Python$ver\Scripts\adafruit-nrfutil.exe"
         if (Test-Path -LiteralPath $cand) {
             $rp = (Resolve-Path -LiteralPath $cand).Path
-            if (-not $ordered.Contains($rp)) {
-                [void]$ordered.Add($rp)
-            }
+            if (-not $ordered.Contains($rp)) { [void]$ordered.Add($rp) }
         }
     }
 
+    # Anything on PATH (where.exe enumerates every hit in order).
     try {
-        $whereLines = @(& where.exe adafruit-nrfutil 2>$null)
-        foreach ($line in $whereLines) {
-            $t = [string]$line
-            if ([string]::IsNullOrWhiteSpace($t)) {
-                continue
-            }
-            $t = $t.Trim().Trim('"')
-            if (-not (Test-Path -LiteralPath $t)) {
-                continue
-            }
+        foreach ($line in @(& where.exe adafruit-nrfutil 2>$null)) {
+            $t = ([string]$line).Trim().Trim('"')
+            if ([string]::IsNullOrWhiteSpace($t) -or -not (Test-Path -LiteralPath $t)) { continue }
             $rp = (Resolve-Path -LiteralPath $t).Path
-            if (-not $ordered.Contains($rp)) {
-                [void]$ordered.Add($rp)
-            }
+            if (-not $ordered.Contains($rp)) { [void]$ordered.Add($rp) }
         }
     }
     catch {
     }
 
     foreach ($gc in @(Get-Command 'adafruit-nrfutil' -ErrorAction SilentlyContinue -All)) {
-        if (-not $gc.Source) {
-            continue
-        }
-        if (-not (Test-Path -LiteralPath $gc.Source)) {
-            continue
-        }
+        if (-not $gc.Source -or -not (Test-Path -LiteralPath $gc.Source)) { continue }
         $rp = (Resolve-Path -LiteralPath $gc.Source).Path
-        if (-not $ordered.Contains($rp)) {
-            [void]$ordered.Add($rp)
-        }
-    }
-
-    foreach ($cand in @(
-        "$env:USERPROFILE\Anaconda3\Scripts\adafruit-nrfutil.exe",
-        'G:\Anaconda\Scripts\adafruit-nrfutil.exe',
-        'C:\ProgramData\Anaconda3\Scripts\adafruit-nrfutil.exe'
-    )) {
-        if (Test-Path -LiteralPath $cand) {
-            $rp = (Resolve-Path -LiteralPath $cand).Path
-            if (-not $ordered.Contains($rp)) {
-                [void]$ordered.Add($rp)
-            }
-        }
+        if (-not $ordered.Contains($rp)) { [void]$ordered.Add($rp) }
     }
 
     if ($ordered.Count -eq 0) {
@@ -858,36 +829,20 @@ function Resolve-AdafruitNrfutil {
 
     $allowConda = ($env:NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL -eq '1')
 
-    if ($allowConda) {
-        $pick = $ordered[0]
-        if ((Test-NiusResolvedPathUnderConda $pick)) {
-            Write-NiusHostLine '[warn] NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL=1: using adafruit-nrfutil from a Conda-related path (may carry mismatched nordicsemi).' -ForegroundColor Yellow
-        }
-        return $pick
-    }
-
-    $pick = $null
+    # Prefer the first non-conda hit.
     foreach ($p in $ordered) {
         if (-not (Test-NiusResolvedPathUnderConda $p)) {
-            $pick = $p
-            break
+            return $p
         }
     }
 
-    if (-not $pick) {
-        $pick = $ordered[0]
-        $ironPyHint = 'G:\Anaconda\envs\IronEngineWorld\python.exe'
-        $ironLauncherHint = 'G:\Anaconda\envs\IronEngineWorld\Scripts\adafruit-nrfutil.exe'
-        if ((Test-Path -LiteralPath $ironPyHint) -and -not (Test-Path -LiteralPath $ironLauncherHint)) {
-            Write-NiusHostLine ('[warn] Using adafruit-nrfutil at: {0}`n      Reason: no python.org launcher found and IronEngineWorld lacks Scripts\adafruit-nrfutil.exe (see prior pip install hint).' -f $pick) -ForegroundColor Yellow
-        }
-        else {
-            Write-NiusHostLine '[warn] Only adafruit-nrfutil found under Anaconda/Miniconda; serial DFU often breaks (wrong nordicsemi). Prefer `pip install adafruit-nrfutil` with python.org Python, set NIUS_ADAFRUIT_NRFUTIL_EXE, or NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL=1 after confirming that toolchain.' -ForegroundColor Yellow
-        }
-        return $pick
+    # Only conda installs available.
+    if ($allowConda) {
+        Write-NiusDetail '[nius] NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL=1: using a Conda adafruit-nrfutil (nordicsemi version may mismatch).' -ForegroundColor Yellow
+        return $ordered[0]
     }
-
-    return $pick
+    Write-NiusDetail '[nius] Only a Conda adafruit-nrfutil was found; serial DFU may fail on a version mismatch. Prefer `pip install adafruit-nrfutil` with python.org Python, or set NIUS_ADAFRUIT_NRFUTIL_EXE.' -ForegroundColor Yellow
+    return $ordered[0]
 }
 
 function Stop-NiusLingeringAdafruitNrfutil {
@@ -983,9 +938,9 @@ function Invoke-AdafruitDfuDeploy {
     if (-not $tool) {
         throw 'adafruit-nrfutil was not found. Install with non-Conda Python (`pip install adafruit-nrfutil`), set NIUS_ADAFRUIT_NRFUTIL_EXE to the Scripts\adafruit-nrfutil.exe path, or temporarily NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL=1 if you must use Conda. UF2 drag-drop is also supported via the UF2 bootloader menu entries.'
     }
-    Write-NiusHostLine ('[nius] Resolved adafruit-nrfutil: {0}' -f $tool) -ForegroundColor DarkGray
+    Write-NiusDetail ('[nius] Resolved adafruit-nrfutil: {0}' -f $tool) -ForegroundColor DarkGray
 
-    Write-NiusHostLine '[nius] Adafruit DFU pipeline starting (genpkg, then serial)...' -ForegroundColor DarkGray
+    Write-NiusDetail '[nius] Adafruit DFU pipeline starting (genpkg, then serial)...' -ForegroundColor DarkGray
 
     Stop-NiusLingeringAdafruitNrfutil -Phase dfu
 
@@ -1006,7 +961,7 @@ function Invoke-AdafruitDfuDeploy {
     }
     $genpkgArgs += @('--application', $HexPath, $zipPath)
 
-    Write-Stage -Percent 55 -Label 'Generating Adafruit DFU package (genpkg)'
+    if ($script:NiusVerbose) { Write-Stage -Percent 55 -Label 'Generating Adafruit DFU package (genpkg)' }
     Invoke-CommandChecked -Exe $tool -Arguments $genpkgArgs -FailureKind 'adafruit-genpkg' -ProgressPercent 60 -ProgressLabel 'genpkg synthesizing DFU package'
 
     if (-not (Test-Path -LiteralPath $zipPath)) {
@@ -1026,7 +981,7 @@ function Invoke-AdafruitDfuDeploy {
         Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output $_.Exception.Message -Exe $tool)
     }
 
-    Write-Stage -Percent 80 -Label ('Streaming firmware over Adafruit serial DFU on {0}' -f $Port)
+    if ($script:NiusVerbose) { Write-Stage -Percent 80 -Label ('Streaming firmware over Adafruit serial DFU on {0}' -f $Port) }
     Invoke-CommandChecked -Exe $tool -Arguments @('--verbose', 'dfu', 'serial', '-pkg', $zipPath, '-p', $Port, '-b', [string]$BaudRate, '-sb') -FailureKind 'adafruit-dfu' -ProgressPercent 90 -ProgressLabel 'Adafruit DFU active'
 }
 
@@ -1185,7 +1140,7 @@ function Invoke-CommandChecked {
                     else {
                         'non-DEBUG/INFO nrfutil lines resetting idle (DEBUG/INFO verbosity alone does not reset it).'
                     }
-                    Write-NiusHostLine ('[nius] DFU payload phase: adafruit-nrfutil may go quiet during transfer; watchdog fails after {0} ms without {1}' -f $idleMs, $hint) -ForegroundColor DarkGray
+                    Write-NiusDetail ('[nius] DFU payload phase: adafruit-nrfutil may go quiet during transfer; watchdog fails after {0} ms without {1}' -f $idleMs, $hint) -ForegroundColor DarkGray
                 }
                 $tick += 1
             }
@@ -1341,7 +1296,7 @@ function Get-FailureHints {
                     'nrfutil idle watchdog: no non-DEBUG/INFO lines for NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS (default 30000 ms) means the transfer is treated as stuck.',
                     'Increase the timeout on slow USB links; NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS=0 disables idle detection (process wall timeout still applies).',
                     'NIUS_ADAFRUIT_DFU_IDLE_RESET_ON_ANY_LINE=1 restores counting DEBUG/INFO lines toward idle reset (can spin forever if logs spam).',
-                    'Otherwise: bootloader not responding, wrong COM, broken adafruit-nrfutil/Python env (install adafruit-nrfutil into IronEngineWorld Scripts), or another program holding the serial port.'
+                    'Otherwise: bootloader not responding, wrong COM, broken adafruit-nrfutil/Python env (reinstall with `pip install -U adafruit-nrfutil`), or another program holding the serial port.'
                 )
             }
             return @(
@@ -1650,7 +1605,7 @@ function Touch-SerialPort1200 {
         return [bool]$recv
     }
 
-    Write-NiusHostLine ('[nius] 1200bps touch on {0} (~28s budget; Open timeout via NIUS_TOUCH_SERIAL_OPEN_TIMEOUT_MS)...' -f $PortName) -ForegroundColor DarkGray
+    Write-NiusDetail ('[nius] 1200bps touch on {0} (~28s budget; Open timeout via NIUS_TOUCH_SERIAL_OPEN_TIMEOUT_MS)...' -f $PortName) -ForegroundColor DarkGray
 
     $pulseLogPhase = ''
     $pulseLogUtc = [datetime]::UtcNow.AddMinutes(-5)
@@ -1661,7 +1616,7 @@ function Touch-SerialPort1200 {
     while ((Get-Date) -lt $deadline) {
         if (((Get-Date) - $lastHeartbeat).TotalMilliseconds -ge 2000) {
             $remainSec = [int][Math]::Max(0, [Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds))
-            Write-NiusHostLine ('[nius]   touch still running on {0} (~{1}s left)...' -f $PortName, $remainSec) -ForegroundColor DarkGray
+            Write-NiusDetail ('[nius]   touch still running on {0} (~{1}s left)...' -f $PortName, $remainSec) -ForegroundColor DarkGray
             $lastHeartbeat = Get-Date
         }
 
@@ -1671,7 +1626,7 @@ function Touch-SerialPort1200 {
                 $phase115200Changed = ($pulseLogPhase -ne '115200')
                 $pulseElapsedMs = ($utcPulse - $pulseLogUtc).TotalMilliseconds
                 if ($phase115200Changed -or $pulseElapsedMs -ge 3500) {
-                    Write-NiusHostLine ('[nius]   touch pulse 115200 on {0}...' -f $PortName) -ForegroundColor DarkGray
+                    Write-NiusDetail ('[nius]   touch pulse 115200 on {0}...' -f $PortName) -ForegroundColor DarkGray
                     $pulseLogPhase = '115200'
                     $pulseLogUtc = $utcPulse
                 }
@@ -1685,7 +1640,7 @@ function Touch-SerialPort1200 {
             $phase1200Changed = ($pulseLogPhase -ne '1200')
             $pulseElapsedMs = ($utcPulse - $pulseLogUtc).TotalMilliseconds
             if ($phase1200Changed -or $pulseElapsedMs -ge 3500) {
-                Write-NiusHostLine ('[nius]   touch pulse 1200 on {0}...' -f $PortName) -ForegroundColor DarkGray
+                Write-NiusDetail ('[nius]   touch pulse 1200 on {0}...' -f $PortName) -ForegroundColor DarkGray
                 $pulseLogPhase = '1200'
                 $pulseLogUtc = $utcPulse
             }
@@ -1798,7 +1753,7 @@ function Invoke-NiusAdafruitDfuRetouchWait {
 
     Stop-NiusLingeringAdafruitNrfutil -Phase touch
 
-    Write-NiusHostLine ('[nius] {0}' -f $Reason)
+    Write-NiusDetail ('[nius] {0}' -f $Reason)
     $touchTransition = Invoke-Touch1200Transition `
         -PortName $PortName `
         -BootloaderVid $BootloaderVid `
@@ -1898,7 +1853,7 @@ function Wait-SerialPortResetCycle {
         throw ('No concrete port selected for {0}.' -f $Purpose)
     }
 
-    Write-NiusHostLine ('[nius] Waiting for {0} on {1} - expecting COM to detach and re-enumerate after 1200 bps touch.' -f $Purpose, $PortName) -ForegroundColor DarkGray
+    Write-NiusDetail ('[nius] Waiting for {0} on {1} - expecting COM to detach and re-enumerate after 1200 bps touch.' -f $Purpose, $PortName) -ForegroundColor DarkGray
     $detachDeadline = (Get-Date).AddMilliseconds($DetachTimeoutMs)
     $lastIssue = 'port stayed present'
     $sawDetach = $false
@@ -1937,7 +1892,7 @@ function Wait-SerialPortReady {
     $lastIssue = 'port not enumerated'
     $progressEveryMs = 2500
     $nextProgressAt = $waitStarted.AddMilliseconds($progressEveryMs)
-    Write-NiusHostLine ('[nius] Waiting for {0} ({1}) - COM must open cleanly (timeout {2} ms). Windows may hold the port briefly after reset.' -f $Purpose, $PortName, $TimeoutMs) -ForegroundColor DarkGray
+    Write-NiusDetail ('[nius] Waiting for {0} ({1}) - COM must open cleanly (timeout {2} ms). Windows may hold the port briefly after reset.' -f $Purpose, $PortName, $TimeoutMs) -ForegroundColor DarkGray
     while ((Get-Date) -lt $deadline) {
         $loopSleep = 280
         $state = Get-SerialPortUsableState -PortName $PortName
@@ -1955,7 +1910,7 @@ function Wait-SerialPortReady {
 
         if ((Get-Date) -ge $nextProgressAt) {
             $elapsed = [int](((Get-Date) - $waitStarted).TotalMilliseconds)
-            Write-NiusHostLine ('[nius]   serial wait {0} ms / {1} ms - last: {2}' -f $elapsed, $TimeoutMs, $lastIssue) -ForegroundColor DarkGray
+            Write-NiusDetail ('[nius]   serial wait {0} ms / {1} ms - last: {2}' -f $elapsed, $TimeoutMs, $lastIssue) -ForegroundColor DarkGray
             $nextProgressAt = (Get-Date).AddMilliseconds($progressEveryMs)
         }
 
@@ -1983,7 +1938,7 @@ function Wait-SamePidAdafruitBootloaderTransition {
         throw ('No concrete port selected for {0}.' -f $Purpose)
     }
 
-    Write-NiusHostLine ('[nius] Waiting for {0} on {1} - accepting either COM reset-cycle or MSC/UF2 bootloader evidence.' -f $Purpose, $PortName) -ForegroundColor DarkGray
+    Write-NiusDetail ('[nius] Waiting for {0} on {1} - accepting either COM reset-cycle or MSC/UF2 bootloader evidence.' -f $Purpose, $PortName) -ForegroundColor DarkGray
     $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
     $waitStarted = Get-Date
     $nextProgressAt = $waitStarted.AddMilliseconds(2500)
@@ -2029,7 +1984,7 @@ function Wait-SamePidAdafruitBootloaderTransition {
         if ((Get-Date) -ge $nextProgressAt) {
             $elapsed = [int](((Get-Date) - $waitStarted).TotalMilliseconds)
             $summary = if ($lastSnapshot) { $lastSnapshot.Summary } else { 'snapshot unavailable' }
-            Write-NiusHostLine ('[nius]   same-PID wait {0} ms / {1} ms - last: {2}; snapshot: {3}' -f $elapsed, $TimeoutMs, $lastIssue, $summary) -ForegroundColor DarkGray
+            Write-NiusDetail ('[nius]   same-PID wait {0} ms / {1} ms - last: {2}; snapshot: {3}' -f $elapsed, $TimeoutMs, $lastIssue, $summary) -ForegroundColor DarkGray
             $nextProgressAt = (Get-Date).AddMilliseconds(2500)
         }
 
@@ -2079,7 +2034,7 @@ try {
             }
             $adafruitControlPort = $portResolution.Port
             if ($adafruitControlPort -ne $Port -and $portResolution -and ($env:NIUS_ALLOW_USER_CDC_UPLOAD_PORT -eq '1')) {
-                Write-NiusHostLine ('[nius] serial DFU control port remap: selected {0}, using {1} ({2})' -f $Port, $adafruitControlPort, $portResolution.Reason)
+                Write-NiusDetail ('[nius] serial DFU control port remap: selected {0}, using {1} ({2})' -f $Port, $adafruitControlPort, $portResolution.Reason)
             }
         }
     }
@@ -2099,7 +2054,7 @@ try {
             }
             $adafruitControlPort = $portResolution.Port
             if ($adafruitControlPort -ne $Port -and $portResolution -and ($env:NIUS_ALLOW_USER_CDC_UPLOAD_PORT -eq '1')) {
-                Write-NiusHostLine ('[nius] serial DFU control port remap: selected {0}, using {1} ({2})' -f $Port, $adafruitControlPort, $portResolution.Reason)
+                Write-NiusDetail ('[nius] serial DFU control port remap: selected {0}, using {1} ({2})' -f $Port, $adafruitControlPort, $portResolution.Reason)
             }
         }
     }
@@ -2128,17 +2083,17 @@ try {
             }
             $strongBootloaderEvidence = ($samePidSnapshot.StorageInterfaceCount -gt 0) -or ($null -ne $uf2Probe)
             if ($strongBootloaderEvidence) {
-                Write-NiusHostLine ('[nius] Same-PID upload path: bootloader evidence present on {0}; skipping 1200 touch ({1})' -f $adafruitControlPort, $samePidSnapshot.Summary) -ForegroundColor DarkGray
+                Write-NiusDetail ('[nius] Same-PID upload path: bootloader evidence present on {0}; skipping 1200 touch ({1})' -f $adafruitControlPort, $samePidSnapshot.Summary) -ForegroundColor DarkGray
             }
             else {
                 $controlPortAlreadyBootloader = $false
-                Write-NiusHostLine ('[nius] Same-PID upload path: no MSC/UF2 bootloader evidence on {0}; treating it as runtime service CDC and keeping 1200 touch enabled.' -f $adafruitControlPort) -ForegroundColor DarkGray
+                Write-NiusDetail ('[nius] Same-PID upload path: no MSC/UF2 bootloader evidence on {0}; treating it as runtime service CDC and keeping 1200 touch enabled.' -f $adafruitControlPort) -ForegroundColor DarkGray
             }
         }
         if ($env:NIUS_ASSUME_SELECTED_PORT_BOOTLOADER -eq '1') {
             $controlPortAlreadyBootloader = $true
             $runtimeSharesUploadIdentity = $false
-            Write-NiusHostLine ('[nius] NIUS_ASSUME_SELECTED_PORT_BOOTLOADER=1 - treating {0} as an already-running bootloader port.' -f $adafruitControlPort) -ForegroundColor DarkGray
+            Write-NiusDetail ('[nius] NIUS_ASSUME_SELECTED_PORT_BOOTLOADER=1 - treating {0} as an already-running bootloader port.' -f $adafruitControlPort) -ForegroundColor DarkGray
         }
     }
 
@@ -2160,7 +2115,7 @@ try {
             if (-not $resolved.Resolved) {
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output ('Auto-detect probed for known nRF52 bootloaders ({0}); none visible on host. Check that the board is plugged in, that the user firmware honors 1200 bps touch, and that no other process is holding the COM port open.' -f $resolved.ProbedCandidates) -Exe $toolPath)
             }
-            Write-NiusHostLine ('[nius] auto-detect resolved to {0} ({1}:{2}, {3})' -f $resolved.Kind.ToUpper(), $resolved.Vid, $resolved.Pid, $resolved.Note)
+            Write-NiusDetail ('[nius] auto-detect resolved to {0} ({1}:{2}, {3})' -f $resolved.Kind.ToUpper(), $resolved.Vid, $resolved.Pid, $resolved.Note)
             $BootloaderMode = $resolved.Kind
             $UsbVid = $resolved.Vid
             $UsbPid = $resolved.Pid
@@ -2204,7 +2159,7 @@ try {
                 $touchPrepared = $true
                 $bootloaderTransitionConfirmed = $true
                 if ($touchTransitionResult.Candidate) {
-                    Write-NiusHostLine ('[nius] 1200 bps touch path confirmed via {0}.' -f $touchTransitionResult.Candidate.Label) -ForegroundColor DarkGray
+                    Write-NiusDetail ('[nius] 1200 bps touch path confirmed via {0}.' -f $touchTransitionResult.Candidate.Label) -ForegroundColor DarkGray
                 }
             }
             else {
@@ -2213,7 +2168,7 @@ try {
             if ($touchPrepared -and -not $bootloaderTransitionConfirmed -and $BootloaderMode -eq 'adafruit-dfu' -and $env:NIUS_ENABLE_SECOND_TOUCH_PASS -eq '1') {
                 $halfPost = [int][Math]::Max(900, [Math]::Floor((Get-NiusPostTouchSleepMilliseconds) * 0.42))
                 Start-Sleep -Milliseconds $halfPost
-                Write-NiusHostLine '[nius] Automatic second 1200bps touch pass (buttonless path; firmware debounce / USB settle).' -ForegroundColor DarkGray
+                Write-NiusDetail '[nius] Automatic second 1200bps touch pass (buttonless path; firmware debounce / USB settle).' -ForegroundColor DarkGray
                 if (-not (Touch-SerialPort1200 -PortName $adafruitControlPort)) {
                     Write-NiusHostLine ('[warn] Second touch pass failed on {0} (USB may be re-enumerating); continuing with post-touch wait.' -f $adafruitControlPort) -ForegroundColor DarkYellow
                 }
@@ -2229,14 +2184,14 @@ try {
             }
             catch {
                 Write-NiusHostLine ('[warn] No confirmed USB reset cycle observed on {0} after touch: {1}' -f $adafruitControlPort, $_.Exception.Message) -ForegroundColor DarkYellow
-                Write-NiusHostLine ('[nius] Continuing with a direct serial DFU attempt on {0} because this board reuses the same COM identity in runtime and bootloader.' -f $adafruitControlPort) -ForegroundColor DarkGray
+                Write-NiusDetail ('[nius] Continuing with a direct serial DFU attempt on {0} because this board reuses the same COM identity in runtime and bootloader.' -f $adafruitControlPort) -ForegroundColor DarkGray
             }
         }
         if ($touchPrepared) {
             Start-Sleep -Milliseconds (Get-NiusPostTouchSleepMilliseconds)
         }
         if ($touchPrepared -and $BootloaderMode -eq 'adafruit-dfu') {
-            Write-NiusHostLine '[nius] DFU: progress ~90% only means nrfutil is in serial DFU wait/transfer (host-side); MCU may still be in application if 1200/DTR reset did not arm yet).' -ForegroundColor DarkGray
+            Write-NiusDetail '[nius] DFU: progress ~90% only means nrfutil is in serial DFU wait/transfer (host-side); MCU may still be in application if 1200/DTR reset did not arm yet).' -ForegroundColor DarkGray
         }
 
         # adafruit-dfu programs over the CDC interface; the host-side MSC LUN
@@ -2258,7 +2213,7 @@ try {
                 $lastAdafruitError = $_
                 $recoveredAfterRetouch = $false
                 if ($UseTouch1200 -eq 'true' -and (Test-NiusAdafruitDfuFailureNeedsAutoRetouch -Failure $fail)) {
-                    Write-NiusHostLine '[nius] Serial DFU failed; automatic re-touch + one repeat (same sd-req, buttonless recovery).' -ForegroundColor Yellow
+                    Write-NiusDetail '[nius] Serial DFU failed; automatic re-touch + one repeat (same sd-req, buttonless recovery).' -ForegroundColor Yellow
                     Invoke-NiusAdafruitDfuRetouchWait `
                         -PortName $adafruitControlPort `
                         -Reason 'Auto re-touch before repeating adafruit-nrfutil serial DFU' `
@@ -2284,7 +2239,7 @@ try {
                 }
                 else {
                     if (Test-NiusAdafruitDfuFailureIsTimeout -Failure $fail) {
-                        Write-NiusHostLine '[nius] Adafruit serial DFU timeout/stall is terminal for this run; skipping extra retries and surfacing the error immediately.' -ForegroundColor DarkYellow
+                        Write-NiusDetail '[nius] Adafruit serial DFU timeout/stall is terminal for this run; skipping extra retries and surfacing the error immediately.' -ForegroundColor DarkYellow
                         if ($fail) {
                             Throw-NiusUploadFailure $fail
                         }
@@ -2298,16 +2253,16 @@ try {
                     }
                     $uploadFailure = $fail
                     if ($uploadFailure -and $uploadFailure.PSObject.Properties['Summary']) {
-                        Write-NiusHostLine ('[nius] Adafruit serial DFU transfer failed before wildcard retry: {0}' -f $uploadFailure.Summary)
+                        Write-NiusDetail ('[nius] Adafruit serial DFU transfer failed before wildcard retry: {0}' -f $uploadFailure.Summary)
                         foreach ($detail in @($uploadFailure.Details)) {
-                            Write-NiusHostLine ('[nius]   {0}' -f $detail)
+                            Write-NiusDetail ('[nius]   {0}' -f $detail)
                         }
                     }
                     else {
-                        Write-NiusHostLine ('[nius] Adafruit serial DFU transfer failed before wildcard retry: {0}' -f $_.Exception.Message)
+                        Write-NiusDetail ('[nius] Adafruit serial DFU transfer failed before wildcard retry: {0}' -f $_.Exception.Message)
                     }
-                    Write-NiusHostLine '[nius] Adafruit serial DFU transfer failed; retrying with wildcard sd-req 0xFFFE'
-                    Write-Stage -Percent 92 -Label 'Retrying Adafruit serial DFU with wildcard sd-req'
+                    Write-NiusDetail '[nius] Adafruit serial DFU transfer failed; retrying with wildcard sd-req 0xFFFE'
+                    Write-Stage -Percent 90 -Label 'Finalizing'
                     if ($UseTouch1200 -eq 'true') {
                         Invoke-NiusAdafruitDfuRetouchWait -PortName $adafruitControlPort -Reason 'Re-arming 1200 bps before wildcard sd-req retry (board may have left bootloader after failed transfer)'
                     }
@@ -2317,8 +2272,8 @@ try {
                 }
             }
             if ($env:NIUS_SKIP_POST_VERIFY -eq '1') {
-                Write-NiusHostLine '[nius] NIUS_SKIP_POST_VERIFY=1 - skipping bootloader/runtime PnP check (clone hosts where transfer succeeds but VID/PID transition is not detected)'
-                Write-Stage -Percent 100 -Label 'Firmware streamed over Adafruit serial DFU (post-verify skipped)'
+                Write-NiusDetail '[nius] NIUS_SKIP_POST_VERIFY=1 - skipping bootloader/runtime PnP check (clone hosts where transfer succeeds but VID/PID transition is not detected)'
+                Write-Stage -Percent 100 -Label 'Upload complete'
                 exit 0
             }
             # Auto-skip post-verify when runtime + bootloader share VID:PID
@@ -2331,15 +2286,15 @@ try {
             # also wants a "board is now in user mode" confirmation it can
             # set NIUS_FORCE_POST_VERIFY=1 to opt back in.
             if ($runtimeSharesUploadIdentity -and $env:NIUS_FORCE_POST_VERIFY -ne '1') {
-                Write-NiusHostLine ('[nius] Same-PID runtime/bootloader ({0}); skipping PnP post-verify (set NIUS_FORCE_POST_VERIFY=1 to override)' -f $UsbPid)
-                Write-Stage -Percent 100 -Label 'Firmware streamed over Adafruit serial DFU (same-PID post-verify auto-skipped)'
+                Write-NiusDetail ('[nius] Same-PID runtime/bootloader ({0}); skipping PnP post-verify (set NIUS_FORCE_POST_VERIFY=1 to override)' -f $UsbPid)
+                Write-Stage -Percent 100 -Label 'Upload complete'
                 exit 0
             }
-            Write-Stage -Percent 94 -Label 'Checking whether the board left bootloader mode'
+            Write-Stage -Percent 94 -Label 'Verifying'
             $postUploadState = Wait-ForAdafruitRuntimeTransition -BootloaderVid $UsbVid -BootloaderPid $UsbPid -RuntimeVid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Vid } else { '' }) -RuntimePid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Pid } else { '' })
             if (-not $postUploadState.Success) {
                 if (-not $wildcardAttempted -and $normalizedSdReq -ne '0XFFFE') {
-                    Write-NiusHostLine '[nius] post-verify still sees bootloader; retrying Adafruit serial DFU with wildcard sd-req 0xFFFE'
+                    Write-NiusDetail '[nius] post-verify still sees bootloader; retrying Adafruit serial DFU with wildcard sd-req 0xFFFE'
                     Write-Stage -Percent 95 -Label 'Retrying Adafruit serial DFU with wildcard sd-req'
                     if ($UseTouch1200 -eq 'true') {
                         Invoke-NiusAdafruitDfuRetouchWait -PortName $adafruitControlPort -Reason 'Re-arming 1200 bps before post-verify wildcard retry'
@@ -2359,7 +2314,7 @@ try {
                 }
 
                 if ($uf2Fallback) {
-                    Write-NiusHostLine ('[nius] UF2 fallback: mounted volume detected at {0}; copying UF2 payload' -f $uf2Fallback.Drive)
+                    Write-NiusDetail ('[nius] UF2 fallback: mounted volume detected at {0}; copying UF2 payload' -f $uf2Fallback.Drive)
                     Write-Stage -Percent 98 -Label 'Deploying UF2 fallback payload'
                     Invoke-Uf2Deploy -HexPath $Hex -FamilyId $Uf2FamilyId -DrivePath $uf2Fallback.Drive
                     Write-Stage -Percent 99 -Label 'Checking whether UF2 fallback launched the application'
