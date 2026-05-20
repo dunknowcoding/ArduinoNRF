@@ -1656,7 +1656,7 @@ function Touch-SerialPort1200 {
         }
     }
 
-    Write-NiusHostLine ('[warn] 1200bps touch skipped on {0}: {1}' -f $PortName, $lastError)
+    Write-NiusDetail ('[warn] 1200bps touch skipped on {0}: {1}' -f $PortName, $lastError)
     return $false
 }
 
@@ -1711,7 +1711,7 @@ function Invoke-Touch1200Transition {
             }
         }
         catch {
-            Write-NiusHostLine ('[warn] {0} on {1} did not produce a confirmed bootloader transition: {2}' -f $touchMode.Label, $PortName, $_.Exception.Message) -ForegroundColor DarkYellow
+            Write-NiusDetail ('[warn] {0} on {1} did not produce a confirmed bootloader transition: {2}' -f $touchMode.Label, $PortName, $_.Exception.Message) -ForegroundColor DarkYellow
         }
     }
 
@@ -1764,7 +1764,7 @@ function Invoke-NiusAdafruitDfuRetouchWait {
         -ExpectedModel $ExpectedModel `
         -ExpectedBoardId $ExpectedBoardId
     if (-not $touchTransition.Triggered) {
-        Write-NiusHostLine ('[warn] Re-touch failed on {0}; continuing in case the port is already in bootloader.' -f $PortName)
+        Write-NiusDetail ('[warn] Re-touch failed on {0}; continuing in case the port is already in bootloader.' -f $PortName)
         return $false
     }
     return $true
@@ -2163,14 +2163,14 @@ try {
                 }
             }
             else {
-                Write-NiusHostLine ('[warn] Unable to confirm 1200 bps touch on {0}; proceeding with a direct serial DFU attempt in case the board is already in bootloader mode.' -f $adafruitControlPort) -ForegroundColor DarkYellow
+                Write-NiusDetail ('[warn] Unable to confirm 1200 bps touch on {0}; proceeding with a direct serial DFU attempt in case the board is already in bootloader mode.' -f $adafruitControlPort) -ForegroundColor DarkYellow
             }
             if ($touchPrepared -and -not $bootloaderTransitionConfirmed -and $BootloaderMode -eq 'adafruit-dfu' -and $env:NIUS_ENABLE_SECOND_TOUCH_PASS -eq '1') {
                 $halfPost = [int][Math]::Max(900, [Math]::Floor((Get-NiusPostTouchSleepMilliseconds) * 0.42))
                 Start-Sleep -Milliseconds $halfPost
                 Write-NiusDetail '[nius] Automatic second 1200bps touch pass (buttonless path; firmware debounce / USB settle).' -ForegroundColor DarkGray
                 if (-not (Touch-SerialPort1200 -PortName $adafruitControlPort)) {
-                    Write-NiusHostLine ('[warn] Second touch pass failed on {0} (USB may be re-enumerating); continuing with post-touch wait.' -f $adafruitControlPort) -ForegroundColor DarkYellow
+                    Write-NiusDetail ('[warn] Second touch pass failed on {0} (USB may be re-enumerating); continuing with post-touch wait.' -f $adafruitControlPort) -ForegroundColor DarkYellow
                 }
             }
         } else {
@@ -2183,7 +2183,7 @@ try {
                 Wait-SerialPortResetCycle -PortName $adafruitControlPort -Purpose '1200 bps touch reset cycle'
             }
             catch {
-                Write-NiusHostLine ('[warn] No confirmed USB reset cycle observed on {0} after touch: {1}' -f $adafruitControlPort, $_.Exception.Message) -ForegroundColor DarkYellow
+                Write-NiusDetail ('[warn] No confirmed USB reset cycle observed on {0} after touch: {1}' -f $adafruitControlPort, $_.Exception.Message) -ForegroundColor DarkYellow
                 Write-NiusDetail ('[nius] Continuing with a direct serial DFU attempt on {0} because this board reuses the same COM identity in runtime and bootloader.' -f $adafruitControlPort) -ForegroundColor DarkGray
             }
         }
@@ -2214,7 +2214,7 @@ try {
                 $recoveredAfterRetouch = $false
                 if ($UseTouch1200 -eq 'true' -and (Test-NiusAdafruitDfuFailureNeedsAutoRetouch -Failure $fail)) {
                     Write-NiusDetail '[nius] Serial DFU failed; automatic re-touch + one repeat (same sd-req, buttonless recovery).' -ForegroundColor Yellow
-                    Invoke-NiusAdafruitDfuRetouchWait `
+                    $null = Invoke-NiusAdafruitDfuRetouchWait `
                         -PortName $adafruitControlPort `
                         -Reason 'Auto re-touch before repeating adafruit-nrfutil serial DFU' `
                         -BootloaderVid $UsbVid `
@@ -2264,7 +2264,7 @@ try {
                     Write-NiusDetail '[nius] Adafruit serial DFU transfer failed; retrying with wildcard sd-req 0xFFFE'
                     Write-Stage -Percent 90 -Label 'Finalizing'
                     if ($UseTouch1200 -eq 'true') {
-                        Invoke-NiusAdafruitDfuRetouchWait -PortName $adafruitControlPort -Reason 'Re-arming 1200 bps before wildcard sd-req retry (board may have left bootloader after failed transfer)'
+                        $null = Invoke-NiusAdafruitDfuRetouchWait -PortName $adafruitControlPort -Reason 'Re-arming 1200 bps before wildcard sd-req retry (board may have left bootloader after failed transfer)'
                     }
                     Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq '0xFFFE'
                     $wildcardAttempted = $true
@@ -2297,7 +2297,7 @@ try {
                     Write-NiusDetail '[nius] post-verify still sees bootloader; retrying Adafruit serial DFU with wildcard sd-req 0xFFFE'
                     Write-Stage -Percent 95 -Label 'Retrying Adafruit serial DFU with wildcard sd-req'
                     if ($UseTouch1200 -eq 'true') {
-                        Invoke-NiusAdafruitDfuRetouchWait -PortName $adafruitControlPort -Reason 'Re-arming 1200 bps before post-verify wildcard retry'
+                        $null = Invoke-NiusAdafruitDfuRetouchWait -PortName $adafruitControlPort -Reason 'Re-arming 1200 bps before post-verify wildcard retry'
                     }
                     Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq '0xFFFE'
                     $wildcardAttempted = $true
