@@ -181,6 +181,21 @@ function Write-NiusUploadComplete {
     Write-NiusHostLine ''
 }
 
+# Phase timing - always appended to %TEMP%\nius_upload_timing.log so a single
+# real upload reveals where the wall-clock goes (connect vs genpkg vs transfer)
+# without needing verbose console output. Cheap; no-op before the banner sets
+# the start time.
+function Write-NiusTiming {
+    param([string]$Label)
+    try {
+        if (-not $script:NiusUploadStartUtc) { return }
+        $ms = [int](([datetime]::UtcNow - $script:NiusUploadStartUtc).TotalMilliseconds)
+        Add-Content -LiteralPath (Join-Path $env:TEMP 'nius_upload_timing.log') -Value ('+{0,6} ms  {1}' -f $ms, $Label) -ErrorAction SilentlyContinue
+    }
+    catch {
+    }
+}
+
 # Internal section header - verbose only.
 function Write-Section {
     param([string]$Label)
@@ -1020,12 +1035,14 @@ function Invoke-AdafruitDfuDeploy {
     }
     $genpkgArgs += @('--application', $HexPath, $zipPath)
 
+    Write-NiusTiming 'deploy-enter (genpkg start)'
     if ($script:NiusVerbose) { Write-Stage -Percent 55 -Label 'Generating Adafruit DFU package (genpkg)' }
     Invoke-CommandChecked -Exe $tool -Arguments $genpkgArgs -FailureKind 'adafruit-genpkg' -ProgressPercent 60 -ProgressLabel 'genpkg synthesizing DFU package'
 
     if (-not (Test-Path -LiteralPath $zipPath)) {
         throw ('adafruit-nrfutil genpkg did not produce expected output: {0}' -f $zipPath)
     }
+    Write-NiusTiming 'genpkg-done'
 
     try {
         $serialReadyMs = 12000
@@ -1039,6 +1056,7 @@ function Invoke-AdafruitDfuDeploy {
     } catch {
         Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output $_.Exception.Message -Exe $tool)
     }
+    Write-NiusTiming 'serial-ready'
 
     # Derive the real firmware size so the progress bar can track transferred
     # bytes instead of guessing. adafruit-nrfutil sends one HCI data frame per
@@ -1052,7 +1070,9 @@ function Invoke-AdafruitDfuDeploy {
     # nrfutil streams '#' frame markers (see Invoke-CommandChecked byteProgress).
     $startDetail = if ($fwBytes -gt 0) { '0.0/{0} KB' -f [Math]::Round($fwBytes / 1024.0, 1) } else { '' }
     Write-Stage -Percent 0 -Label 'Uploading' -Detail $startDetail
+    Write-NiusTiming 'transfer-start'
     Invoke-CommandChecked -Exe $tool -Arguments @('--verbose', 'dfu', 'serial', '-pkg', $zipPath, '-p', $Port, '-b', [string]$BaudRate, '-sb') -FailureKind 'adafruit-dfu' -ProgressPercent 90 -ProgressLabel 'Uploading' -TotalFrames $totalFrames -FirmwareBytes $fwBytes
+    Write-NiusTiming 'transfer-done'
 }
 
 function Get-NiusDfuFirmwareInfo {
@@ -1175,32 +1195,16 @@ function Invoke-CommandChecked {
     if ($FailureKind -eq 'adafruit-dfu' -and $idleMs -gt 0) {
         $streamSync = [hashtable]::Synchronized(@{
                 Lines = [System.Collections.ArrayList]::Synchronized((New-Object System.Collections.ArrayList))
+                Out = New-Object System.Text.StringBuilder
                 LastUtc = [datetime]::UtcNow
                 IdleResetOnAnyLine = [bool]$idleResetOnAnyLine
                 Hashes = 0
             })
 
-        $idleSrcOut = 'nius-adf-out-' + ([Guid]::NewGuid().ToString('n'))
         $idleSrcErr = 'nius-adf-err-' + ([Guid]::NewGuid().ToString('n'))
 
-        $null = Register-ObjectEvent -InputObject $process -EventName OutputDataReceived -SourceIdentifier $idleSrcOut -MessageData $streamSync -Action {
-            $ea = $EventArgs
-            if ($null -ne $ea.Data -and $ea.Data.Length -gt 0) {
-                $sync = $Event.MessageData
-                [void]$sync.Lines.Add($ea.Data)
-                $trimmed = $ea.Data.TrimStart()
-                # adafruit-nrfutil echoes one '#' per 512 B DFU frame, newline
-                # every 40 frames. Count pure-'#' lines to drive the byte bar.
-                $hashOnly = $ea.Data.Trim()
-                if ($hashOnly.Length -gt 0 -and $hashOnly -match '^#+$') {
-                    $sync.Hashes += $hashOnly.Length
-                }
-                if ($sync.IdleResetOnAnyLine -or ($trimmed -notmatch '^(?i)(DEBUG|INFO)\s')) {
-                    $sync.LastUtc = [datetime]::UtcNow
-                }
-            }
-        }
-
+        # stderr stays line-based: adafruit-nrfutil's DEBUG/INFO verbose logs go
+        # here and feed the idle watchdog.
         $null = Register-ObjectEvent -InputObject $process -EventName ErrorDataReceived -SourceIdentifier $idleSrcErr -MessageData $streamSync -Action {
             $ea = $EventArgs
             if ($null -ne $ea.Data -and $ea.Data.Length -gt 0) {
@@ -1213,7 +1217,40 @@ function Invoke-CommandChecked {
             }
         }
 
-        $process.BeginOutputReadLine()
+        # stdout is read RAW on a background runspace rather than line-by-line.
+        # adafruit-nrfutil prints one '#' per 512 B DFU frame but only emits a
+        # newline every 40 frames, so a line reader sees progress just once per
+        # ~20 KB (~4-5 updates total). Reading raw bytes lets us count every
+        # frame and render a smooth 0-10-...-100 bar. Each '#' also refreshes
+        # the idle clock, and all bytes are captured for failure-text scanning.
+        $stdoutReaderScript = {
+            param($proc, $sync)
+            try {
+                $sr = $proc.StandardOutput
+                $buf = New-Object char[] 512
+                while ($true) {
+                    $n = $sr.Read($buf, 0, $buf.Length)
+                    if ($n -le 0) { break }
+                    $h = 0
+                    for ($i = 0; $i -lt $n; $i++) {
+                        $c = $buf[$i]
+                        [void]$sync.Out.Append($c)
+                        if ($c -eq [char]0x23) { $h++ }
+                    }
+                    if ($h -gt 0) { $sync.Hashes = [int]$sync.Hashes + $h }
+                    $sync.LastUtc = [datetime]::UtcNow
+                }
+            }
+            catch {
+            }
+        }
+        $stdoutRunspace = [runspacefactory]::CreateRunspace()
+        $stdoutRunspace.Open()
+        $stdoutReader = [powershell]::Create()
+        $stdoutReader.Runspace = $stdoutRunspace
+        $null = $stdoutReader.AddScript($stdoutReaderScript).AddArgument($process).AddArgument($streamSync)
+        $stdoutAsync = $stdoutReader.BeginInvoke()
+
         $process.BeginErrorReadLine()
 
         try {
@@ -1250,16 +1287,16 @@ function Invoke-CommandChecked {
                 }
 
                 if ($byteProgress) {
-                    # Real byte-based bar: map streamed frames onto 0..98% and
-                    # only emit a line when we cross a new 20% band, so the IDE
-                    # console shows ~5-6 clean lines instead of a flood.
+                    # Real byte-based bar: map streamed frames onto 0..100% and
+                    # emit a line each time we cross a new 10% band, so the IDE
+                    # console shows the 0-10-20-...-100 steps (~11 lines).
                     $done = [int]$streamSync.Hashes
                     $frac = if ($TotalFrames -gt 0) { $done / [double]$TotalFrames } else { 0 }
                     if ($frac -lt 0) { $frac = 0 }
                     if ($frac -gt 1) { $frac = 1 }
                     $pct = [int][Math]::Floor($frac * 100)
                     if ($pct -gt 98) { $pct = 98 }
-                    $band = [int][Math]::Floor($pct / 20)
+                    $band = [int][Math]::Floor($pct / 10)
                     if ($band -gt $lastShownBand) {
                         $lastShownBand = $band
                         $sentKb = [Math]::Round(($frac * $FirmwareBytes) / 1024.0, 1)
@@ -1290,6 +1327,26 @@ function Invoke-CommandChecked {
                 catch {
                 }
             }
+            # Drain/stop the raw stdout reader runspace (it ends on stdout EOF,
+            # which follows process exit; cap the wait so a stuck pipe can't hang).
+            try {
+                if ($null -ne $stdoutReader) {
+                    if (-not $stdoutAsync.AsyncWaitHandle.WaitOne(2000)) {
+                        $stdoutReader.Stop()
+                    }
+                    $stdoutReader.Dispose()
+                }
+            }
+            catch {
+            }
+            try {
+                if ($null -ne $stdoutRunspace) {
+                    $stdoutRunspace.Close()
+                    $stdoutRunspace.Dispose()
+                }
+            }
+            catch {
+            }
             Start-Sleep -Milliseconds 120
         }
 
@@ -1297,7 +1354,9 @@ function Invoke-CommandChecked {
             $null = $process.WaitForExit(0)
         }
 
-        $output = (@($streamSync.Lines) -join [Environment]::NewLine).Trim()
+        $stdoutText = ''
+        try { $stdoutText = $streamSync.Out.ToString() } catch { }
+        $output = (($stdoutText, (@($streamSync.Lines) -join [Environment]::NewLine)) -join [Environment]::NewLine).Trim()
     }
     else {
         while ($true) {
@@ -1708,35 +1767,31 @@ function Touch-SerialPort1200 {
             }
         }
 
-        $job = Start-Job -ScriptBlock $touchSb -ArgumentList $PortName, $BaudRate
-        $completed = Wait-Job -Job $job -Timeout $openTimeoutSec
+        # Run the pulse on a background runspace (a thread), not Start-Job (which
+        # cold-starts a whole PowerShell *process*, ~1-3 s each and the dominant
+        # cost of the touch). A runspace still lets us bail if SerialPort.Open()
+        # wedges: WaitOne() with a timeout, then Stop().
+        $ps = [powershell]::Create()
+        $null = $ps.AddScript($touchSb).AddArgument($PortName).AddArgument($BaudRate)
+        $async = $ps.BeginInvoke()
+        $completed = $async.AsyncWaitHandle.WaitOne([int]($openTimeoutSec * 1000))
         if (-not $completed) {
-            try {
-                Stop-Job -Job $job -Force -ErrorAction SilentlyContinue
-            }
-            catch {
-            }
-            try {
-                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-            }
-            catch {
-            }
+            try { $ps.Stop() } catch { }
+            try { $ps.Dispose() } catch { }
             return $false
         }
 
-        $recv = $null
+        $recv = $false
         try {
-            $recv = Receive-Job -Job $job -ErrorAction SilentlyContinue
+            $result = $ps.EndInvoke($async)
+            $vals = @($result | Where-Object { $_ -is [bool] })
+            if ($vals.Count -gt 0) { $recv = [bool]$vals[$vals.Count - 1] }
         }
         catch {
             $recv = $false
         }
         finally {
-            try {
-                Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-            }
-            catch {
-            }
+            try { $ps.Dispose() } catch { }
         }
 
         return [bool]$recv
@@ -1809,18 +1864,42 @@ function Invoke-Touch1200Transition {
         [string]$ExpectedBoardId = ''
     )
 
+    # Order matters for speed: the plain "single 1200 touch" is what actually
+    # triggers the Adafruit-fork clone bootloader; the legacy 115200->1200
+    # prepulse variant does not, and used to run first and burn a full timeout
+    # before we fell through to the one that works. Try the working one first;
+    # keep the legacy prepulse only as a fallback for other boards.
     $touchModes = @(
-        [pscustomobject]@{
-            Label = 'legacy 115200->1200 touch'
-            IncludePrepulse115200 = $true
-        },
         [pscustomobject]@{
             Label = 'single 1200 touch'
             IncludePrepulse115200 = $false
+        },
+        [pscustomobject]@{
+            Label = 'legacy 115200->1200 touch'
+            IncludePrepulse115200 = $true
         }
     )
 
+    # Per-mode transition-detect timeout. The old 12 s default meant a first
+    # touch whose detach we missed cost 12 s before falling to the next mode -
+    # the dominant chunk of "connect" time. Empirically this board needs two
+    # touch attempts: the FIRST mode's detection always times out and the SECOND
+    # confirms, so we keep the first-mode wait short. A real transition lands in
+    # 1-2 s; override via NIUS_TOUCH_TRANSITION_TIMEOUT_MS.
+    $perModeTimeoutMs = 2500
+    $o = $env:NIUS_TOUCH_TRANSITION_TIMEOUT_MS
+    if (-not [string]::IsNullOrWhiteSpace($o)) {
+        $tt = -1
+        if ([int]::TryParse($o, [ref]$tt) -and $tt -ge 800) { $perModeTimeoutMs = $tt }
+    }
+
+    # The cached serial inventory was populated by pre-touch port resolution on
+    # the stable runtime port set; drop it now so anything that re-queries after
+    # the board resets/re-enumerates sees fresh data.
+    Clear-SerialPortInventoryCache
+
     foreach ($touchMode in $touchModes) {
+        Write-NiusTiming ('touch mode start: {0}' -f $touchMode.Label)
         if (-not (Touch-SerialPort1200 -PortName $PortName -IncludePrepulse115200:$touchMode.IncludePrepulse115200)) {
             continue
         }
@@ -1836,18 +1915,21 @@ function Invoke-Touch1200Transition {
                     -ExpectedLabel $ExpectedLabel `
                     -ExpectedModel $ExpectedModel `
                     -ExpectedBoardId $ExpectedBoardId `
+                    -TimeoutMs $perModeTimeoutMs `
                     -Purpose $touchMode.Label | Out-Null
             }
             else {
                 Wait-SerialPortResetCycle -PortName $PortName -Purpose $touchMode.Label
             }
 
+            Write-NiusTiming ('touch mode confirmed: {0}' -f $touchMode.Label)
             return [pscustomobject]@{
                 Triggered = $true
                 Candidate = $touchMode
             }
         }
         catch {
+            Write-NiusTiming ('touch mode timed out: {0}' -f $touchMode.Label)
             Write-NiusDetail ('[warn] {0} on {1} did not produce a confirmed bootloader transition: {2}' -f $touchMode.Label, $PortName, $_.Exception.Message) -ForegroundColor DarkYellow
         }
     }
@@ -1973,10 +2055,17 @@ function Test-SerialPortPnpPresent {
         return $false
     }
     $normalizedPort = $PortName.Trim().ToUpperInvariant()
-    $count = @(Get-SerialPortInventory | Where-Object {
-        ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $normalizedPort
-    }).Count
-    return $count -gt 0
+    # Fast presence check via GetPortNames() (an instant registry read of
+    # HKLM\HARDWARE\DEVICEMAP\SERIALCOMM) instead of the ~1-3 s Win32_SerialPort
+    # WMI query. This runs in the tight 70 ms detach/reattach poll, so the WMI
+    # cost there used to slow the effective poll to seconds and miss the brief
+    # same-PID re-enumeration, forcing a full touch-mode timeout.
+    foreach ($n in [System.IO.Ports.SerialPort]::GetPortNames()) {
+        if (([string]$n).Trim().ToUpperInvariant() -eq $normalizedPort) {
+            return $true
+        }
+    }
+    return $false
 }
 
 function Get-SerialPortUsableState {
@@ -1991,10 +2080,16 @@ function Get-SerialPortUsableState {
     }
 
     $normalizedPort = $PortName.Trim().ToUpperInvariant()
-    $portRecord = @(Get-SerialPortInventory | Where-Object {
-        ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $normalizedPort
-    } | Select-Object -First 1)
-    if (-not $portRecord) {
+    # Fast presence via GetPortNames() (see Test-SerialPortPnpPresent); the
+    # openability probe below is what actually matters and is unchanged.
+    $present = $false
+    foreach ($n in [System.IO.Ports.SerialPort]::GetPortNames()) {
+        if (([string]$n).Trim().ToUpperInvariant() -eq $normalizedPort) {
+            $present = $true
+            break
+        }
+    }
+    if (-not $present) {
         return [pscustomobject]@{
             Present = $false
             Openable = $false
@@ -2139,39 +2234,49 @@ function Wait-SamePidAdafruitBootloaderTransition {
     $lastIssue = 'port stayed present'
     $lastSnapshot = $null
     $sawDetach = $false
+    $lastSnapshotAt = [datetime]::MinValue
 
     while ((Get-Date) -lt $deadline) {
         # PnP-only: do NOT open the port - opening at 115200 baud would send
         # SET_LINE_CODING(115200) to the firmware and cancel the pending 1200bps touch.
+        # This presence check is now fast (GetPortNames), so the 70 ms poll
+        # actually catches the brief same-PID detach -> reset-cycle.
         $portPresent = Test-SerialPortPnpPresent -PortName $PortName
         if (-not $portPresent) {
             $sawDetach = $true
             $lastIssue = 'port detached'
         }
 
-        $lastSnapshot = Get-AdafruitRuntimeSnapshot -BootloaderVid $BootloaderVid -BootloaderPid $BootloaderPid -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid
-        $uf2Probe = $null
-        try {
-            $uf2Probe = Get-Uf2ProbeSummary -ExpectedLabel $ExpectedLabel -ExpectedModel $ExpectedModel -ExpectedBoardId $ExpectedBoardId
-        }
-        catch {
-            $uf2Probe = $null
-        }
-
-        $strongBootloaderEvidence = ($lastSnapshot.StorageInterfaceCount -gt 0) -or ($null -ne $uf2Probe)
-        if ($strongBootloaderEvidence -and $portPresent) {
-            return [pscustomobject]@{
-                Mode = 'bootloader-evidence'
-                Summary = $lastSnapshot.Summary
-                Uf2 = $uf2Probe
-            }
-        }
-
+        # Primary, cheap signal: detached then back == bootloader re-enumerated.
         if ($sawDetach -and $portPresent) {
             return [pscustomobject]@{
                 Mode = 'reset-cycle'
                 Summary = if ($lastSnapshot) { $lastSnapshot.Summary } else { '' }
-                Uf2 = $uf2Probe
+                Uf2 = $null
+            }
+        }
+
+        # Secondary signal (MSC/UF2 evidence) for boards that don't show a clean
+        # detach. The USB-tree / WMI snapshot is expensive (~1 s), so throttle it
+        # to ~1 Hz instead of running it every 70 ms poll.
+        if (((Get-Date) - $lastSnapshotAt).TotalMilliseconds -ge 1000) {
+            $lastSnapshotAt = Get-Date
+            $lastSnapshot = Get-AdafruitRuntimeSnapshot -BootloaderVid $BootloaderVid -BootloaderPid $BootloaderPid -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid
+            $uf2Probe = $null
+            try {
+                $uf2Probe = Get-Uf2ProbeSummary -ExpectedLabel $ExpectedLabel -ExpectedModel $ExpectedModel -ExpectedBoardId $ExpectedBoardId
+            }
+            catch {
+                $uf2Probe = $null
+            }
+
+            $strongBootloaderEvidence = ($lastSnapshot.StorageInterfaceCount -gt 0) -or ($null -ne $uf2Probe)
+            if ($strongBootloaderEvidence -and $portPresent) {
+                return [pscustomobject]@{
+                    Mode = 'bootloader-evidence'
+                    Summary = $lastSnapshot.Summary
+                    Uf2 = $uf2Probe
+                }
             }
         }
 
@@ -2182,7 +2287,10 @@ function Wait-SamePidAdafruitBootloaderTransition {
             $nextProgressAt = (Get-Date).AddMilliseconds(2500)
         }
 
-        Start-Sleep -Milliseconds 220
+        # Poll fast: a same-PID clone can detach and re-enumerate the bootloader
+        # CDC in well under 200 ms, and missing that brief detach is what used to
+        # force a full-timeout fallback to the next touch mode.
+        Start-Sleep -Milliseconds 70
     }
 
     $summary = if ($lastSnapshot) { $lastSnapshot.Summary } else { 'snapshot unavailable' }
@@ -2193,8 +2301,10 @@ $toolPath = [System.IO.Path]::GetFullPath($Tool)
 try {
     Assert-ToolExists -Path $toolPath
     Write-Banner -BoardName $Board
+    Write-NiusTiming 'banner done'
     Write-Section -Label 'transport handshake initialized'
     $expectedRuntimeIdentity = Resolve-ExpectedRuntimeUsbIdentity -BoardName $Board
+    Write-NiusTiming 'runtime identity resolved'
     $effectiveRuntimeUsbVid = if ($expectedRuntimeIdentity) { [string]$expectedRuntimeIdentity.Vid } else { '' }
     $effectiveRuntimeUsbPid = if ($expectedRuntimeIdentity) { [string]$expectedRuntimeIdentity.Pid } else { '' }
     if (-not [string]::IsNullOrWhiteSpace($RuntimeUsbPid)) {
@@ -2210,6 +2320,7 @@ try {
     $adafruitControlPort = $Port
     $controlPortAlreadyBootloader = $false
     if (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid) -and -not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid)) {
+        Write-NiusTiming 'port resolution start'
         $portResolution = Resolve-AdafruitSerialControlPort -SelectedPort $Port -RuntimeVid $effectiveRuntimeUsbVid -RuntimePid $effectiveRuntimeUsbPid
         if (-not $portResolution) {
             $portResolution = Resolve-AdafruitSerialControlPortWithBoardIdentity -SelectedPort $Port -BoardName $Board
@@ -2291,6 +2402,7 @@ try {
         }
     }
 
+    Write-NiusTiming 'identity/bootloader checks done'
     if ($Mode -eq 'dfu') {
         Assert-InputArtifact -Path $Hex -Label 'hex'
 
@@ -2396,6 +2508,7 @@ try {
                 # stably openable instead of always burning the full window.
                 Wait-NiusBootloaderPortSettled -PortName $adafruitControlPort -CeilingMs (Get-NiusPostTouchSleepMilliseconds)
             }
+            Write-NiusTiming 'connect: touch + settle done'
         }
         if ($touchPrepared -and $BootloaderMode -eq 'adafruit-dfu') {
             Write-NiusDetail '[nius] DFU: progress ~90% only means nrfutil is in serial DFU wait/transfer (host-side); MCU may still be in application if 1200/DTR reset did not arm yet).' -ForegroundColor DarkGray

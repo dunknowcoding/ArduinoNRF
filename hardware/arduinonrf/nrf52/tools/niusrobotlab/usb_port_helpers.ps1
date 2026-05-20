@@ -1,5 +1,20 @@
+$script:NiusSerialInventoryCache = $null
 function Get-SerialPortInventory {
-    return @(Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue)
+    # Win32_SerialPort is a ~1-3 s WMI query. The pre-touch port-resolution
+    # helpers call this several times in a row on a stable (not-yet-touched)
+    # port set, so cache the result and reuse it. All hot detach/settle loops
+    # use the instant [SerialPort]::GetPortNames() instead, never this, so the
+    # cache can't go stale under them. Clear-SerialPortInventoryCache is called
+    # right before the 1200 bps touch so any later call re-queries fresh.
+    param([switch]$Fresh)
+    if ($Fresh -or $null -eq $script:NiusSerialInventoryCache) {
+        $script:NiusSerialInventoryCache = @(Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue)
+    }
+    return $script:NiusSerialInventoryCache
+}
+
+function Clear-SerialPortInventoryCache {
+    $script:NiusSerialInventoryCache = $null
 }
 
 function Get-RuntimeUsbIdentityCandidates {
