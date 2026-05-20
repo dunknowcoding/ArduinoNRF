@@ -231,6 +231,7 @@ try {
             if ($LogTraffic) {
                 Write-Host ('[tcp->serial] {0}' -f (Format-Bytes -Buffer $buffer -Length $fromTcp))
             }
+            Write-BridgeLog ('gdb->mcu {0}B: {1}' -f $fromTcp, (Format-Bytes -Buffer $buffer -Length ([Math]::Min($fromTcp, 96))))
 
             $serial.Write($buffer, 0, $fromTcp)
             $didWork = $true
@@ -244,6 +245,7 @@ try {
                 if ($LogTraffic) {
                     Write-Host ('[serial->tcp] {0}' -f (Format-Bytes -Buffer $buffer -Length $fromSerial))
                 }
+                Write-BridgeLog ('mcu->gdb {0}B: {1}' -f $fromSerial, (Format-Bytes -Buffer $buffer -Length ([Math]::Min($fromSerial, 96))))
 
                 $networkStream.Write($buffer, 0, $fromSerial)
                 $networkStream.Flush()

@@ -494,7 +494,16 @@ void NrfGdbStubClass::poll() {
     if (!enabled()) {
         return;
     }
-    nrfUsbdDriver().poll();
+    // CRITICAL: pump irqHandler(), not poll(). While the stub is halted it masks
+    // the USBD NVIC IRQ, so the hardware ISR can't run. The host->device (OUT)
+    // draining - EVENTS_EPDATA -> TASKS_STARTEPOUT -> EVENTS_ENDEPOUT -> rx ring -
+    // lives ONLY in irqHandler(); poll() services device->host (IN) but never
+    // drains OUT. Calling poll() alone meant GDB's RSP packets were never read
+    // off the service CDC: the OUT endpoint stayed full, host writes stalled
+    // ("semaphore timeout"), and GDB saw the connection close. Manually pumping
+    // irqHandler() (safe precisely because the IRQ is masked) drains OUT so the
+    // stub actually receives commands.
+    nrfUsbdDriver().irqHandler();
 }
 
 bool NrfGdbStubClass::enabled() const {

@@ -40,6 +40,12 @@ void setup() {
     delay(WAIT_MS);
   }
 
+  // If a previous debug session left a breadcrumb and the watchdog reset the
+  // board, print it for diagnostics, then clear it and CONTINUE to the
+  // breakpoint. (We must not park here: the stub now feeds the watchdog while
+  // halted, so waiting for the debugger no longer causes a reset loop, and a
+  // terminal park would stop the board from ever reaching the breakpoint -
+  // leaving GDB with nothing to talk to.)
   const uint8_t breadcrumb = nrfGdbStubBreadcrumb();
   if (Watchdog.causedReset() && breadcrumb != 0U) {
     Serial.print("gdbstub breadcrumb 0x");
@@ -50,9 +56,6 @@ void setup() {
     printTrace();
     nrfGdbStubClearBreadcrumb();
     nrfUsbdClearPollTrace();
-    while (true) {
-      delay(WAIT_MS);
-    }
   }
 
   Watchdog.begin(WATCHDOG_TIMEOUT_MS);
