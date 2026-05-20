@@ -187,6 +187,9 @@ function Write-NiusUploadComplete {
 # the start time.
 function Write-NiusTiming {
     param([string]$Label)
+    # Off by default; opt in with NIUS_UPLOAD_TIMING=1 to profile where the
+    # upload wall-clock goes (connect vs touch vs genpkg vs transfer).
+    if ($env:NIUS_UPLOAD_TIMING -ne '1') { return }
     try {
         if (-not $script:NiusUploadStartUtc) { return }
         $ms = [int](([datetime]::UtcNow - $script:NiusUploadStartUtc).TotalMilliseconds)
@@ -2235,13 +2238,18 @@ function Wait-SamePidAdafruitBootloaderTransition {
     $lastSnapshot = $null
     $sawDetach = $false
     $lastSnapshotAt = [datetime]::MinValue
+    $normalizedPort = $PortName.Trim().ToUpperInvariant()
 
     while ((Get-Date) -lt $deadline) {
         # PnP-only: do NOT open the port - opening at 115200 baud would send
         # SET_LINE_CODING(115200) to the firmware and cancel the pending 1200bps touch.
-        # This presence check is now fast (GetPortNames), so the 70 ms poll
-        # actually catches the brief same-PID detach -> reset-cycle.
-        $portPresent = Test-SerialPortPnpPresent -PortName $PortName
+        # Use the INSTANT, always-fresh GetPortNames() (reads SERIALCOMM) rather
+        # than the cached Win32_SerialPort inventory: the cache, once populated,
+        # returned a frozen "present" for the whole loop so the brief same-PID
+        # detach was never seen and the reset-cycle never fired -> the touch
+        # mode timed out and we fell through to a slow retry. GetPortNames is
+        # sub-millisecond, so the fast poll genuinely catches the detach.
+        $portPresent = (@([System.IO.Ports.SerialPort]::GetPortNames() | ForEach-Object { $_.Trim().ToUpperInvariant() }) -contains $normalizedPort)
         if (-not $portPresent) {
             $sawDetach = $true
             $lastIssue = 'port detached'
