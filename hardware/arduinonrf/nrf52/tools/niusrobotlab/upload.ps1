@@ -2117,11 +2117,11 @@ try {
 
         $autoMode = ($BootloaderMode -eq 'auto' -or $UsbVid -eq 'auto' -or $UsbPid -eq 'auto')
         if ($autoMode) {
-            Write-Stage -Percent 5 -Label 'Auto-detecting bootloader on connected board'
+            Write-Stage -Percent 5 -Label 'Connecting'
             $resolved = Resolve-AutoBootloader -DfuToolPath $toolPath -Attempts 2 -DelayMs 200
             if (-not $resolved.Resolved -and $UseTouch1200 -eq 'true') {
                 Stop-NiusLingeringAdafruitNrfutil -Phase touch
-                Write-Stage -Percent 10 -Label 'Bootloader not yet visible; arming 1200 bps trigger'
+                Write-Stage -Percent 10 -Label 'Entering bootloader'
                 if (-not (Touch-SerialPort1200 -PortName $adafruitControlPort)) {
                     Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output ('Unable to trigger 1200 bps touch on {0}; the service/user CDC port may be missing or busy.' -f $adafruitControlPort) -Exe $toolPath)
                 }
@@ -2152,14 +2152,14 @@ try {
         $touchPrepared = $false
         $bootloaderTransitionConfirmed = $false
         if ($BootloaderMode -eq 'adafruit-dfu' -and $UseTouch1200 -eq 'true' -and $controlPortAlreadyBootloader) {
-            Write-Stage -Percent 10 -Label ('USB trigger bypassed; {0} is already the bootloader/service upload port' -f $adafruitControlPort)
+            Write-Stage -Percent 10 -Label 'Entering bootloader'
         } elseif ($UseTouch1200 -eq 'true') {
             Stop-NiusLingeringAdafruitNrfutil -Phase touch
             if ($runtimeSharesUploadIdentity -and $BootloaderMode -eq 'adafruit-dfu') {
-                Write-Stage -Percent 10 -Label ('Arming 1200 bps bootloader trigger on same-PID runtime port {0}' -f $adafruitControlPort)
+                Write-Stage -Percent 10 -Label 'Entering bootloader'
             }
             else {
-                Write-Stage -Percent 10 -Label 'Arming 1200 bps bootloader trigger'
+                Write-Stage -Percent 10 -Label 'Entering bootloader'
             }
             $touchTransitionResult = Invoke-Touch1200Transition `
                 -PortName $adafruitControlPort `
@@ -2189,7 +2189,7 @@ try {
                 }
             }
         } else {
-            Write-Stage -Percent 10 -Label 'USB trigger bypassed by recipe'
+            Write-Stage -Percent 10 -Label 'Entering bootloader'
         }
 
         # Wait for the board to enter bootloader after the 1200 bps touch.
@@ -2220,7 +2220,7 @@ try {
             }
             $wildcardAttempted = $normalizedSdReq -eq '0XFFFE'
 
-            Write-Stage -Percent 50 -Label ('Streaming firmware over Adafruit serial DFU on {0}' -f $adafruitControlPort)
+            Write-Stage -Percent 50 -Label 'Uploading'
             try {
                 Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq $SdReq
             } catch {
@@ -2310,32 +2310,32 @@ try {
             if (-not $postUploadState.Success) {
                 if (-not $wildcardAttempted -and $normalizedSdReq -ne '0XFFFE') {
                     Write-NiusDetail '[nius] post-verify still sees bootloader; retrying Adafruit serial DFU with wildcard sd-req 0xFFFE'
-                    Write-Stage -Percent 95 -Label 'Retrying Adafruit serial DFU with wildcard sd-req'
+                    Write-Stage -Percent 95 -Label 'Finalizing'
                     if ($UseTouch1200 -eq 'true') {
                         $null = Invoke-NiusAdafruitDfuRetouchWait -PortName $adafruitControlPort -Reason 'Re-arming 1200 bps before post-verify wildcard retry'
                     }
                     Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq '0xFFFE'
                     $wildcardAttempted = $true
                     $normalizedSdReq = '0XFFFE'
-                    Write-Stage -Percent 96 -Label 'Re-checking whether wildcard sd-req launched the application'
+                    Write-Stage -Percent 96 -Label 'Verifying'
                     $postUploadState = Wait-ForAdafruitRuntimeTransition -BootloaderVid $UsbVid -BootloaderPid $UsbPid -RuntimeVid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Vid } else { '' }) -RuntimePid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Pid } else { '' })
                 }
             }
             if (-not $postUploadState.Success) {
                 $uf2Fallback = $null
                 if (-not [string]::IsNullOrWhiteSpace($Uf2FamilyId)) {
-                    Write-Stage -Percent 97 -Label 'Board still in bootloader; probing for a mounted UF2 volume'
+                    Write-Stage -Percent 97 -Label 'Finalizing'
                     $uf2Fallback = Wait-ForUf2Volume -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId -Attempts 30 -DelayMs 500
                 }
 
                 if ($uf2Fallback) {
                     Write-NiusDetail ('[nius] UF2 fallback: mounted volume detected at {0}; copying UF2 payload' -f $uf2Fallback.Drive)
-                    Write-Stage -Percent 98 -Label 'Deploying UF2 fallback payload'
+                    Write-Stage -Percent 98 -Label 'Uploading'
                     Invoke-Uf2Deploy -HexPath $Hex -FamilyId $Uf2FamilyId -DrivePath $uf2Fallback.Drive
-                    Write-Stage -Percent 99 -Label 'Checking whether UF2 fallback launched the application'
+                    Write-Stage -Percent 99 -Label 'Verifying'
                     $postFallbackState = Wait-ForAdafruitRuntimeTransition -BootloaderVid $UsbVid -BootloaderPid $UsbPid -RuntimeVid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Vid } else { '' }) -RuntimePid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Pid } else { '' })
                     if ($postFallbackState.Success) {
-                        Write-Stage -Percent 100 -Label 'Firmware deployed over Adafruit DFU with UF2 fallback'
+                        Write-Stage -Percent 100 -Label 'Upload complete'
                         exit 0
                     }
 
@@ -2350,19 +2350,19 @@ try {
                 }
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'post-verify' -ExitCode 1 -Output $summary -Exe $toolPath)
             }
-            Write-Stage -Percent 100 -Label 'Firmware deployed over Adafruit serial DFU'
+            Write-Stage -Percent 100 -Label 'Upload complete'
             exit 0
         }
 
         $detectedBootloader = $null
         if ($WaitForUploadPort -eq 'true') {
-            Write-Stage -Percent 32 -Label 'Scanning for bootloader endpoint'
+            Write-Stage -Percent 32 -Label 'Connecting'
             $detectedBootloader = Wait-ForUsbBootloader -Exe $toolPath -UsbVid $UsbVid -UsbPid $UsbPid -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId
             if (-not $detectedBootloader) {
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output '' -Exe $toolPath)
             }
         } else {
-            Write-Stage -Percent 32 -Label 'Using declared bootloader path'
+            Write-Stage -Percent 32 -Label 'Connecting'
             $detectedBootloader = [pscustomobject]@{
                 Kind = if ($BootloaderMode -eq 'uf2') { 'uf2' } else { 'dfu' }
                 Summary = if ($BootloaderMode -eq 'uf2') { Get-Uf2ProbeSummary -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId } else { $null }
@@ -2374,9 +2374,9 @@ try {
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu' -ExitCode 1 -Output ('Selected bootloader mode requires UF2, but the board presented Nordic DFU {0}:{1} instead.' -f $UsbVid, $UsbPid) -Exe $toolPath)
             }
 
-            Write-Stage -Percent 68 -Label 'Synthesizing UF2 payload'
+            Write-Stage -Percent 68 -Label 'Uploading'
             Invoke-Uf2Deploy -HexPath $Hex -FamilyId $Uf2FamilyId -DrivePath $detectedBootloader.Summary.Drive
-            Write-Stage -Percent 100 -Label 'Firmware deployed over USB UF2'
+            Write-Stage -Percent 100 -Label 'Upload complete'
             exit 0
         }
 
@@ -2384,17 +2384,17 @@ try {
             Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu' -ExitCode 1 -Output ('Selected bootloader mode requires Nordic DFU, but the board presented UF2 volume {0} with model "{1}" and board-id "{2}" instead.' -f $detectedBootloader.Summary.Drive, $detectedBootloader.Summary.Model, $detectedBootloader.Summary.BoardId) -Exe $toolPath)
         }
 
-        Write-Stage -Percent 68 -Label 'Streaming firmware over Nordic DFU'
+        Write-Stage -Percent 68 -Label 'Uploading'
         Invoke-CommandChecked -Exe $toolPath -Arguments @('-v', '-d', ('{0}:{1}' -f $UsbVid, $UsbPid), '-a', $Alt, '-D', $Bin, '-R') -FailureKind 'dfu' -ProgressPercent 78 -ProgressLabel 'Nordic DFU transfer active'
-        Write-Stage -Percent 100 -Label 'Firmware deployed over USB DFU'
+        Write-Stage -Percent 100 -Label 'Upload complete'
         exit 0
     }
 
     Assert-InputArtifact -Path $Hex -Label 'hex'
-    Write-Stage -Percent 10 -Label 'Attaching CMSIS-DAP / OpenOCD bridge'
-    Write-Stage -Percent 42 -Label 'Programming target via SWD'
+    Write-Stage -Percent 10 -Label 'Connecting'
+    Write-Stage -Percent 42 -Label 'Uploading'
     Invoke-CommandChecked -Exe $toolPath -Arguments @('-s', $ScriptRoot, '-f', $Config, '-c', ('init; halt; program {{{0}}} verify reset exit' -f $Hex)) -FailureKind 'openocd' -ProgressPercent 76 -ProgressLabel 'SWD flash transaction active'
-    Write-Stage -Percent 100 -Label 'Firmware deployed over SWD'
+    Write-Stage -Percent 100 -Label 'Upload complete'
 }
 catch {
     $failure = $_.Exception.Message
