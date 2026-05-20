@@ -51,6 +51,17 @@ constexpr uint32_t USBD_NVIC_REG_OFFSET = (USBD_NVIC_IRQ / 32U) * 4U;
 constexpr uint32_t USBD_NVIC_BIT = 1UL << (USBD_NVIC_IRQ % 32U);
 constexpr uint32_t POWER_BASE = 0x40000000UL;
 constexpr uint32_t POWER_GPREGRET = 0x51CUL;
+
+// Hardware watchdog (WDT). A sketch may arm it before hitting a breakpoint
+// (the UsbGdbStubBreakpoint example does, as a brick-recovery safety). Once
+// started the WDT cannot be stopped, so while the stub is halted waiting for /
+// talking to GDB we must reload it or the board resets out from under the
+// debug session after the timeout. RREN enables RR0 only; writing the reload
+// magic to RR0 kicks it. Harmless no-op when the WDT isn't running.
+constexpr uint32_t WDT_BASE = 0x40010000UL;
+constexpr uint32_t WDT_RUNSTATUS = 0x400UL;
+constexpr uint32_t WDT_RR0 = 0x600UL;
+constexpr uint32_t WDT_RELOAD_MAGIC = 0x6E524635UL;
 constexpr uint32_t ARM_FLASH_END = 0x00100000UL;
 constexpr uint32_t ARM_SRAM_BASE = 0x20000000UL;
 constexpr uint32_t ARM_SRAM_END = 0x20040000UL;
@@ -68,6 +79,15 @@ constexpr uint32_t GDB_USB_REENUMERATION_SPINS = 3200000UL;
 
 inline volatile uint32_t &mem32(uint32_t address) {
     return *reinterpret_cast<volatile uint32_t *>(address);
+}
+
+// Reload the hardware watchdog if (and only if) it is running, so a sketch
+// that armed the WDT before a breakpoint doesn't reset the board while the
+// stub is halted waiting for or servicing GDB.
+inline void feedWatchdogIfRunning() {
+    if (*reinterpret_cast<volatile uint32_t *>(WDT_BASE + WDT_RUNSTATUS) != 0UL) {
+        *reinterpret_cast<volatile uint32_t *>(WDT_BASE + WDT_RR0) = WDT_RELOAD_MAGIC;
+    }
 }
 
 inline volatile uint32_t &powerReg32(uint32_t offset) {
@@ -607,6 +627,10 @@ void NrfGdbStubClass::sendStop() {
 
 bool NrfGdbStubClass::readPacket(char *packet, size_t capacity) {
     while (true) {
+        // This is the indefinite idle spin while halted at a breakpoint waiting
+        // for the next GDB byte. Keep any sketch-armed watchdog fed here, or it
+        // would reset the board before the user even attaches.
+        feedWatchdogIfRunning();
         poll();
         const int value = nrfUsbdDriver().read();
         if (value < 0) {
@@ -905,10 +929,15 @@ void NrfGdbStubClass::serve() {
     char response[REPLY_CAPACITY] = {0};
 
     while (!USBDevice.connected()) {
+        feedWatchdogIfRunning();
         poll();
     }
 
     while (true) {
+        // Halted at a breakpoint or between GDB packets: keep any sketch-armed
+        // watchdog alive so the debug session isn't reset out from under us.
+        feedWatchdogIfRunning();
+
         if (stopPending_) {
             sendStop();
             stopPending_ = false;
