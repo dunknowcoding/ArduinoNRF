@@ -610,6 +610,11 @@ void NrfUsbdDriver::begin() {
     started_ = true;
     attached_ = true;
     resetConnectionState();
+    // The USBD peripheral completed its post-ENABLE READY handshake above, so it
+    // is ready for endpoint activity regardless of bus state. Set it here (and
+    // only clear it in end()), because the one-shot EVENTCAUSE.READY event was
+    // already consumed during the ENABLE handshake and won't fire again.
+    ready_ = true;
     enablePullup(attached_ && effectiveVbusDetected());
     configStartMillis_ = millis();
     diagResetAtUsbdBeginStage(6UL);
@@ -622,6 +627,7 @@ void NrfUsbdDriver::end() {
     enabled_ = false;
     started_ = false;
     attached_ = false;
+    ready_ = false;
     resetConnectionState();
     pendingControlOut_ = ControlOutTransfer::None;
     controlOutExpected_ = 0U;
@@ -1175,7 +1181,15 @@ NrfUsbdStatus NrfUsbdDriver::status() const {
 }
 
 void NrfUsbdDriver::resetConnectionState() {
-    ready_ = false;
+    // NOTE: do NOT clear ready_ here. ready_ reflects the USBD *peripheral*
+    // readiness after ENABLE (the one-shot EVENTCAUSE.READY observed in begin()),
+    // not the USB *bus* connection. resetConnectionState() runs on every USB bus
+    // reset (which the host issues during normal enumeration); clearing ready_
+    // there left it false forever - begin() consumes the READY event, so the
+    // processBusState path that sets ready_ never fires again - so
+    // USBDevice.connected() never returned true and any sketch that waits on it
+    // (e.g. the GDB-stub debug example) hung before reaching the breakpoint.
+    // ready_ is owned by begin() (set true) and end() (set false).
     configured_ = false;
     suspended_ = false;
     cdcActive_ = false;
