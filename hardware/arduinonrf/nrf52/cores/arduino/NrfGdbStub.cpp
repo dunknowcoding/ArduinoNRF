@@ -504,6 +504,14 @@ void NrfGdbStubClass::poll() {
     // irqHandler() (safe precisely because the IRQ is masked) drains OUT so the
     // stub actually receives commands.
     nrfUsbdDriver().irqHandler();
+    // This silicon doesn't signal a received OUT packet via EPDATASTATUS, so
+    // the busy-poll can't wait for an event — speculatively drain the service
+    // CDC OUT endpoint each poll to pick up GDB's RSP bytes.
+    nrfUsbdDriver().drainServiceDataOut();
+    // Brick-prevention: if the host opens the service CDC at 1200 bps while we
+    // are halted (an upload's DFU touch), reboot to the bootloader. millis() is
+    // frozen here, so the driver debounces this with a poll-iteration counter.
+    nrfUsbdDriver().serviceHaltedTouch();
 }
 
 bool NrfGdbStubClass::enabled() const {
@@ -948,8 +956,14 @@ void NrfGdbStubClass::serve() {
         feedWatchdogIfRunning();
 
         if (stopPending_) {
-            sendStop();
+            // Only send the stop reply if gdb resumed us and is waiting for it.
+            // On initial attach gdb expects to drive (qSupported/?/...), so an
+            // unsolicited stop would desync the whole session.
+            if (expectStopReply_) {
+                sendStop();
+            }
             stopPending_ = false;
+            expectStopReply_ = false;
         }
 
         if (!readPacket(packet, sizeof(packet))) {
@@ -959,6 +973,7 @@ void NrfGdbStubClass::serve() {
         // Continue without stepping: c, c<addr>, vCont;c
         if (packet[0] == 'c' || strncmp(packet, "vCont;c", 7) == 0) {
             disableMonStep();
+            expectStopReply_ = true; // gdb will block waiting for the next stop
             continueFrom(packet);
             active_ = false;
             return;
@@ -970,6 +985,7 @@ void NrfGdbStubClass::serve() {
         if (packet[0] == 's' || strncmp(packet, "vCont;s", 7) == 0 ||
             strncmp(packet, "vCont;S", 7) == 0) {
             enableMonStep();
+            expectStopReply_ = true; // gdb blocks waiting for the post-step stop
             // Pass plain 'c' so continueFrom does the register write-back
             // without trying to skip a faulting instruction.
             char nudge[2] = {'c', '\0'};
@@ -1006,10 +1022,14 @@ void NrfGdbStubClass::handleException(uint32_t *stack, uint32_t excReturn, uint3
     if (usbIrqWasEnabled_) {
         mem32(NVIC_ICER_BASE + USBD_NVIC_REG_OFFSET) = USBD_NVIC_BIT;
     }
+    // Arm the millis-free 1200-bps touch watchdog so a halted board stays
+    // reflashable: an upload can always reboot us into the bootloader.
+    nrfUsbdDriver().setStubHalted(true);
     capture(stack, excReturn, exceptionNumber);
     active_ = true;
     stopPending_ = true;
     serve();
+    nrfUsbdDriver().setStubHalted(false);
     if (usbIrqWasEnabled_) {
         mem32(NVIC_ISER_BASE + USBD_NVIC_REG_OFFSET) = USBD_NVIC_BIT;
     }

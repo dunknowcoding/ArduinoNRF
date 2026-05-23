@@ -74,6 +74,11 @@ private:
     bool active_ = false;
     bool noAckMode_ = false;
     bool stopPending_ = false;
+    // Only volunteer a stop reply ($Sxx) when gdb is actually waiting for one,
+    // i.e. after it resumed us with c/s/vCont. On the INITIAL attach gdb drives
+    // the handshake (qSupported, ?, ...) and an unsolicited stop shifts every
+    // response by one packet, desyncing the session. Set when we resume.
+    bool expectStopReply_ = false;
     bool fpbReady_ = false;
     bool usbIrqWasEnabled_ = false;
     uint8_t signal_ = 5;

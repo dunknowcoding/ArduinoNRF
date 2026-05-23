@@ -80,6 +80,33 @@ public:
     void setUserLineState(bool dtr, bool rts);
     NrfUsbdStatus status() const;
 
+    // Brick-prevention for the GDB stub. While the stub is halted in DebugMon
+    // (highest priority), SysTick is blocked so millis() is frozen and the
+    // normal millis-gated 1200-bps touch can never arm — an upload to a halted
+    // board then stalls mid-DFU and corrupts flash. setStubHalted(true) tells
+    // the driver it is being pumped from the halted stub loop;
+    // serviceHaltedTouch() is called every poll iteration and reboots to the
+    // bootloader on a host 1200-bps open, using a poll-iteration counter
+    // instead of millis() so it works while time is frozen.
+    void setStubHalted(bool halted);
+    void serviceHaltedTouch();
+
+    // ISR-mode TX nudge for the GDB stub. While halted the stub lets the USBD
+    // ISR service USB (instead of busy-polling, which raced on EVENTS_EPDATA /
+    // EasyDMA). The ISR advances an in-flight IN transfer on ENDEPIN, but a TX
+    // the stub just queued has no pending USB event to start it, so the stub
+    // calls this to kick serviceDataIn(). It is PRIMASK-guarded so it cannot
+    // race the USBD ISR's own serviceDataIn().
+    void kickServiceDataIn();
+
+    // Speculatively drain the service-CDC OUT endpoint. This silicon does not
+    // signal a received host OUT packet via EPDATASTATUS/EVENTS_EPDATA, so the
+    // halted GDB stub cannot wait for an event — it calls this each poll to
+    // STARTEPOUT and copy any bytes the host delivered into the rx ring. Only
+    // safe to call post-enumeration (it breaks SET_CONFIGURATION if used during
+    // enumeration), which is exactly the stub-halted context.
+    void drainServiceDataOut();
+
 private:
     enum class ControlOutTransfer : uint8_t {
         None,
@@ -159,6 +186,9 @@ private:
     volatile bool pendingAddressValid_ = false;
     volatile bool serviceSawNonResetBaud_ = false;
     volatile bool serviceTouchPending_ = false;
+    volatile bool stubHalted_ = false;
+    volatile uint32_t haltTouchTicks_ = 0;
+    uint32_t lastDrainSig_ = 0; // dedup signature for speculative OUT drain
     volatile uint32_t serviceTouchResetMillis_ = 0;
     volatile uint8_t ignoredResetTouchCount_ = 0;
     volatile uint8_t address_ = 0;

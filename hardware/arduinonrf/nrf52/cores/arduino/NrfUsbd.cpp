@@ -57,7 +57,20 @@ constexpr uint32_t EVENTS_EP0DATADONE = 0x128UL;
 constexpr uint32_t EVENTS_USBEVENT = 0x158UL;
 constexpr uint32_t EVENTS_EP0SETUP = 0x15CUL;
 constexpr uint32_t EVENTS_EPDATA = 0x160UL;
-constexpr uint32_t EPDATASTATUS = 0x468UL;
+// nRF52840 USBD register map: EPSTATUS=0x468 (which endpoints' EasyDMA was
+// captured), EPDATASTATUS=0x46C (which endpoints had an acknowledged host data
+// transfer — the "this OUT packet is buffered, drain it" signal), USBADDR=0x470.
+// This was previously 0x468, i.e. the firmware read EPSTATUS by mistake: its
+// EP0 bits (EPIN0=bit0, EPOUT0=bit16) read as a constant 0x00010001 and its
+// EPOUT data bits never reflect a freshly-arrived host packet, so the EPDATA
+// handler never drained the service-CDC OUT endpoint — every host write NAK'd
+// once the internal buffer filled. (Verified over SWD: with a packet buffered,
+// 0x468 reads 0 while 0x46C has EPOUT2/bit18 set.) IN and enumeration were
+// unaffected because they key off ENDEPIN/EP0 events, not EPDATASTATUS, which
+// is why the GDB stub — the first feature to receive bulk OUT on the service
+// CDC — was the first to expose this.
+constexpr uint32_t EPSTATUS = 0x468UL;
+constexpr uint32_t EPDATASTATUS = 0x46CUL;
 constexpr uint32_t INTENSET = 0x304UL;
 constexpr uint32_t INTENCLR = 0x308UL;
 constexpr uint32_t EVENTCAUSE = 0x400UL;
@@ -118,10 +131,19 @@ constexpr uint32_t USBD_INT_ENDEPOUT4_MASK = (1UL << 17);  // nRF52840 PS: ENDEP
 constexpr uint32_t USBD_INT_USBEVENT_MASK = (1UL << 22);
 constexpr uint32_t USBD_INT_EP0SETUP_MASK = (1UL << 23);
 // EPDATA fires whenever a non-EP0 IN/OUT transaction completes on the wire.
-// EPDATASTATUS bits 16..22 indicate which OUT endpoint received data and
-// needs an EasyDMA START to copy it from the internal buffer to RAM.
+// EPDATASTATUS bits 17..23 indicate which OUT endpoint received data and
+// needs an EasyDMA START to copy it from the internal buffer to RAM
+// (Nordic: USBD_EPDATASTATUS_EPOUT1_Pos=17, EPOUT2=18 ... EPOUT7=23). The
+// per-endpoint bit is therefore (17 + endpoint - 1) == (16 + endpoint).
+// NOTE: this base was 16 (giving bit 17 for EP2 instead of 18), so the
+// service-CDC OUT data-ready bit never matched, queueDataOut() was never
+// called, and the first host OUT packet sat undrained in the endpoint's
+// internal buffer — wedging every subsequent OUT into a NAK. That was the
+// real cause of the GDB-stub "service CDC OUT NAKs while halted" bug: the
+// stub is simply the first feature to receive bulk OUT on the service CDC
+// (uploads only use EP0 control), so the latent off-by-one finally bit.
 constexpr uint32_t USBD_INT_EPDATA_MASK = (1UL << 24);
-constexpr uint32_t EPDATASTATUS_OUT_BASE_BIT = 16U;
+constexpr uint32_t EPDATASTATUS_OUT_BASE_BIT = 17U;
 constexpr uint32_t USBD_EVENTCAUSE_SUSPEND_MASK = (1UL << 8);
 constexpr uint32_t USBD_EVENTCAUSE_RESUME_MASK = (1UL << 9);
 constexpr uint32_t USBD_EVENTCAUSE_READY_MASK = (1UL << 11);
@@ -151,6 +173,14 @@ constexpr uint32_t USBD_DTOGGLE_VALUE_POS = 8UL;
 constexpr uint32_t USBD_DTOGGLE_NOP = 0UL;
 constexpr uint32_t USBD_DTOGGLE_DATA0 = 1UL;
 constexpr uint32_t USBD_START_CAPTURE_TIMEOUT_SPINS = 100000UL;
+// Bounded spin for flush() while the GDB stub is halted (ISR-mode). Generous —
+// the USBD ISR drains the IN ring between kicks — but finite so a host that
+// stops reading can't wedge the stub forever.
+constexpr uint32_t USBD_STUB_FLUSH_SPINS = 2000000UL;
+// Bounded wait for the speculative OUT drain's STARTEPOUT to complete (ENDEPOUT)
+// each stub poll. Short — the EasyDMA copy is a few cycles when data is present,
+// and on an empty endpoint ENDEPOUT still fires with AMOUNT=0.
+constexpr uint32_t USBD_DRAIN_OUT_SPINS = 4000UL;
 constexpr size_t USBD_RING_BUFFER_SIZE = 256U;
 #if defined(NRF_USBD_CONFIG_TIMEOUT_RESET_MS)
 constexpr uint32_t USBD_CONFIG_TIMEOUT_RESET_MS = static_cast<uint32_t>(NRF_USBD_CONFIG_TIMEOUT_RESET_MS);
@@ -810,6 +840,43 @@ void NrfUsbdDriver::irqHandler() {
     }
 }
 
+// Number of consecutive halted-pump iterations the host must hold the service
+// CDC open at 1200 bps before we reboot to the bootloader. The stub busy-loops
+// the pump, so this is a debounce against a transient line-coding readout, not
+// a wall-clock interval (millis() is frozen during the DebugMon halt).
+constexpr uint32_t USBD_HALT_TOUCH_CONFIRM_TICKS = 1024UL;
+
+void NrfUsbdDriver::setStubHalted(bool halted) {
+    stubHalted_ = halted;
+    haltTouchTicks_ = 0UL;
+}
+
+void NrfUsbdDriver::serviceHaltedTouch() {
+    // Only meaningful while the GDB stub is pumping us from its halted loop.
+    if (!stubHalted_) {
+        haltTouchTicks_ = 0UL;
+        return;
+    }
+    // The host opens the service CDC at exactly 1200 bps solely to request the
+    // DFU touch; nothing in a debug session legitimately does. lineCoding_ is
+    // updated from EP0 control-OUT (completeControlOutTransfer), which still
+    // completes while halted — that is how re-enumeration finishes — so this
+    // signal is observable even though millis() is frozen.
+    const bool touchSignal = enabled_ && configured_ &&
+        nrfSystemProfile().prefersUsbUpload && lineCoding_.baudRate == 1200UL;
+    if (!touchSignal) {
+        haltTouchTicks_ = 0UL;
+        return;
+    }
+    if (++haltTouchTicks_ >= USBD_HALT_TOUCH_CONFIRM_TICKS) {
+        // Reboot into the bootloader so the upload's DFU write lands on the
+        // bootloader (which programs flash safely) instead of stalling against a
+        // halted app and leaving a partially-written, bricked image.
+        markResetCause(USBD_DIAG_CAUSE_1200_TOUCH);
+        requestBootloaderReset();  // never returns
+    }
+}
+
 void NrfUsbdDriver::processBusState(bool hasVbus) {
     if (reg32(USBD_BASE, EVENTS_USBRESET) != 0UL) {
         reg32(USBD_BASE, EVENTS_USBRESET) = 0UL;
@@ -895,21 +962,32 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         // Else: spurious EP0DATADONE with neither side tracked — drop silently.
     }
 
-    // EPDATA fires when the USB peripheral has buffered an OUT packet from
-    // the host. EPDATASTATUS bits 16..22 mark which OUT endpoints have data
-    // pending; for each, we trigger an EasyDMA STARTEPOUT (queueDataOut). The
-    // peripheral then fires ENDEPOUT once the bytes are in RAM, and the
-    // existing branch below copies them into the rx ring buffer.
+    // A host OUT packet has been buffered when its EPDATASTATUS OUT bit is set
+    // (EPOUT1..7 = bits 17..23); for each we trigger an EasyDMA STARTEPOUT
+    // (queueDataOut), then ENDEPOUT fires and the branch below copies the bytes
+    // into the rx ring.
+    //
+    // We drain straight from EPDATASTATUS rather than gating on EVENTS_EPDATA.
+    // EVENTS_EPDATA is only an aggregate "a data endpoint advanced" wake. The
+    // GDB stub services USB by busy-polling this handler (USBD IRQ masked while
+    // halted) thousands of times faster than the ISR would, and that polling
+    // can sample EVENTS_EPDATA in the brief window *before* the per-endpoint
+    // OUT bit latches in EPDATASTATUS — or after a prior pass already cleared
+    // the aggregate event. Gating the drain on EVENTS_EPDATA then strands the
+    // received packet in the endpoint's internal buffer with its EPDATASTATUS
+    // bit stuck set, so every subsequent OUT is NAK'd and host writes time out.
+    // (This never bit the normal USBD ISR because interrupt latency lets
+    // EPDATASTATUS latch before the handler reads it.) Reading EPDATASTATUS
+    // directly each pass recovers any such packet on the very next poll. This
+    // was the real cause of the "service CDC OUT NAKs while the stub is halted"
+    // bug — the GDB stub is the first feature to receive bulk OUT on the
+    // service CDC, so the latent busy-poll race finally surfaced.
+    // Clear the aggregate EPDATA event for hygiene, but do NOT touch
+    // EPDATASTATUS here: drainServiceDataOut() consumes the EPOUT2 data flag, and
+    // clearing it out from under that read would steal the only "OUT packet
+    // arrived" signal this silicon gives us.
     if (reg32(USBD_BASE, EVENTS_EPDATA) != 0UL) {
         reg32(USBD_BASE, EVENTS_EPDATA) = 0UL;
-        const uint32_t status = reg32(USBD_BASE, EPDATASTATUS);
-        reg32(USBD_BASE, EPDATASTATUS) = status; // clear by write-back
-        if (configured_ && (status & (1UL << (EPDATASTATUS_OUT_BASE_BIT + SERVICE_DATA_EP - 1U))) != 0UL) {
-            queueDataOut(false);
-        }
-        if (configured_ && userPortEnabled() && (status & (1UL << (EPDATASTATUS_OUT_BASE_BIT + USER_DATA_EP - 1U))) != 0UL) {
-            queueDataOut(true);
-        }
     }
 
     if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {
@@ -1063,6 +1141,14 @@ size_t NrfUsbdDriver::write(uint8_t value) {
         serviceDataIn(false);
     }
     return 1U;
+}
+
+void NrfUsbdDriver::kickServiceDataIn() {
+    if (!enabled_ || !configured_ || suspended_) {
+        return;
+    }
+    serviceDataIn(false);
+    serviceNotificationIn(false);
 }
 
 bool NrfUsbdDriver::sendInPacket(uint8_t endpoint, const void *data, size_t length) {
@@ -1383,11 +1469,8 @@ void NrfUsbdDriver::startCdcEndpoints() {
     resetEndpointDataState(epAddressIn(SERVICE_NOTIFICATION_EP));
     resetEndpointDataState(epAddressIn(SERVICE_DATA_EP));
     resetEndpointDataState(epAddressOut(SERVICE_DATA_EP));
-    // Do NOT pre-trigger TASKS_STARTEPOUT here. Per nRF52840 PS, TASKS_STARTEPOUT must
-    // only be issued after EVENTS_EPDATA fires (data in internal USB buffer). Issuing it
-    // preemptively with an empty buffer puts the endpoint into an undefined DMA-pending
-    // state that causes all subsequent OUT packets to be NAK'd (write timeout).
-    // EPOUTEN already arms the endpoint to accept the first incoming OUT packet.
+    // Do NOT pre-trigger TASKS_STARTEPOUT here: with no data yet in the internal
+    // buffer it wedges the endpoint (and during enumeration it breaks config).
     if (userPortEnabled()) {
         reg32(USBD_BASE, EPINEN) |= endpointMask(USER_NOTIFICATION_EP) | endpointMask(USER_DATA_EP);
         reg32(USBD_BASE, EPOUTEN) |= endpointMask(USER_DATA_EP);
@@ -1398,12 +1481,65 @@ void NrfUsbdDriver::startCdcEndpoints() {
     cdcActive_ = true;
 }
 
+// Arm the OUT endpoint's EasyDMA to receive the next host packet directly into
+// our RAM buffer. On this clone the "auto internal-buffer + EPDATASTATUS"
+// reception model never signals (a received packet leaves EVENTS_EPDATA and
+// EPDATASTATUS untouched), so we must explicitly STARTEPOUT to arm reception;
+// the host's data then EasyDMA's into the buffer and EVENTS_ENDEPOUT fires.
+// Asynchronous: ENDEPOUT is serviced (serviceDataOut) and re-armed by the
+// EVENTS_ENDEPOUT handler.
 void NrfUsbdDriver::queueDataOut(bool userPort) {
     const uint8_t endpoint = userPort ? USER_DATA_EP : SERVICE_DATA_EP;
     uint8_t *buffer = userPort ? &userEndpointOutBuffer_[0] : &endpointOutBuffer_[0];
+    reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
     reg32(USBD_BASE, epoutPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(buffer);
     reg32(USBD_BASE, epoutMaxcntOffset(endpoint)) = DATA_EP_MAX_PACKET;
     triggerEndpointStartTask(taskStartEpoutOffset(endpoint));
+}
+
+void NrfUsbdDriver::drainServiceDataOut() {
+    if (!enabled_) {
+        return;
+    }
+    // This silicon gives no usable "OUT packet arrived" signal to a busy-poll:
+    // EPDATASTATUS/EVENTS_EPDATA don't latch a readable bit while running, and
+    // STARTEPOUT on an empty endpoint still fires ENDEPOUT with a STALE AMOUNT
+    // (and does not overwrite the RAM buffer). So we STARTEPOUT speculatively
+    // each poll and detect a real transfer with a sentinel: GDB RSP traffic
+    // never begins with NUL, so we pre-set buffer[0]=0; if EasyDMA actually
+    // received a packet it overwrites byte 0 with '$'/'+'/'-'/0x03, and only
+    // then do we push it. An empty STARTEPOUT leaves the NUL sentinel in place
+    // (its stale AMOUNT is ignored), so no duplicate/garbage reaches the stub.
+    const uint8_t endpoint = SERVICE_DATA_EP;
+    endpointOutBuffer_[0] = 0x00U; // sentinel
+    reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
+    reg32(USBD_BASE, epoutPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(&endpointOutBuffer_[0]);
+    reg32(USBD_BASE, epoutMaxcntOffset(endpoint)) = DATA_EP_MAX_PACKET;
+    triggerEndpointStartTask(taskStartEpoutOffset(endpoint));
+    for (uint32_t spin = 0UL; spin < USBD_DRAIN_OUT_SPINS; ++spin) {
+        if (reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) != 0UL) {
+            reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
+            const uint32_t amount = reg32(USBD_BASE, epoutAmountOffset(endpoint));
+            if (endpointOutBuffer_[0] != 0x00U && amount != 0UL) {
+                // This silicon re-delivers the same internal buffer on every
+                // STARTEPOUT (no consume signal works), so dedup by content: a
+                // genuinely-new packet differs in length or bytes. With GDB
+                // NoAckMode there are no legitimate back-to-back identical
+                // packets, so skipping repeats is safe and keeps the RSP stream
+                // clean. Signature mixes length + a few bytes.
+                const uint32_t last = (amount > 0U) ? endpointOutBuffer_[amount - 1U] : 0U;
+                const uint32_t sig = amount
+                    ^ (static_cast<uint32_t>(endpointOutBuffer_[0]) << 8)
+                    ^ (static_cast<uint32_t>(endpointOutBuffer_[(amount > 1U) ? 1U : 0U]) << 16)
+                    ^ (last << 24);
+                if (sig != lastDrainSig_) {
+                    lastDrainSig_ = sig;
+                    serviceDataOut(false);
+                }
+            }
+            return;
+        }
+    }
 }
 
 void NrfUsbdDriver::serviceDataOut(bool userPort) {
