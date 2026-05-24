@@ -1058,7 +1058,11 @@ extern "C" __attribute__((naked)) void HardFault_Handler(void) {
         "mrseq r0, msp\n"
         "mrsne r0, psp\n"
         "mov r3, lr\n"
-        "push {r3, r4}\n"
+        // Preserve EXC_RETURN across the bl. push {r3,r4} stored it in the LOW
+        // slot, but pop {r4,lr} restores lr from the HIGH slot -> lr came back
+        // as a garbage callee reg and bx lr faulted (INVSTATE) on resume. lr is
+        // still EXC_RETURN here (only the bl clobbers it), so push it directly.
+        "push {r3, lr}\n"
         "mov r1, lr\n"
         "movs r2, #3\n"
         "bl nrfGdbStubHandleExceptionC\n"
@@ -1090,7 +1094,11 @@ extern "C" __attribute__((naked)) void MemManage_Handler(void) {
         "mrseq r0, msp\n"
         "mrsne r0, psp\n"
         "mov r3, lr\n"
-        "push {r3, r4}\n"
+        // Preserve EXC_RETURN across the bl. push {r3,r4} stored it in the LOW
+        // slot, but pop {r4,lr} restores lr from the HIGH slot -> lr came back
+        // as a garbage callee reg and bx lr faulted (INVSTATE) on resume. lr is
+        // still EXC_RETURN here (only the bl clobbers it), so push it directly.
+        "push {r3, lr}\n"
         "mov r1, lr\n"
         "movs r2, #4\n"
         "bl nrfGdbStubHandleExceptionC\n"
@@ -1122,7 +1130,11 @@ extern "C" __attribute__((naked)) void BusFault_Handler(void) {
         "mrseq r0, msp\n"
         "mrsne r0, psp\n"
         "mov r3, lr\n"
-        "push {r3, r4}\n"
+        // Preserve EXC_RETURN across the bl. push {r3,r4} stored it in the LOW
+        // slot, but pop {r4,lr} restores lr from the HIGH slot -> lr came back
+        // as a garbage callee reg and bx lr faulted (INVSTATE) on resume. lr is
+        // still EXC_RETURN here (only the bl clobbers it), so push it directly.
+        "push {r3, lr}\n"
         "mov r1, lr\n"
         "movs r2, #5\n"
         "bl nrfGdbStubHandleExceptionC\n"
@@ -1154,7 +1166,11 @@ extern "C" __attribute__((naked)) void UsageFault_Handler(void) {
         "mrseq r0, msp\n"
         "mrsne r0, psp\n"
         "mov r3, lr\n"
-        "push {r3, r4}\n"
+        // Preserve EXC_RETURN across the bl. push {r3,r4} stored it in the LOW
+        // slot, but pop {r4,lr} restores lr from the HIGH slot -> lr came back
+        // as a garbage callee reg and bx lr faulted (INVSTATE) on resume. lr is
+        // still EXC_RETURN here (only the bl clobbers it), so push it directly.
+        "push {r3, lr}\n"
         "mov r1, lr\n"
         "movs r2, #6\n"
         "bl nrfGdbStubHandleExceptionC\n"
@@ -1186,7 +1202,11 @@ extern "C" __attribute__((naked)) void DebugMon_Handler(void) {
         "mrseq r0, msp\n"
         "mrsne r0, psp\n"
         "mov r3, lr\n"
-        "push {r3, r4}\n"
+        // Preserve EXC_RETURN across the bl. push {r3,r4} stored it in the LOW
+        // slot, but pop {r4,lr} restores lr from the HIGH slot -> lr came back
+        // as a garbage callee reg and bx lr faulted (INVSTATE) on resume. lr is
+        // still EXC_RETURN here (only the bl clobbers it), so push it directly.
+        "push {r3, lr}\n"
         "mov r1, lr\n"
         "movs r2, #12\n"
         "bl nrfGdbStubHandleExceptionC\n"
