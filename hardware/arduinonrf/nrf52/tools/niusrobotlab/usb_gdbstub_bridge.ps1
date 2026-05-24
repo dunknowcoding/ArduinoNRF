@@ -176,7 +176,11 @@ try {
     $serial = New-Object System.IO.Ports.SerialPort $SerialPort, $BaudRate, ([System.IO.Ports.Parity]::None), 8, ([System.IO.Ports.StopBits]::One)
     $serial.Handshake = [System.IO.Ports.Handshake]::None
     $serial.ReadTimeout = 50
-    $serial.WriteTimeout = 50
+    # Generous write timeout: right after gdb connects, the halted stub may take
+    # a few hundred ms to (re)enumerate and start servicing its CDC OUT endpoint,
+    # during which a host write NAKs. A 50 ms timeout threw mid-handshake and
+    # killed the bridge. The relay loop also retries on a transient timeout.
+    $serial.WriteTimeout = 3000
     $serial.DtrEnable = $true
     $serial.RtsEnable = $true
     Open-NiusSerialWithRetry -Serial $serial
@@ -233,7 +237,24 @@ try {
             }
             Write-BridgeLog ('gdb->mcu {0}B: {1}' -f $fromTcp, (Format-Bytes -Buffer $buffer -Length ([Math]::Min($fromTcp, 96))))
 
-            $serial.Write($buffer, 0, $fromTcp)
+            $writeOk = $false
+            for ($attempt = 0; $attempt -lt 5 -and -not $writeOk; $attempt++) {
+                try {
+                    $serial.Write($buffer, 0, $fromTcp)
+                    $writeOk = $true
+                } catch {
+                    # SerialPort.Write surfaces a write timeout as an IOException
+                    # ("semaphore timeout") wrapped in a MethodInvocationException,
+                    # not System.TimeoutException — so catch broadly. Right after
+                    # gdb connects the halted stub may briefly NAK OUT while it
+                    # (re)enumerates; retry instead of letting the bridge die.
+                    Write-BridgeLog ('serial write failed (attempt {0}): {1}; retrying' -f ($attempt + 1), $_.Exception.Message)
+                    Start-Sleep -Milliseconds 150
+                }
+            }
+            if (-not $writeOk) {
+                Write-BridgeLog 'serial write still timing out after retries; dropping bytes to keep bridge alive'
+            }
             $didWork = $true
         }
 

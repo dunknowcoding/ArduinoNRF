@@ -107,6 +107,10 @@ public:
     // enumeration), which is exactly the stub-halted context.
     void drainServiceDataOut();
 
+    // Prime the CDC OUT endpoints once on stub takeover so the first host OUT is
+    // accepted (this silicon needs an initial STARTEPOUT to arm reception).
+    void armCdcDataOut();
+
 private:
     enum class ControlOutTransfer : uint8_t {
         None,
@@ -131,6 +135,7 @@ private:
     void processBusState(bool hasVbus);
     void startCdcEndpoints();
     void queueDataOut(bool userPort);
+    void fetchOutPacket(uint8_t endpoint, bool userPort, uint32_t statusBit);
     void serviceDataOut(bool userPort);
     void serviceDataIn(bool userPort);
     void serviceNotificationIn(bool userPort);
@@ -188,7 +193,6 @@ private:
     volatile bool serviceTouchPending_ = false;
     volatile bool stubHalted_ = false;
     volatile uint32_t haltTouchTicks_ = 0;
-    uint32_t lastDrainSig_ = 0; // dedup signature for speculative OUT drain
     volatile uint32_t serviceTouchResetMillis_ = 0;
     volatile uint8_t ignoredResetTouchCount_ = 0;
     volatile uint8_t address_ = 0;
