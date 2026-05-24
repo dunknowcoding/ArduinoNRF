@@ -28,6 +28,23 @@ constexpr uint32_t DFSR = 0xE000ED30UL;
 constexpr uint32_t DFSR_HALTED = 0x00000001UL;    // Halt request (BKPT or step).
 constexpr uint32_t DFSR_BKPT = 0x00000002UL;      // BKPT or FPB instruction match.
 
+// System Handler Priority Register 3. Byte 0 holds the DebugMon (exc 12)
+// priority. We pin it to 0 (highest configurable) so that during a single step
+// we can raise BASEPRI to mask the application's interrupts while DebugMon
+// itself is still allowed to fire -- otherwise `stepi` steps into whatever ISR
+// (e.g. SysTick at prio 0xE0) happens to be pending instead of the user's code.
+constexpr uint32_t SHPR3 = 0xE000ED20UL;
+// nRF52840 implements 3 NVIC priority bits, so priorities live in the top 3
+// bits: 0x00,0x20,...,0xE0. BASEPRI=0x20 masks every interrupt of priority
+// >=0x20 (SysTick/RTC1/...) while leaving priority-0 handlers -- the pinned
+// DebugMon -- able to preempt and complete the step. (USBD is prio 0 but stays
+// NVIC-masked across the halt and is inert under NRF_USBD_POLL_ONLY.)
+constexpr uint32_t STEP_BASEPRI = 0x20UL;
+
+inline void setBasepri(uint32_t value) {
+    __asm__ volatile("msr basepri, %0" : : "r"(value) : "memory");
+}
+
 // Cortex-M Flash Patch and Breakpoint unit. Provides up to 6 instruction
 // comparators that halt the CPU into DebugMon_Handler when PC matches a flash
 // address. We use this for GDB's Z0 packet so we never have to NVMC-erase
@@ -394,6 +411,9 @@ void NrfGdbStubClass::init() {
     // TRCENA must be set before any FPB/DWT register write.
     mem32(DEMCR) |= DEMCR_TRCENA | DEMCR_MON_EN;
     mem32(SHCSR) |= SHCSR_MEMFAULTENA | SHCSR_BUSFAULTENA | SHCSR_USGFAULTENA;
+    // Pin DebugMon to the highest configurable priority so a step-time BASEPRI
+    // raise can mask the application's interrupts without masking DebugMon.
+    mem32(SHPR3) &= ~0x000000FFUL;
     fpbInitOnce();
     initialized_ = true;
     writeBreadcrumb(GDB_BREADCRUMB_INIT);
@@ -989,6 +1009,12 @@ void NrfGdbStubClass::serve() {
         if (packet[0] == 's' || strncmp(packet, "vCont;s", 7) == 0 ||
             strncmp(packet, "vCont;S", 7) == 0) {
             enableMonStep();
+            // Mask application interrupts (SysTick/RTC1/...) for the duration of
+            // the single instruction so the step lands on the next user
+            // instruction instead of diving into a pending ISR. DebugMon is
+            // pinned to priority 0 so it still fires to end the step. Cleared on
+            // the next DebugMon entry (top of handleException).
+            setBasepri(STEP_BASEPRI);
             expectStopReply_ = true; // gdb blocks waiting for the post-step stop
             // Pass plain 'c' so continueFrom does the register write-back
             // without trying to skip a faulting instruction.
@@ -1019,6 +1045,10 @@ void NrfGdbStubClass::handleException(uint32_t *stack, uint32_t excReturn, uint3
 
     writeBreadcrumb(GDB_BREADCRUMB_EXCEPTION);
     init();
+    // Drop any step-time interrupt mask raised on the previous resume so the
+    // stub loop (and any subsequent `continue`) runs with interrupts at their
+    // normal levels.
+    setBasepri(0);
     // Mask USBD in NVIC for the duration of the stub session. The peripheral
     // events still latch in EVENTS_*; our explicit poll() services them, so
     // this prevents the ISR from racing the busy-loop reads/writes below.
