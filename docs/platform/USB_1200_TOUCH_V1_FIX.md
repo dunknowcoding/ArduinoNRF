@@ -3,8 +3,8 @@
 This document is the authoritative writeup of why the button-less reflash
 chain (V1: two `compile+upload` cycles on the SAME SERVICE CDC without a
 manual reset) was broken on the AliExpress ProMicro nRF52840 clone, and the
-three firmware patches that fix it. It supersedes the older descriptions in
-`VALIDATION_GUIDE.md` / `README_VALIDATION.md` that called V1 a blocker.
+three firmware patches that fix it. Current status lives in
+[`docs/VALIDATION.md`](../VALIDATION.md).
 
 ## Configuration in scope
 

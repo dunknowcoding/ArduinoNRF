@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Automated checks for docs/USB_SINGLE_CABLE_PLAN.md (compile matrix + ELF layout).
+  Automated single-cable USB checks (compile matrix + ELF layout). See docs/VALIDATION.md.
 
 .DESCRIPTION
   - Uses a sketchbook junction so `arduino-cli` builds against THIS repo under hardware/arduinonrf/nrf52.

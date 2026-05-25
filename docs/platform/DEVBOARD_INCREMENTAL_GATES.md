@@ -2,7 +2,7 @@
 
 Cursor Agent **无法接入你的 USB/COM 硬件**，因此「每一步改完先在板上测到通过」只能由你本地执行；Agent 侧负责：拆小步、给出 **FQBN / 命令 / 期望现象**，并在你回报「闸门 Gx 通过」后再写下一步代码。
 
-下列闸门与 `docs/DUAL_CDC_AND_USB_DEBUG_ROADMAP.md`、`docs/USB_SINGLE_CABLE_PLAN.md` 对齐；**按序号做**，只有通过才进入下一闸门。
+下列闸门与 `docs/VALIDATION.md`、`docs/platform/UPLOAD_BEHAVIOR.md` 对齐；**按序号做**，只有通过才进入下一闸门。
 
 ---
 

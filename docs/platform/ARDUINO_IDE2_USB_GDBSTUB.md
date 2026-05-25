@@ -1,6 +1,6 @@
 # Arduino IDE 2：USB CDC GDB stub 调试（单线）
 
-本文描述在本平台使用 **Build profile → USB CDC GDB stub** 时的推荐顺序；与 `docs/DUAL_CDC_AND_USB_DEBUG_ROADMAP.md` 中的「维护口 / 用户口」分工一致。
+本文描述在本平台使用 **Build profile → USB CDC GDB stub** 时的推荐顺序；与 `docs/VALIDATION.md` 中的「维护口 / 用户口」分工一致。
 
 ## 1. 板卡与编译选项
 

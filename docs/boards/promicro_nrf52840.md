@@ -47,8 +47,8 @@
 ## Notes
 
 - For `promicroserialnosd`, runtime and bootloader phase detection cannot rely on VID/PID alone.
-- The repository no longer claims that this board already has hands-free same-port upload fixed.
-- The current source-of-truth progress docs are:
-  - `docs\USB_SINGLE_CABLE_PLAN.md`
-  - `docs\CURRENT_ACCEPTANCE_REPORT.md`
-  - `docs\platform\UPLOAD_BEHAVIOR.md`
+- Hands-free same-port reupload and single-cable USB-CDC debugging are both verified on this board.
+- The current source-of-truth docs are:
+  - `docs/VALIDATION.md`
+  - `docs/platform/UPLOAD_BEHAVIOR.md`
+  - `docs/platform/USB_1200_TOUCH_V1_FIX.md`
