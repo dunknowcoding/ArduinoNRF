@@ -2310,6 +2310,95 @@ try {
     Assert-ToolExists -Path $toolPath
     Write-Banner -BoardName $Board
     Write-NiusTiming 'banner done'
+
+    # --- Concurrency guard ----------------------------------------------------
+    # Robustness: the user may click Upload again while an upload is still in
+    # flight (e.g. mid-1200-touch or mid-DFU). A second instance racing for the
+    # same COM would interleave touches / DFU frames and can corrupt flash. A
+    # per-port system-wide mutex makes the first upload the sole owner; a
+    # duplicate fails fast BEFORE any touch/port manipulation, so it cannot
+    # disturb the in-flight transfer. The OS releases the mutex when the owning
+    # process exits (covers crashes / killed nrfutil); a later acquirer that
+    # sees the abandoned state simply takes ownership. Disable with
+    # NIUS_DISABLE_UPLOAD_LOCK=1; tune the contention wait via
+    # NIUS_UPLOAD_LOCK_WAIT_MS (default 600 ms: instant when free, brief enough
+    # to fail fast on a real concurrent upload).
+    $script:NiusUploadMutex = $null
+    $script:NiusUploadMutexHeld = $false
+    if ($env:NIUS_DISABLE_UPLOAD_LOCK -ne '1') {
+        $portKey = 'default'
+        if ($Port -match '^(?i)COM\d+$') {
+            $portKey = $Port.Trim().ToUpperInvariant()
+        }
+        elseif (-not [string]::IsNullOrWhiteSpace($Board)) {
+            $portKey = ($Board.Trim() -replace '[^A-Za-z0-9_]', '_')
+        }
+        $mutexName = 'Global\NiusUpload_' + $portKey
+        $lockWaitMs = 600
+        $o = $env:NIUS_UPLOAD_LOCK_WAIT_MS
+        if (-not [string]::IsNullOrWhiteSpace($o)) {
+            $p = -1
+            if ([int]::TryParse($o, [ref]$p) -and $p -ge 0) { $lockWaitMs = $p }
+        }
+        try {
+            $script:NiusUploadMutex = New-Object System.Threading.Mutex($false, $mutexName)
+        }
+        catch {
+            $script:NiusUploadMutex = $null
+        }
+        if ($script:NiusUploadMutex) {
+            try {
+                $script:NiusUploadMutexHeld = $script:NiusUploadMutex.WaitOne($lockWaitMs)
+            }
+            catch [System.Threading.AbandonedMutexException] {
+                # Previous owner exited without releasing (crash / kill). The
+                # wait still grants us ownership; proceed.
+                $script:NiusUploadMutexHeld = $true
+            }
+            if (-not $script:NiusUploadMutexHeld) {
+                Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output (@(
+                            ('Another upload is already in progress on {0}; ignoring this duplicate request.' -f $portKey),
+                            'Wait for the current upload to finish (the board will reboot into the new firmware), then upload again.',
+                            'ZH: This port already has an upload in progress; the duplicate click was ignored. Wait for it to finish, then retry.'
+                        ) -join ' ') -Exe $toolPath)
+            }
+        }
+    }
+    # --------------------------------------------------------------------------
+
+    # --- Yield request to a running USB-CDC GDB-stub bridge -------------------
+    # Upload-during-debug: a debug session's bridge holds the service COM, so our
+    # 1200-touch can't reach the board. Drop a request file; the bridge releases
+    # the port and exits (uploading new firmware ends the debug session anyway).
+    # Then wait briefly for the COM to become openable. Harmless when no bridge
+    # is running. The board's halted-stub touch handler reboots a *paused* debug
+    # target into the bootloader once the touch lands. Disable with
+    # NIUS_DISABLE_BRIDGE_YIELD=1.
+    $script:NiusBridgeYieldFile = $null
+    if ($env:NIUS_DISABLE_BRIDGE_YIELD -ne '1' -and $Port -match '^(?i)COM\d+$') {
+        $yieldKey = $Port.Trim().ToUpperInvariant()
+        $script:NiusBridgeYieldFile = Join-Path $env:TEMP ('nius_gdb_yield_{0}.req' -f $yieldKey)
+        try {
+            Set-Content -LiteralPath $script:NiusBridgeYieldFile -Value ('pid={0} utc={1:o}' -f $PID, [datetime]::UtcNow) -Encoding ascii -ErrorAction SilentlyContinue
+        }
+        catch {
+        }
+        # Wait for a holding bridge (if any) to drop the port. Returns at once
+        # when the COM is already free (no bridge / not debugging).
+        $yieldDeadline = (Get-Date).AddMilliseconds(3500)
+        $waitedForBridge = $false
+        while ((Get-Date) -lt $yieldDeadline) {
+            $st = Get-SerialPortUsableState -PortName $Port
+            if (-not $st.Present -or $st.Openable) { break }
+            $waitedForBridge = $true
+            Start-Sleep -Milliseconds 100
+        }
+        if ($waitedForBridge) {
+            Write-NiusDetail ('[nius] Released {0} from an active debug bridge for upload.' -f $Port) -ForegroundColor DarkGray
+        }
+    }
+    # --------------------------------------------------------------------------
+
     Write-Section -Label 'transport handshake initialized'
     $expectedRuntimeIdentity = Resolve-ExpectedRuntimeUsbIdentity -BoardName $Board
     Write-NiusTiming 'runtime identity resolved'
@@ -2727,4 +2816,20 @@ catch {
 
     Show-FailureReport -Title 'generic' -Summary $failure -Hints @(Get-FailureHints -Kind 'generic' -Output $failure) -Details @(Get-RelevantLogLines -Output $failure)
     exit 1
+}
+finally {
+    # Remove the bridge-yield request so a bridge started later doesn't see a
+    # stale request and release its port. (It is also freshness-gated.)
+    if ($script:NiusBridgeYieldFile) {
+        try { Remove-Item -LiteralPath $script:NiusBridgeYieldFile -Force -ErrorAction SilentlyContinue } catch {}
+    }
+    # Best-effort release of the concurrency lock on the normal-completion path.
+    # On `exit`, crash, or kill the OS releases the named mutex automatically, so
+    # a held lock never wedges future uploads even if this block is skipped.
+    if ($script:NiusUploadMutexHeld -and $script:NiusUploadMutex) {
+        try { $script:NiusUploadMutex.ReleaseMutex() } catch {}
+    }
+    if ($script:NiusUploadMutex) {
+        try { $script:NiusUploadMutex.Dispose() } catch {}
+    }
 }

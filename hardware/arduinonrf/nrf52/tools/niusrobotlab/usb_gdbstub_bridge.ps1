@@ -73,6 +73,29 @@ function Get-AvailableSerialPorts {
     return [System.IO.Ports.SerialPort]::GetPortNames() | Sort-Object
 }
 
+function Test-NiusBridgeYieldRequested {
+    # An upload (upload.ps1) drops a request file when it needs the service COM
+    # back for a 1200-bps touch. We release the port + exit so the touch can
+    # reach the board (a paused debug target's halted-stub touch handler reboots
+    # it into the bootloader). Uploading new firmware ends the debug session, so
+    # exiting is the correct behavior; the IDE re-launches debug afterward.
+    # Freshness-gated so a stale file from a killed upload can't strand a bridge.
+    param([string]$Port)
+    if ([string]::IsNullOrWhiteSpace($Port)) { return $false }
+    if ($env:NIUS_DISABLE_BRIDGE_YIELD -eq '1') { return $false }
+    $key = $Port.Trim().ToUpperInvariant()
+    $f = Join-Path $env:TEMP ('nius_gdb_yield_{0}.req' -f $key)
+    if (-not (Test-Path -LiteralPath $f)) { return $false }
+    try {
+        $age = ((Get-Date) - (Get-Item -LiteralPath $f -ErrorAction Stop).LastWriteTime).TotalSeconds
+        if ($age -gt 45) { return $false }
+    }
+    catch {
+        return $false
+    }
+    return $true
+}
+
 function Write-BridgeDescription {
     $availablePorts = @(Get-AvailableSerialPorts)
 
@@ -214,6 +237,24 @@ try {
     [Console]::Out.WriteLine('Waiting for a GDB client connection...')
     [Console]::Out.Flush()
 
+    # Wait for a gdb client, but stay responsive to an upload's yield request so
+    # a debug session that is merely "armed" (bridge up, no client yet) still
+    # releases the COM for an upload instead of blocking forever on accept.
+    $yielded = $false
+    while (-not $listener.Pending()) {
+        if (Test-NiusBridgeYieldRequested -Port $SerialPort) {
+            $yielded = $true
+            break
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    if ($yielded) {
+        Write-BridgeLog 'upload yield requested before client connect; releasing serial + exiting so the upload can touch the board'
+        [Console]::Out.WriteLine('Info : releasing port for firmware upload')
+        [Console]::Out.Flush()
+        return
+    }
+
     $client = $listener.AcceptTcpClient()
     $client.NoDelay = $true
     $networkStream = $client.GetStream()
@@ -275,6 +316,13 @@ try {
         }
 
         if (-not $didWork) {
+            # An upload needs the COM back: stop relaying, drop the port, exit.
+            # The board reboots into the new firmware, so this debug session is
+            # over anyway; the IDE re-launches debug after the upload.
+            if (Test-NiusBridgeYieldRequested -Port $SerialPort) {
+                Write-BridgeLog 'upload yield requested during session; releasing serial + exiting for the upload'
+                break
+            }
             [System.Threading.Thread]::Sleep(5)
         }
     }
