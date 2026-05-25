@@ -17,6 +17,29 @@ function Clear-SerialPortInventoryCache {
     $script:NiusSerialInventoryCache = $null
 }
 
+$script:NiusPnpDeviceCache = $null
+$script:NiusPnpCacheArmed = $false
+function Set-PnpDeviceCacheArmed {
+    # Get-PnpDevice -PresentOnly is a ~2-3 s full device enumeration; the
+    # pre-touch identity/port checks call it 2-3x for the same VID/PID on a
+    # stable (not-yet-touched) port set, so one cached scan saves several
+    # seconds. Arm ONLY for that pre-touch window. MUST be disarmed before the
+    # 1200 bps touch: the post-touch transition pollers also filter PnP and
+    # need fresh data each iteration (a stale cache would miss the brief
+    # app->bootloader detach on same-PID clones).
+    param([bool]$Armed)
+    $script:NiusPnpCacheArmed = $Armed
+    if (-not $Armed) { $script:NiusPnpDeviceCache = $null }
+}
+function Get-PnpDeviceInventory {
+    if ($script:NiusPnpCacheArmed -and $null -ne $script:NiusPnpDeviceCache) {
+        return $script:NiusPnpDeviceCache
+    }
+    $snap = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)
+    if ($script:NiusPnpCacheArmed) { $script:NiusPnpDeviceCache = $snap }
+    return $snap
+}
+
 function Get-RuntimeUsbIdentityCandidates {
     param([string]$BoardName)
 
@@ -68,7 +91,7 @@ function Get-PnpPortsMatchingBoardRuntimeUsb {
         return @()
     }
 
-    $devices = @(Get-PnpDevice -PresentOnly -Class 'Ports' -ErrorAction SilentlyContinue)
+    $devices = @(Get-PnpDeviceInventory | Where-Object { ([string]$_.Class) -eq 'Ports' })
     $matched = @()
     foreach ($d in $devices) {
         $inst = ([string]$d.InstanceId).ToUpperInvariant()

@@ -588,7 +588,7 @@ function Find-PnpVidPid {
     )
 
     $needle = ('VID_{0}&PID_{1}' -f $VidLetters, $PidLetters).ToUpperInvariant()
-    $candidates = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue
+    $candidates = Get-PnpDeviceInventory
     foreach ($device in $candidates) {
         $hwId = ($device.HardwareID -join ';').ToUpperInvariant()
         if ($hwId -match [Regex]::Escape($needle)) {
@@ -605,7 +605,7 @@ function Get-PnpVidPidMatches {
     )
 
     $needle = ('USB\VID_{0}&PID_{1}' -f $VidLetters, $PidLetters).ToUpperInvariant()
-    $candidates = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)
+    $candidates = @(Get-PnpDeviceInventory)
     return @($candidates | Where-Object {
         $instanceId = ([string]$_.InstanceId).ToUpperInvariant()
         $hardwareId = ([string](($_.HardwareID -join ';'))).ToUpperInvariant()
@@ -1900,6 +1900,9 @@ function Invoke-Touch1200Transition {
     # the stable runtime port set; drop it now so anything that re-queries after
     # the board resets/re-enumerates sees fresh data.
     Clear-SerialPortInventoryCache
+    # Same for the PnP-device snapshot: disarm + drop so the post-touch
+    # transition pollers (which filter PnP every iteration) see fresh data.
+    Set-PnpDeviceCacheArmed -Armed $false
 
     foreach ($touchMode in $touchModes) {
         Write-NiusTiming ('touch mode start: {0}' -f $touchMode.Label)
@@ -2311,6 +2314,12 @@ try {
     Write-Banner -BoardName $Board
     Write-NiusTiming 'banner done'
 
+    # Arm the PnP-device snapshot cache for the pre-touch identity/port checks
+    # (board is on a stable, not-yet-touched port set). Disarmed before the
+    # 1200 touch (next to Clear-SerialPortInventoryCache) so transition polling
+    # re-queries fresh. Saves several seconds of repeated ~2-3 s enumerations.
+    Set-PnpDeviceCacheArmed -Armed $true
+
     # --- Concurrency guard ----------------------------------------------------
     # Robustness: the user may click Upload again while an upload is still in
     # flight (e.g. mid-1200-touch or mid-DFU). A second instance racing for the
@@ -2500,6 +2509,9 @@ try {
     }
 
     Write-NiusTiming 'identity/bootloader checks done'
+    # All PnP-heavy pre-touch identity checks are done; disarm the snapshot cache
+    # (path-independent) so the connect/touch/transition phase re-queries fresh.
+    Set-PnpDeviceCacheArmed -Armed $false
     if ($Mode -eq 'dfu') {
         Assert-InputArtifact -Path $Hex -Label 'hex'
 
