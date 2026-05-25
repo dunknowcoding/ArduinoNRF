@@ -35,6 +35,12 @@ public:
     bool active() const;
     void handleException(uint32_t *stack, uint32_t excReturn, uint32_t exceptionNumber);
 
+    // Async break (IDE 2 "Pause"). While the target runs free, the stub is
+    // dormant -- nothing reads the service CDC. yield() calls this so a host
+    // Ctrl-C/0x03 byte is noticed and turned into a pended DebugMon exception
+    // that halts the target. No-op unless a debug session has resumed us.
+    void serviceAsyncBreak();
+
 private:
     // Hardware breakpoint slot. nRF52840 (Cortex-M4 r0p1) provides 6 instruction
     // comparators in the FPB unit, which we use to satisfy GDB's Z0 packets.
@@ -43,6 +49,15 @@ private:
         uint32_t address;
     };
     static constexpr size_t kFpbMaxSlots = 6;
+
+    // Data watchpoint slot, backed by a Cortex-M4 DWT comparator (4 on this
+    // part). Satisfies GDB's Z2/Z3/Z4 (write/read/access) packets.
+    struct DwtSlot {
+        bool inUse;
+        uint32_t address;
+        uint8_t function; // DWT_FUNCTION FUNCTION value (5 read, 6 write, 7 access)
+    };
+    static constexpr size_t kDwtMaxSlots = 4;
 
     void capture(uint32_t *stack, uint32_t excReturn, uint32_t exceptionNumber);
     void applyRegs();
@@ -59,6 +74,19 @@ private:
     bool fpbInsert(uint32_t address);
     bool fpbRemove(uint32_t address);
     void fpbDisableAll();
+
+    // Z2/Z3/Z4 data watchpoint backing (Cortex-M4 DWT comparators).
+    void dwtInitOnce();
+    bool dwtInsert(uint32_t function, uint32_t address, uint32_t kind);
+    bool dwtRemove(uint32_t function, uint32_t address);
+    void dwtDisableAll();
+    // After a halt, work out whether a DWT watchpoint fired and which address;
+    // fills watchHit*/returns true so sendStop() can emit the watch stop reply.
+    bool detectWatchpointHit();
+
+    // "monitor reset" (qRcmd) warm restart: re-point SP/PC at the app's reset
+    // vector so the next resume re-runs C startup (re-inits .data/.bss, setup()).
+    void performWarmRestart();
 
     // Single step via DEMCR.MON_STEP. Returns from exception with the bit set;
     // the next instruction re-enters DebugMon_Handler.
@@ -80,13 +108,26 @@ private:
     // response by one packet, desyncing the session. Set when we resume.
     bool expectStopReply_ = false;
     bool fpbReady_ = false;
+    bool dwtReady_ = false;
     bool usbIrqWasEnabled_ = false;
+    // Set once gdb has resumed us at least once (real session live). Gates the
+    // async-break peek so we never pend a halt before a session exists.
+    volatile bool sessionLive_ = false;
+    // Raised by serviceAsyncBreak() when it consumes a host 0x03 and pends a
+    // DebugMon halt; capture() turns it into a SIGINT stop.
+    volatile bool pendingAsyncBreak_ = false;
+    // Filled by detectWatchpointHit(): which data address tripped and its kind
+    // ('w' write / 'r' read / 'a' access) so sendStop() can emit T05<kind>:addr;.
+    bool watchHit_ = false;
+    char watchHitKind_ = 'a';
+    uint32_t watchHitAddr_ = 0;
     uint8_t signal_ = 5;
     uint32_t excReturn_ = 0;
     uint32_t exceptionNumber_ = 0;
     uint32_t *stackFrame_ = nullptr;
     NrfGdbRegs regs_ = {0};
     FpbSlot fpbSlots_[kFpbMaxSlots] = {};
+    DwtSlot dwtSlots_[kDwtMaxSlots] = {};
 };
 
 NrfGdbStubClass &nrfGdbStub();

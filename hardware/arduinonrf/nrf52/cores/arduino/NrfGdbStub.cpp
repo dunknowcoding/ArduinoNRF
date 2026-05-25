@@ -16,8 +16,22 @@ namespace {
 // ARMv7-M System Control Block / Debug Control Block registers.
 constexpr uint32_t DEMCR = 0xE000EDFCUL;
 constexpr uint32_t DEMCR_MON_EN = 0x00010000UL;   // Bit 16: enable DebugMon exception.
+constexpr uint32_t DEMCR_MON_PEND = 0x00020000UL; // Bit 17: pend a DebugMon exception (async halt).
 constexpr uint32_t DEMCR_MON_STEP = 0x00040000UL; // Bit 18: step a single instruction after exit.
 constexpr uint32_t DEMCR_TRCENA = 0x01000000UL;   // Bit 24: enable DWT/FPB tracing block.
+
+// Cortex-M4 Data Watchpoint and Trace unit. 4 comparators on nRF52840; we use
+// them for GDB's data watchpoints (Z2/Z3/Z4). Each comparator is COMP/MASK/
+// FUNCTION at a 16-byte stride. FUNCTION.FUNCTION: 5=read, 6=write, 7=access;
+// bit 24 (MATCHED) reads 1 (and self-clears) when that comparator tripped.
+constexpr uint32_t DWT_COMP_BASE = 0xE0001020UL;
+constexpr uint32_t DWT_COMP_STRIDE = 16UL;
+constexpr uint32_t DWT_FUNCTION_MATCHED = 0x01000000UL;
+constexpr uint32_t DFSR_DWTTRAP = 0x00000004UL;   // DFSR bit 2: a DWT debug event occurred.
+
+// Vector Table Offset Register; [VTOR]=initial SP, [VTOR+4]=reset handler.
+constexpr uint32_t VTOR = 0xE000ED08UL;
+// Cortex-M3/M4 implement up to 6 FPB code comparators and 4 DWT comparators.
 constexpr uint32_t SHCSR = 0xE000ED24UL;
 constexpr uint32_t SHCSR_MEMFAULTENA = 0x00010000UL;
 constexpr uint32_t SHCSR_BUSFAULTENA = 0x00020000UL;
@@ -227,6 +241,21 @@ bool memoryReadable(uint32_t address, uint32_t length) {
     if (address >= ARM_SRAM_BASE && end <= ARM_SRAM_END) {
         return true;
     }
+    // FICR/UICR device-info pages (0x10000000-0x10001000).
+    if (address >= 0x10000000UL && end <= 0x10002000UL) {
+        return true;
+    }
+    // Peripheral register space (0x40000000-0x60000000) for cortex-debug's
+    // Peripherals/SVD pane, plus the PPB/system block (0xE0000000-0xE0100000:
+    // SCB, NVIC, DWT, FPB...). NOTE: a few peripheral regs have read side
+    // effects (EVENTS_*, FIFO pops); the debugger only reads what the SVD/user
+    // requests, so this is acceptable for a debug build.
+    if (address >= 0x40000000UL && end <= 0x60000000UL) {
+        return true;
+    }
+    if (address >= 0xE0000000UL && end <= 0xE0100000UL) {
+        return true;
+    }
     return false;
 }
 
@@ -415,6 +444,7 @@ void NrfGdbStubClass::init() {
     // raise can mask the application's interrupts without masking DebugMon.
     mem32(SHPR3) &= ~0x000000FFUL;
     fpbInitOnce();
+    dwtInitOnce();
     initialized_ = true;
     writeBreadcrumb(GDB_BREADCRUMB_INIT);
 }
@@ -487,6 +517,155 @@ void NrfGdbStubClass::enableMonStep() {
 
 void NrfGdbStubClass::disableMonStep() {
     mem32(DEMCR) &= ~DEMCR_MON_STEP;
+}
+
+void NrfGdbStubClass::dwtInitOnce() {
+    if (dwtReady_) {
+        return;
+    }
+    // TRCENA (set in init()) must already be on for DWT writes to stick.
+    for (size_t index = 0; index < kDwtMaxSlots; ++index) {
+        const uint32_t base = DWT_COMP_BASE + (index * DWT_COMP_STRIDE);
+        mem32(base + 8U) = 0UL; // FUNCTION = 0 -> comparator disabled
+        dwtSlots_[index].inUse = false;
+        dwtSlots_[index].address = 0UL;
+        dwtSlots_[index].function = 0U;
+    }
+    dwtReady_ = true;
+}
+
+bool NrfGdbStubClass::dwtInsert(uint32_t function, uint32_t address, uint32_t kind) {
+    dwtInitOnce();
+    // kind is the watch length in bytes (1/2/4). DWT MASK ignores the low
+    // log2(kind) address bits so the whole object is covered.
+    uint32_t mask = 0UL;
+    if (kind == 2UL) {
+        mask = 1UL;
+    } else if (kind == 4UL) {
+        mask = 2UL;
+    } else if (kind != 1UL) {
+        return false; // only byte/halfword/word watchpoints
+    }
+    // Reuse a slot already watching this address+function.
+    for (size_t index = 0; index < kDwtMaxSlots; ++index) {
+        if (dwtSlots_[index].inUse && dwtSlots_[index].address == address &&
+            dwtSlots_[index].function == function) {
+            return true;
+        }
+    }
+    for (size_t index = 0; index < kDwtMaxSlots; ++index) {
+        if (dwtSlots_[index].inUse) {
+            continue;
+        }
+        const uint32_t base = DWT_COMP_BASE + (index * DWT_COMP_STRIDE);
+        mem32(base + 0U) = address;       // COMP
+        mem32(base + 4U) = mask;          // MASK
+        mem32(base + 8U) = function;      // FUNCTION (5 read / 6 write / 7 access)
+        dwtSlots_[index].inUse = true;
+        dwtSlots_[index].address = address;
+        dwtSlots_[index].function = static_cast<uint8_t>(function);
+        return true;
+    }
+    return false; // all 4 comparators in use
+}
+
+bool NrfGdbStubClass::dwtRemove(uint32_t function, uint32_t address) {
+    for (size_t index = 0; index < kDwtMaxSlots; ++index) {
+        if (dwtSlots_[index].inUse && dwtSlots_[index].address == address &&
+            dwtSlots_[index].function == function) {
+            mem32(DWT_COMP_BASE + (index * DWT_COMP_STRIDE) + 8U) = 0UL;
+            dwtSlots_[index].inUse = false;
+            dwtSlots_[index].address = 0UL;
+            dwtSlots_[index].function = 0U;
+            return true;
+        }
+    }
+    return false;
+}
+
+void NrfGdbStubClass::dwtDisableAll() {
+    for (size_t index = 0; index < kDwtMaxSlots; ++index) {
+        mem32(DWT_COMP_BASE + (index * DWT_COMP_STRIDE) + 8U) = 0UL;
+        dwtSlots_[index].inUse = false;
+        dwtSlots_[index].address = 0UL;
+        dwtSlots_[index].function = 0U;
+    }
+}
+
+bool NrfGdbStubClass::detectWatchpointHit() {
+    watchHit_ = false;
+    if ((mem32(DFSR) & DFSR_DWTTRAP) == 0UL) {
+        return false;
+    }
+    for (size_t index = 0; index < kDwtMaxSlots; ++index) {
+        if (!dwtSlots_[index].inUse) {
+            continue;
+        }
+        const uint32_t base = DWT_COMP_BASE + (index * DWT_COMP_STRIDE);
+        if ((mem32(base + 8U) & DWT_FUNCTION_MATCHED) != 0UL) {
+            watchHit_ = true;
+            watchHitAddr_ = dwtSlots_[index].address;
+            // gdb stop-reply keyword by access type: read->rwatch, write->watch,
+            // access->awatch (FUNCTION 5/6/7 respectively).
+            const uint8_t fn = dwtSlots_[index].function;
+            watchHitKind_ = (fn == 6U) ? 'w' : (fn == 5U) ? 'r' : 'a';
+            return true;
+        }
+    }
+    return false;
+}
+
+void NrfGdbStubClass::serviceAsyncBreak() {
+    // Called from yield() while the target runs free. Only meaningful once a
+    // gdb session has resumed us and we're not already halted in the stub.
+    if (!sessionLive_ || active_ || !enabled()) {
+        return;
+    }
+    // During free-run nothing else fetches the service-CDC OUT endpoint (its
+    // bit-gated drain lives in the stub's halted poll), so the host's byte
+    // would sit unfetched in the EP buffer and the next packet would NAK. Pump
+    // the drain here to pull any host OUT into the rx ring. Safe in free-run:
+    // POLL_ONLY silicon has no USB ISR, and we run in thread context.
+    nrfUsbdDriver().drainServiceDataOut();
+    // A host async-interrupt arrives as a bare 0x03 byte (no $..# framing). In
+    // all-stop mode (what gdb/cortex-debug use) the host sends nothing else
+    // while the target runs except acks, so drain-and-scan the whole rx ring:
+    // consume every byte and halt if any is 0x03. (A stale/ack byte at the ring
+    // head must not block the 0x03 behind it.)
+    bool sawBreak = false;
+    while (true) {
+        const int b = nrfUsbdDriver().read();
+        if (b < 0) {
+            break; // ring drained
+        }
+        if (b == 0x03) {
+            sawBreak = true;
+            break;
+        }
+    }
+    if (!sawBreak) {
+        return;
+    }
+    pendingAsyncBreak_ = true;
+    // Pend a DebugMon exception; it fires immediately (prio 0) and halts us.
+    mem32(DEMCR) |= DEMCR_MON_PEND;
+}
+
+void NrfGdbStubClass::performWarmRestart() {
+    // Re-point SP/PC at the application's reset vector so the next resume
+    // re-runs C startup (copies .data, zeroes .bss, calls SystemInit + main ->
+    // setup()). VTOR currently points at the app table (0x1000 on this board).
+    const uint32_t vtor = mem32(VTOR);
+    const uint32_t initialSp = mem32(vtor + 0U);
+    const uint32_t resetVec = mem32(vtor + 4U);
+    regs_.sp = initialSp;
+    regs_.pc = resetVec | 1UL;       // Thumb
+    regs_.lr = 0xFFFFFFFFUL;
+    regs_.xpsr = 0x01000000UL;       // Thumb bit set, no active exception
+    fpbDisableAll();
+    dwtDisableAll();
+    disableMonStep();
+    clearFaults();
 }
 
 bool NrfGdbStubClass::memoryWritable(uint32_t address, uint32_t length) const {
@@ -567,6 +746,13 @@ void NrfGdbStubClass::capture(uint32_t *stack, uint32_t excReturn, uint32_t exce
     excReturn_ = excReturn;
     exceptionNumber_ = exceptionNumber;
     signal_ = signalForException(exceptionNumber);
+    // Classify why we stopped, for an accurate stop reply.
+    if (pendingAsyncBreak_) {
+        pendingAsyncBreak_ = false;
+        signal_ = 2; // SIGINT -- host requested the halt (IDE 2 Pause).
+    } else if (detectWatchpointHit()) {
+        signal_ = 5; // SIGTRAP; sendStop() adds the watch:addr keyword.
+    }
 }
 
 void NrfGdbStubClass::applyRegs() {
@@ -655,10 +841,26 @@ void NrfGdbStubClass::sendPacket(const char *payload) {
 
 void NrfGdbStubClass::sendStop() {
     writeBreadcrumb(GDB_BREADCRUMB_STOP);
-    char reply[8] = {0};
+    char reply[32] = {0};
     size_t length = 0U;
-    appendChar(reply, sizeof(reply), length, 'S');
-    appendByte(reply, sizeof(reply), length, signal_);
+    if (watchHit_) {
+        // Watchpoint stop: gdb needs the T-packet keyword + data address (plain
+        // big-endian hex) to attribute it to the right watchpoint.
+        appendChar(reply, sizeof(reply), length, 'T');
+        appendByte(reply, sizeof(reply), length, signal_);
+        const char *keyword = (watchHitKind_ == 'w') ? "watch:"
+                              : (watchHitKind_ == 'r') ? "rwatch:"
+                                                       : "awatch:";
+        appendText(reply, sizeof(reply), length, keyword);
+        appendByte(reply, sizeof(reply), length, (watchHitAddr_ >> 24) & 0xFFU);
+        appendByte(reply, sizeof(reply), length, (watchHitAddr_ >> 16) & 0xFFU);
+        appendByte(reply, sizeof(reply), length, (watchHitAddr_ >> 8) & 0xFFU);
+        appendByte(reply, sizeof(reply), length, watchHitAddr_ & 0xFFU);
+        appendChar(reply, sizeof(reply), length, ';');
+    } else {
+        appendChar(reply, sizeof(reply), length, 'S');
+        appendByte(reply, sizeof(reply), length, signal_);
+    }
     sendPacket(reply);
 }
 
@@ -767,6 +969,29 @@ void NrfGdbStubClass::reply(char *packet, char *response, size_t capacity) {
         }
         if (strcmp(packet, "qsThreadInfo") == 0) {
             appendText(response, capacity, length, "l");
+            return;
+        }
+        // qRcmd,<hex> — gdb "monitor" command. cortex-debug's Restart issues
+        // "reset"/"reset halt" here; honor any command containing "reset" as a
+        // warm restart (re-point SP/PC at the reset vector) and stay halted.
+        if (strncmp(packet, "qRcmd,", 6) == 0) {
+            char decoded[40] = {0};
+            size_t out = 0U;
+            for (const char *cursor = packet + 6;
+                 cursor[0] != '\0' && cursor[1] != '\0' && out + 1U < sizeof(decoded);
+                 cursor += 2) {
+                const int high = fromHex(cursor[0]);
+                const int low = fromHex(cursor[1]);
+                if (high < 0 || low < 0) {
+                    break;
+                }
+                decoded[out++] = static_cast<char>((high << 4) | low);
+            }
+            decoded[out] = '\0';
+            if (strstr(decoded, "reset") != nullptr) {
+                performWarmRestart();
+            }
+            appendText(response, capacity, length, "OK");
             return;
         }
         return;
@@ -924,14 +1149,15 @@ void NrfGdbStubClass::reply(char *packet, char *response, size_t capacity) {
         return;
     }
 
-    // Z0,addr,kind / z0,addr,kind — software breakpoint insert / remove.
-    // We satisfy them with hardware FPB comparators (max 6 simultaneous bps).
-    // Z1/z1 are aliased to the same handler since FPB is the only mechanism.
+    // ZN,addr,kind / zN,addr,kind — breakpoint/watchpoint insert / remove.
+    //   Z0/Z1 -> code breakpoint via FPB (max 6); Z1 aliased to FPB.
+    //   Z2/Z3/Z4 -> data write/read/access watchpoint via DWT (max 4); `kind`
+    //   is the watch length in bytes.
     if (packet[0] == 'Z' || packet[0] == 'z') {
         const bool insert = (packet[0] == 'Z');
         const char type = packet[1];
-        if ((type != '0' && type != '1') || packet[2] != ',') {
-            return; // Unsupported breakpoint type → empty reply lets gdb retry.
+        if ((type < '0' || type > '4') || packet[2] != ',') {
+            return; // Unsupported type → empty reply lets gdb fall back.
         }
         char *afterAddr = strchr(packet + 3, ',');
         if (afterAddr == nullptr) {
@@ -945,15 +1171,32 @@ void NrfGdbStubClass::reply(char *packet, char *response, size_t capacity) {
             appendText(response, capacity, length, "E01");
             return;
         }
-        const bool result = insert ? fpbInsert(address) : fpbRemove(address);
+
+        if (type == '0' || type == '1') {
+            const bool result = insert ? fpbInsert(address) : fpbRemove(address);
+            appendText(response, capacity, length, result ? "OK" : "E02");
+            return;
+        }
+
+        // Watchpoint. Parse the length (kind) after the second comma.
+        bool kindOk = false;
+        const uint32_t kind = parseHexWord(afterAddr + 1, kindOk);
+        const uint32_t fn = (type == '2') ? 6UL    // write
+                            : (type == '3') ? 5UL   // read
+                                            : 7UL;  // '4' = access
+        const bool result = insert ? dwtInsert(fn, address, kindOk ? kind : 4UL)
+                                    : dwtRemove(fn, address);
         appendText(response, capacity, length, result ? "OK" : "E02");
         return;
     }
 
     if (packet[0] == 'D') {
-        // GDB detach: drop all breakpoints so the program runs cleanly afterwards.
+        // GDB detach: drop all breakpoints/watchpoints so the program runs
+        // cleanly afterwards, and disarm async-break.
         fpbDisableAll();
+        dwtDisableAll();
         disableMonStep();
+        sessionLive_ = false;
         appendText(response, capacity, length, "OK");
         return;
     }
@@ -998,6 +1241,7 @@ void NrfGdbStubClass::serve() {
         if (packet[0] == 'c' || strncmp(packet, "vCont;c", 7) == 0) {
             disableMonStep();
             expectStopReply_ = true; // gdb will block waiting for the next stop
+            sessionLive_ = true;     // arm async-break (Pause) while we run free
             continueFrom(packet);
             active_ = false;
             return;
@@ -1016,6 +1260,7 @@ void NrfGdbStubClass::serve() {
             // the next DebugMon entry (top of handleException).
             setBasepri(STEP_BASEPRI);
             expectStopReply_ = true; // gdb blocks waiting for the post-step stop
+            sessionLive_ = true;     // a live session: keep async-break armed
             // Pass plain 'c' so continueFrom does the register write-back
             // without trying to skip a faulting instruction.
             char nudge[2] = {'c', '\0'};

@@ -747,6 +747,10 @@ void initVariant(void) {
 
 void yield(void) {
     nrfUsbSerialBackend().poll();
+    // Honor an IDE 2 "Pause" (host Ctrl-C/0x03) while the sketch runs free:
+    // the GDB stub is dormant between halts, so this is where a break byte is
+    // turned into a pended DebugMon halt. No-op unless a debug session is live.
+    nrfGdbStub().serviceAsyncBreak();
     nrfWdtFeed();
 }
 
