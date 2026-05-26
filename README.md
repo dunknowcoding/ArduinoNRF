@@ -19,9 +19,7 @@
 
 ## Why this core exists
 
-The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, …) are fantastic value, but they usually ship without workable board library for Arduino IDE 2.x, which makes those board very difficult to use and debug. Widely-used ProMicro even comes without reset buttons and usable SWD pins (it does has the pads). **NiusRobotLab** developed this easy-to-use, Arduino IDE compatible third-party board library that makes every upload automatically as a double-tap-reset dance, and source-level debugging possible merely using **single USB cable**. **No debugger needed any more!**. If you would like to support our work, test this repo with your own nRF board then tell me any issues and possible fix.
-
-**ArduinoNRF removes both pain points** while keeping the board metadata *honest* — it tells you what the hardware actually does instead of copying an Adafruit feature list.
+The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, …) are fantastic value, but they usually ship without workable board library for Arduino IDE 2.x, which makes those boards extremely difficult to use and debug. Widely-used ProMicro even comes without reset buttons and usable SWD pins (it does has the pads). **NiusRobotLab** developed this easy-to-use, Arduino IDE compatible third-party board library that makes every upload automatically as a double-tap-reset dance, and source-level debugging possible merely using **single USB cable**. **No debugger needed any more!** If you would like to support our work, test this repo with your own nRF board then tell me any issues or possible fix.
 
 ## ✨ Highlights
 
@@ -29,7 +27,7 @@ The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, 
 |---|---|---|
 | 🔌 | **Hands-free uploads** | Click **Upload**. The firmware reboots itself into the bootloader over the USB-CDC maintenance port — **no button, no double-reset, no jumper**. |
 | 🐞 | **Single-cable debugging** | Click **Debug** in Arduino IDE 2 and get **breakpoints, step in/over/out, registers, memory, watchpoints and pause** — all over the *same* USB cable, with **no external SWD/J-Link probe**. |
-| 🧩 | **10 boards, one package** | ProMicro, nice!nano v2, SuperMini, nRFMicro, XIAO-like, dev boards and more — installed from one Board Manager URL. |
+| 🧩 | **10 boards, one package** | ProMicro (*verified*), nice!nano v2, SuperMini, nRFMicro, XIAO-like, dev boards and more — installed from one Board Manager URL. |
 | 📋 | **Truth-oriented metadata** | ADC, PWM, BLE and bus capabilities are documented as *verified*, not aspirational. No silent overclaiming. |
 | 🛡️ | **Robust upload pipeline** | Double-click-safe, coexists with a live debug session, rejects the wrong COM with a clear message, and caches slow port scans for speed. |
 
