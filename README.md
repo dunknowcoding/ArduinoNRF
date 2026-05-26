@@ -19,7 +19,7 @@
 
 ## Why this core exists
 
-The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, …) are fantastic value, but they usually ship with **no exposed reset button and no SWD pads**. With a stock Arduino core that means every upload is a double-tap-reset dance, and source-level debugging is impossible without soldering on a probe.
+The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, …) are fantastic value, but they usually ship without workable board library for Arduino IDE 2.x, which makes those board very difficult to use and debug. Widely-used ProMicro even comes without reset buttons and usable SWD pins (it does has the pads). **NiusRobotLab** developed this easy-to-use, Arduino IDE compatible third-party board library that makes every upload automatically as a double-tap-reset dance, and source-level debugging possible merely using **single USB cable**. **No debugger needed any more!**. If you would like to support our work, test this repo with your own nRF board then tell me any issues and possible fix.
 
 **ArduinoNRF removes both pain points** while keeping the board metadata *honest* — it tells you what the hardware actually does instead of copying an Adafruit feature list.
 
@@ -41,7 +41,7 @@ The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, 
 
 In **Arduino IDE → Settings → Additional Boards Manager URLs**, add:
 
-```
+```raw
 https://raw.githubusercontent.com/dunknowcoding/ArduinoNRF/main/package_arduinonrf_index.json
 ```
 
@@ -134,7 +134,7 @@ Everything beyond this README lives under **[docs/](docs/)** — start at **[doc
 
 ## 🛠️ Repository layout
 
-```
+```raw
 hardware/arduinonrf/nrf52/    # the Arduino platform: cores, variants, boards.txt, tools
 examples/                     # ~50 examples incl. UsbGdbStub* and capability self-tests
 docs/                         # all documentation (the only place docs live)
