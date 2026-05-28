@@ -31,9 +31,16 @@ All project documentation lives here. Start with the [project README](../README.
 
 ## Peripherals (subsystem drivers)
 
-- [platform/PWM_MULTI_MODULE.md](platform/PWM_MULTI_MODULE.md) — **the 4-module / 16-channel PWM facade, per-pin frequency, polarity, complementary pairs**
-- [platform/RTC_DRIVER.md](platform/RTC_DRIVER.md) — **low-level driver for RTC0/1/2 (compare + overflow IRQs)**
-- [platform/NIMBLE_INTEGRATION_PLAN.md](platform/NIMBLE_INTEGRATION_PLAN.md) — **multi-session roadmap for full BLE via Apache Mynewt's NimBLE (no SoftDevice)**
+- [platform/PWM_MULTI_MODULE.md](platform/PWM_MULTI_MODULE.md) — 4-module / 16-channel PWM facade, per-pin frequency, polarity, complementary pairs
+- [platform/RTC_DRIVER.md](platform/RTC_DRIVER.md) — low-level driver for RTC0/1/2 (compare + overflow IRQs)
+- [`cores/arduino/NrfPower.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPower.h) — power management: System ON sleep (WFI/WFE), low-power / constant-latency sub-modes, DCDC, RAM retention, SystemOFF + GPIO / NFC / USB wake sources
+- [`cores/arduino/NrfNfcTag.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfNfcTag.h) — NFC-A Type 2 tag emulation (NDEF URI / text), field detect IRQ, read count
+
+## Multi-session roadmaps (large vendoring efforts)
+
+- [platform/NIMBLE_INTEGRATION_PLAN.md](platform/NIMBLE_INTEGRATION_PLAN.md) — full BLE via Apache Mynewt's NimBLE (no SoftDevice)
+- [platform/CC310_INTEGRATION_PLAN.md](platform/CC310_INTEGRATION_PLAN.md) — CryptoCell 310 hardware crypto (AES / SHA / ECC / TRNG)
+- [platform/ZIGBEE_INTEGRATION_PLAN.md](platform/ZIGBEE_INTEGRATION_PLAN.md) — IEEE 802.15.4 + Zboss
 
 ## Platform reference (capabilities & truth)
 

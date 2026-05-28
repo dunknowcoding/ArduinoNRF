@@ -122,7 +122,11 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **ADC** | ✅ SAADC-backed `analogRead`, plus `analogReadVDD()` / `analogReadVDDHDIV5()` |
 | **PWM** | ✅ **All 4 PWM modules / 16 channels / 4 independent frequency groups** + per-pin polarity + complementary pairing with software dead-time. Tools → PWM speed picks the default carrier. See [docs/platform/PWM_MULTI_MODULE.md](docs/platform/PWM_MULTI_MODULE.md). |
 | **RTC** | ✅ Low-level driver for **RTC0/1/2** (24-bit counter, 4 compares each, overflow IRQ, LFCLK-clocked so it survives sleep). See [docs/platform/RTC_DRIVER.md](docs/platform/RTC_DRIVER.md). |
-| **BLE** | ⚠️ Advertising-only self-hosted facade today. Full BLE (connections, GATT, security, sleep) is planned via NimBLE integration — see [docs/platform/NIMBLE_INTEGRATION_PLAN.md](docs/platform/NIMBLE_INTEGRATION_PLAN.md). |
+| **Power** | ✅ **System ON sleep** (WFI/WFE/sleepMs), low-power / constant-latency sub-modes, **DCDC** enable, RAM retention, **SystemOFF** with **GPIO / NFC / USB wake**. See [`NrfPower.h`](hardware/arduinonrf/nrf52/cores/arduino/NrfPower.h) + `examples/PowerSleep`. |
+| **NFC-A Tag** | ✅ Type 2 tag emulation (NDEF **URL** / **text** records), auto-collision-resolution via NFCT hardware. See [`NrfNfcTag.h`](hardware/arduinonrf/nrf52/cores/arduino/NrfNfcTag.h) + `examples/NfcTag`. |
+| **BLE** | ⚠️ Advertising-only self-hosted facade today. Full BLE (connections, GATT, security, sleep) planned via NimBLE integration — see [docs/platform/NIMBLE_INTEGRATION_PLAN.md](docs/platform/NIMBLE_INTEGRATION_PLAN.md). |
+| **CC310 (crypto)** | ⚠️ Skeleton library at [`libraries/CC310/`](hardware/arduinonrf/nrf52/libraries/CC310/) — returns `NOT_VENDORED` until Nordic's `libcc_310.a` is dropped in. Roadmap: [docs/platform/CC310_INTEGRATION_PLAN.md](docs/platform/CC310_INTEGRATION_PLAN.md). |
+| **Zigbee / 802.15.4** | ❌ Not implemented. Roadmap: [docs/platform/ZIGBEE_INTEGRATION_PLAN.md](docs/platform/ZIGBEE_INTEGRATION_PLAN.md). |
 | **EEPROM** | ✅ Emulated (see EEPROM examples) |
 | **Upload** | ✅ Hands-free serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |

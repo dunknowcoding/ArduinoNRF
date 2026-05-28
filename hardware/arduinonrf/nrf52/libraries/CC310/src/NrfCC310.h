@@ -1,0 +1,102 @@
+// NrfCC310.h - Arduino API surface for the nRF52840 CryptoCell 310 hardware
+// crypto accelerator (Arm CryptoCell 310).
+//
+// SCOPE
+//   This is a SKELETON. The actual hardware driver requires Nordic's
+//   `libcc_310.a` binary (see vendor/README.md). Until the binary is
+//   dropped in, every operation returns NOT_VENDORED and isAvailable()
+//   returns false. The API surface is fixed so sketches written against it
+//   compile clean both ways.
+//
+// CRYPTOCELL 310 CAPABILITIES
+//   * Symmetric: AES-128 (ECB / CBC / CTR / CCM / GCM), ChaCha20-Poly1305
+//   * Hash: SHA-1, SHA-2 (224/256/384/512), HMAC over any of those
+//   * Asymmetric: RSA up to 4096-bit, ECDSA / ECDH on P-192/224/256/384/521
+//     + secp192k1/256k1 + Curve25519 / Ed25519
+//   * RNG: hardware TRNG (NIST SP 800-22 compliant) plus PRNG seeded from
+//     it. Faster than software RNG, never blocks more than a few us.
+//   * Key derivation: HKDF, PBKDF2
+//
+// IMPORTANT - CC310 is NOT ARM TrustZone
+//   CryptoCell 310 is a separate crypto co-processor on the AHB bus. It is
+//   often described together with TrustZone because Nordic's CryptoCell
+//   product line also targets Cortex-M33 (where ARM TrustZone-M exists).
+//   On Cortex-M4 nRF52840 there is no TrustZone - secure isolation here
+//   comes from APPROTECT (debug-port lockout), CC310 key isolation, and
+//   ACL flash region protection. See the integration roadmap doc for the
+//   full security story.
+
+#pragma once
+
+#include <stdint.h>
+#include <stddef.h>
+
+class NrfCC310 {
+public:
+    // Status codes returned by every operation. CC_ prefix because Arduino.h
+    // #define-s INTERNAL / DEFAULT as preprocessor macros that would otherwise
+    // textually replace our enumerator names before the C++ compiler sees them.
+    enum Status : int8_t {
+        CC_OK            = 0,
+        CC_NOT_VENDORED  = -1,  // libcc_310.a not linked - see vendor/README.md
+        CC_NOT_STARTED   = -2,  // begin() not called
+        CC_BAD_PARAM     = -3,
+        CC_INTERNAL      = -4,
+    };
+
+    // Initialize CC310 (HFCLK request, peripheral enable, RNG init).
+    // Returns OK on real hardware; NOT_VENDORED if the binary lib is absent.
+    static Status begin();
+    static void   end();
+    static bool   isAvailable();   // true only after a successful begin()
+
+    // ---- Random ---------------------------------------------------------
+
+    // Fill `buf` with `len` random bytes from the CC310 TRNG.
+    static Status randomBytes(uint8_t *buf, size_t len);
+
+    // ---- Hash -----------------------------------------------------------
+
+    static Status sha256(const uint8_t *in, size_t inLen, uint8_t out[32]);
+
+    // ---- AES-128 --------------------------------------------------------
+
+    static Status aes128CbcEncrypt(const uint8_t key[16],
+                                    const uint8_t iv[16],
+                                    const uint8_t *in,
+                                    uint8_t *out,
+                                    size_t lenMultipleOf16);
+    static Status aes128CbcDecrypt(const uint8_t key[16],
+                                    const uint8_t iv[16],
+                                    const uint8_t *in,
+                                    uint8_t *out,
+                                    size_t lenMultipleOf16);
+
+    // ---- Authenticated AES ----------------------------------------------
+
+    static Status aes128GcmEncrypt(const uint8_t key[16],
+                                    const uint8_t iv[12],
+                                    const uint8_t *aad, size_t aadLen,
+                                    const uint8_t *in, uint8_t *out, size_t inLen,
+                                    uint8_t tag[16]);
+    static Status aes128GcmDecrypt(const uint8_t key[16],
+                                    const uint8_t iv[12],
+                                    const uint8_t *aad, size_t aadLen,
+                                    const uint8_t *in, uint8_t *out, size_t inLen,
+                                    const uint8_t tag[16]);
+
+    // ---- ECDSA P-256 sign / verify -------------------------------------
+
+    static Status ecdsaP256Sign(const uint8_t privateKey[32],
+                                 const uint8_t hash[32],
+                                 uint8_t signature[64]);
+    static Status ecdsaP256Verify(const uint8_t publicKey[64],
+                                   const uint8_t hash[32],
+                                   const uint8_t signature[64]);
+
+    // ---- ECDH P-256 -----------------------------------------------------
+
+    static Status ecdhP256ComputeShared(const uint8_t privateKey[32],
+                                         const uint8_t peerPublicKey[64],
+                                         uint8_t sharedSecret[32]);
+};
