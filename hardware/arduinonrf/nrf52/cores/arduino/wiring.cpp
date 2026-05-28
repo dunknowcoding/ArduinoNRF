@@ -1410,26 +1410,56 @@ bool nrfPwmPolarityConfigurable(void) {
 
 // ---- Per-pin extensions (new with multi-module PWM) -----------------------
 
-// Set the PWM frequency for the GROUP that owns this pin. If the pin doesn't
-// have an assigned module yet, the call allocates one so the frequency sticks
-// to the pin's own group. Returns false on out-of-range or unsupported pin.
+// Set the PWM frequency for the GROUP that owns this pin.
+//   * If pin already has a module, the call retunes THAT module (other pins
+//     on the same module follow along - they share a frequency group).
+//   * If pin has no module yet, prefer an existing module that is already
+//     running at the requested frequency AND has a free slot (sharing is the
+//     point of a "group"). Otherwise allocate a fresh module so this pin
+//     gets its own independent frequency group.
+//   * Returns false on out-of-range / unsupported pin / out-of-range freq /
+//     all 4 modules exhausted with no matching-frequency slot.
 bool nrfPwmSetPinFrequency(uint8_t pin, uint32_t hz) {
     if (pin >= sizeof(g_pwmSlots) || !nrfDigitalPinHasPwm(pin) || hz == 0UL) {
         return false;
     }
-    uint8_t encoded = g_pwmSlots[pin];
-    if (encoded == PWM_SLOT_UNASSIGNED) {
-        encoded = assignPwmSlot(pin);
-        if (encoded == PWM_SLOT_UNASSIGNED) {
-            return false;
-        }
-    }
-    const uint8_t mod = pwmSlotModuleIndex(encoded);
     uint8_t prescaler = 0U;
     uint16_t counterTop = 0U;
     if (!selectPwmFrequencyConfig(hz, &prescaler, &counterTop)) {
         return false;
     }
+
+    uint8_t encoded = g_pwmSlots[pin];
+    if (encoded == PWM_SLOT_UNASSIGNED) {
+        // Pass 1: an active module already running at the requested freq AND
+        // with a free channel - join it (true frequency-group sharing).
+        for (uint8_t mod = 0; mod < PWM_MODULE_COUNT && encoded == PWM_SLOT_UNASSIGNED; ++mod) {
+            if (pwmModuleActiveChannelCount(mod) == 0U) continue;
+            if (g_pwmModules[mod].prescaler != prescaler) continue;
+            if (g_pwmModules[mod].counterTop != counterTop) continue;
+            for (uint8_t ch = 0; ch < PWM_CHANNELS_PER_MODULE; ++ch) {
+                if (g_pwmModules[mod].pins[ch] == PWM_SLOT_UNASSIGNED) {
+                    g_pwmModules[mod].pins[ch] = pin;
+                    encoded = pwmEncodeSlot(mod, ch);
+                    g_pwmSlots[pin] = encoded;
+                    break;
+                }
+            }
+        }
+        // Pass 2: a fresh idle module - claim it for this frequency.
+        for (uint8_t mod = 0; mod < PWM_MODULE_COUNT && encoded == PWM_SLOT_UNASSIGNED; ++mod) {
+            if (pwmModuleActiveChannelCount(mod) != 0U) continue;
+            g_pwmModules[mod].prescaler = prescaler;
+            g_pwmModules[mod].counterTop = counterTop;
+            g_pwmModules[mod].pins[0] = pin;
+            encoded = pwmEncodeSlot(mod, 0U);
+            g_pwmSlots[pin] = encoded;
+        }
+        if (encoded == PWM_SLOT_UNASSIGNED) {
+            return false;   // all 4 modules in use at other frequencies
+        }
+    }
+    const uint8_t mod = pwmSlotModuleIndex(encoded);
     g_pwmModules[mod].prescaler = prescaler;
     g_pwmModules[mod].counterTop = counterTop;
     if (pwmModuleActiveChannelCount(mod) > 0U) {
