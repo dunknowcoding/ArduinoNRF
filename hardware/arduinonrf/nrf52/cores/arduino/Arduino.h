@@ -168,6 +168,21 @@ uint32_t nrfPwmMinFrequencyHz(void);
 uint32_t nrfPwmMaxFrequencyHz(void);
 bool nrfPwmSupportsFrequency(uint32_t hz);
 bool nrfPwmSetFrequency(uint32_t hz);
+
+// Multi-module PWM extensions (nRF52 has PWM0..PWM3, each with 4 channels and
+// an independent prescaler/countertop). Pins on the same module share a
+// frequency group; across modules they're independent. See wiring.cpp for
+// allocation semantics.
+#ifndef NRF_PWM_PIN_POLARITY_HIGH_ON_DUTY
+#define NRF_PWM_PIN_POLARITY_HIGH_ON_DUTY 0U
+#define NRF_PWM_PIN_POLARITY_LOW_ON_DUTY  1U
+#endif
+bool nrfPwmSetPinFrequency(uint8_t pin, uint32_t hz);
+uint32_t nrfPwmPinFrequencyHz(uint8_t pin);
+uint8_t nrfPwmPinTimerGroup(uint8_t pin);    // 0..3 module index, 0xFF if pin not yet bound
+bool nrfPwmSetPinPolarity(uint8_t pin, uint8_t polarity);
+uint8_t nrfPwmPinPolarity(uint8_t pin);
+bool nrfPwmConfigureComplementary(uint8_t pinA, uint8_t pinB, uint16_t deadTimeTicks);
 NrfPwmWriteStatus nrfPwmLastWriteStatus(void);
 const char *nrfPwmWriteStatusName(NrfPwmWriteStatus status);
 uint32_t nrfPwmCounterClockHz(void);

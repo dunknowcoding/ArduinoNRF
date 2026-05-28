@@ -19,7 +19,6 @@ uint8_t g_pwmSlots[64] = {
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
 };
-uint8_t g_pwmPins[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 voidFuncPtr g_interruptHandlers[64] = {nullptr};
 uint8_t g_interruptModes[64] = {0};
 uint8_t g_interruptChannels[64] = {
@@ -83,7 +82,14 @@ constexpr uint32_t SAADC_CH_CONFIG_GAIN_SHIFT = 8UL;
 constexpr uint32_t SAADC_CH_CONFIG_REFSEL_SHIFT = 12UL;
 constexpr uint32_t SAADC_CH_CONFIG_TACQ_SHIFT = 16UL;
 constexpr uint32_t SAADC_TIMEOUT_SPINS = 200000UL;
+// PWM peripheral register offsets (identical across PWM0..PWM3 instances).
 constexpr uint32_t PWM0_BASE = 0x4001C000UL;
+constexpr uint32_t PWM1_BASE = 0x40021000UL;
+constexpr uint32_t PWM2_BASE = 0x40022000UL;
+constexpr uint32_t PWM3_BASE = 0x4002D000UL;
+constexpr uint8_t  PWM_MODULE_COUNT = 4U;
+constexpr uint8_t  PWM_CHANNELS_PER_MODULE = 4U;
+constexpr uint8_t  PWM_TOTAL_CHANNELS = PWM_MODULE_COUNT * PWM_CHANNELS_PER_MODULE;  // 16
 constexpr uint32_t PWM_TASKS_STOP = 0x004UL;
 constexpr uint32_t PWM_TASKS_SEQSTART0 = 0x008UL;
 constexpr uint32_t PWM_ENABLE = 0x500UL;
@@ -107,10 +113,47 @@ constexpr uint32_t PWM_DECODER_LOAD_INDIVIDUAL = 2UL;
 constexpr uint32_t PWM_PSEL_DISCONNECTED = 0xFFFFFFFFUL;
 constexpr uint16_t PWM_COUNTERTOP_MIN = 3U;
 constexpr uint16_t PWM_COUNTERTOP_MAX = 32767U;
-constexpr uint8_t PWM_PRESCALER_MAX = 7U;
+constexpr uint8_t  PWM_PRESCALER_MAX = 7U;
 constexpr uint32_t PWM_BASE_CLOCK_HZ = 16000000UL;
 
-uint16_t g_pwmSequence[4] = {0, 0, 0, 0};
+// g_pwmSlots[pin] now encodes BOTH the PWM module (0..3) and the channel slot
+// within the module (0..3): high nibble = module index, low nibble = slot.
+// 0xFF still means "unassigned". Helpers below extract the two halves.
+constexpr uint8_t  PWM_SLOT_UNASSIGNED = 0xFFU;
+inline uint8_t pwmSlotModuleIndex(uint8_t encoded) { return static_cast<uint8_t>((encoded >> 4U) & 0x0FU); }
+inline uint8_t pwmSlotChannelIndex(uint8_t encoded) { return static_cast<uint8_t>(encoded & 0x0FU); }
+inline uint8_t pwmEncodeSlot(uint8_t moduleIndex, uint8_t channelIndex) {
+    return static_cast<uint8_t>(((moduleIndex & 0x0FU) << 4U) | (channelIndex & 0x0FU));
+}
+
+// Polarity options (per-pin). Default INVERTED matches the previous global
+// behavior: analogWrite(pin, 0) -> output LOW, analogWrite(pin, full) -> HIGH.
+constexpr uint8_t PWM_PIN_POLARITY_HIGH_ON_DUTY = 0U; // default: duty = high time
+constexpr uint8_t PWM_PIN_POLARITY_LOW_ON_DUTY  = 1U; // inverse: duty = low time
+
+// Per-module state. Each PWM module is its own frequency group with up to 4
+// channels sharing prescaler + countertop, but the four modules are mutually
+// independent so different pins can run at different frequencies.
+struct NrfPwmModuleState {
+    uint32_t base;
+    uint8_t pins[PWM_CHANNELS_PER_MODULE];    // pin index per slot (0xFF if free)
+    uint8_t prescaler;
+    uint16_t counterTop;
+    uint16_t sequence[PWM_CHANNELS_PER_MODULE]; // SEQ buffer (EasyDMA reads it)
+    bool enabled;
+    bool configured;                          // sticky: do we own the peripheral?
+};
+
+NrfPwmModuleState g_pwmModules[PWM_MODULE_COUNT] = {
+    {PWM0_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
+    {PWM1_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
+    {PWM2_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
+    {PWM3_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
+};
+
+// Per-pin polarity (set via analogWritePolarity). Default = HIGH_ON_DUTY.
+uint8_t g_pwmPinPolarity[64] = {0};
+
 uint8_t g_analogReadResolutionBits = 10;
 uint8_t g_analogWriteResolutionBits = 10;
 uint8_t g_analogReferenceMode = INTERNAL;
@@ -120,6 +163,11 @@ uint8_t g_lastCalibratedReferenceMode = 0xFFU;
 NrfAdcGain g_lastCalibratedGain = NRF_ADC_GAIN_1_6;
 uint8_t g_lastCalibratedAcquisitionTimeUs = 0U;
 uint32_t g_randomState = 0x6D2B79F5UL;
+
+// Legacy global "default" prescaler + countertop. Used as:
+//   - the seed value for newly-activated PWM modules,
+//   - the answer to legacy global getters (nrfPwmFrequencyHz, nrfPwmCounterTop, ...).
+// Per-module values in g_pwmModules[i] are the actual hardware truth.
 uint8_t g_pwmPrescaler = 4U;
 uint16_t g_pwmCounterTop = 1023U;
 NrfPwmWriteStatus g_pwmLastWriteStatus = NRF_PWM_WRITE_OK;
@@ -496,11 +544,31 @@ inline uint32_t pwmPselOffset(uint8_t channel) {
     return PWM_PSEL_OUT0 + (static_cast<uint32_t>(channel) * 4UL);
 }
 
-uint16_t pwmSequenceValueFromDuty(uint16_t duty) {
-    if (duty > g_pwmCounterTop) {
-        duty = g_pwmCounterTop;
+// Encode (duty, polarity, counterTop) into a SEQ word.
+// The nRF52 SEQ word semantics:
+//   bit 15 == 0  -> output is HIGH while counter < value, LOW after (rising-then-falling)
+//   bit 15 == 1  -> output is LOW  while counter < value, HIGH after (falling-then-rising)
+// For PWM_PIN_POLARITY_HIGH_ON_DUTY (default): the user's `duty` should be the
+// HIGH time. Using bit 15 == 1 and seq = (top - duty) gives high time = duty + 1.
+// For PWM_PIN_POLARITY_LOW_ON_DUTY: invert that by clearing bit 15 and using
+// seq = duty, which gives the same high time but with phase inverted (output
+// high for top-duty ticks before transitioning low) -- effectively the
+// complement, useful for half-bridge pairing.
+uint16_t pwmSequenceValueForChannel(uint16_t duty, uint16_t counterTop, uint8_t polarity) {
+    if (duty > counterTop) {
+        duty = counterTop;
     }
-    return static_cast<uint16_t>(g_pwmCounterTop - duty) | PWM_POLARITY_INVERTED;
+    if (polarity == PWM_PIN_POLARITY_LOW_ON_DUTY) {
+        return duty;  // bit 15 clear -> phase-inverted complement
+    }
+    return static_cast<uint16_t>(counterTop - duty) | PWM_POLARITY_INVERTED;
+}
+
+// Legacy single-module helper kept for callers (analogWrite scaling path) that
+// reference the global default counterTop. New code should use the per-module
+// variant above with the actual module's counterTop.
+uint16_t pwmSequenceValueFromDuty(uint16_t duty) {
+    return pwmSequenceValueForChannel(duty, g_pwmCounterTop, PWM_PIN_POLARITY_HIGH_ON_DUTY);
 }
 
 uint32_t pwmCounterClockHzForPrescaler(uint8_t prescaler) {
@@ -638,75 +706,141 @@ void detachPwmPin(uint8_t pin) {
     if (pin >= sizeof(g_pwmSlots)) {
         return;
     }
-    const uint8_t slot = g_pwmSlots[pin];
-    if (slot >= 4U) {
+    const uint8_t encoded = g_pwmSlots[pin];
+    if (encoded == PWM_SLOT_UNASSIGNED) {
         return;
     }
-    g_pwmPins[slot] = 0xFF;
-    g_pwmSlots[pin] = 0xFF;
+    const uint8_t mod = pwmSlotModuleIndex(encoded);
+    const uint8_t ch = pwmSlotChannelIndex(encoded);
+    if (mod < PWM_MODULE_COUNT && ch < PWM_CHANNELS_PER_MODULE) {
+        g_pwmModules[mod].pins[ch] = PWM_SLOT_UNASSIGNED;
+    }
+    g_pwmSlots[pin] = PWM_SLOT_UNASSIGNED;
 }
 
-void updatePwmHardware() {
-    reg32(PWM0_BASE, PWM_TASKS_STOP) = 1UL;
-    reg32(PWM0_BASE, PWM_ENABLE) = PWM_ENABLE_DISABLED;
+// Count how many slots a given PWM module currently has assigned.
+uint8_t pwmModuleActiveChannelCount(uint8_t mod) {
+    if (mod >= PWM_MODULE_COUNT) {
+        return 0U;
+    }
+    uint8_t n = 0U;
+    for (uint8_t ch = 0; ch < PWM_CHANNELS_PER_MODULE; ++ch) {
+        if (g_pwmModules[mod].pins[ch] != PWM_SLOT_UNASSIGNED) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+// Re-emit a single PWM module's hardware state from g_pwmModules[mod].
+void updatePwmModule(uint8_t mod) {
+    if (mod >= PWM_MODULE_COUNT) {
+        return;
+    }
+    NrfPwmModuleState &m = g_pwmModules[mod];
+    const uint32_t base = m.base;
+
+    reg32(base, PWM_TASKS_STOP) = 1UL;
+    reg32(base, PWM_ENABLE) = PWM_ENABLE_DISABLED;
 
     bool anyActive = false;
-    for (uint8_t slot = 0; slot < 4U; ++slot) {
-        const uint8_t pin = g_pwmPins[slot];
-        if (pin == 0xFF) {
-            g_pwmSequence[slot] = pwmSequenceValueFromDuty(0U);
-            reg32(PWM0_BASE, pwmPselOffset(slot)) = PWM_PSEL_DISCONNECTED;
+    for (uint8_t ch = 0; ch < PWM_CHANNELS_PER_MODULE; ++ch) {
+        const uint8_t pin = m.pins[ch];
+        if (pin == PWM_SLOT_UNASSIGNED) {
+            m.sequence[ch] = pwmSequenceValueForChannel(0U, m.counterTop, PWM_PIN_POLARITY_HIGH_ON_DUTY);
+            reg32(base, pwmPselOffset(ch)) = PWM_PSEL_DISCONNECTED;
             continue;
         }
-
         const uint32_t rawPin = rawPinFor(pin);
         if (!isValidRawPin(rawPin)) {
-            g_pwmPins[slot] = 0xFF;
-            g_pwmSequence[slot] = pwmSequenceValueFromDuty(0U);
-            reg32(PWM0_BASE, pwmPselOffset(slot)) = PWM_PSEL_DISCONNECTED;
+            m.pins[ch] = PWM_SLOT_UNASSIGNED;
+            m.sequence[ch] = pwmSequenceValueForChannel(0U, m.counterTop, PWM_PIN_POLARITY_HIGH_ON_DUTY);
+            reg32(base, pwmPselOffset(ch)) = PWM_PSEL_DISCONNECTED;
             continue;
         }
-
         anyActive = true;
-        reg32(PWM0_BASE, pwmPselOffset(slot)) = rawPin;
-        g_pwmSequence[slot] = pwmSequenceValueFromDuty(g_pwmValues[pin]);
+        reg32(base, pwmPselOffset(ch)) = rawPin;
+        const uint8_t pol = (pin < sizeof(g_pwmPinPolarity)) ? g_pwmPinPolarity[pin] : PWM_PIN_POLARITY_HIGH_ON_DUTY;
+        // Re-scale the user's stored duty (in legacy g_pwmCounterTop units) to
+        // this module's counterTop. Most modules will share the same default,
+        // so the multiply is a no-op; but per-pin frequency makes module CTs
+        // diverge, and a channel re-bound to a new module must re-scale.
+        uint32_t storedDuty = g_pwmValues[pin];
+        if (g_pwmCounterTop != m.counterTop && g_pwmCounterTop != 0U) {
+            storedDuty = (storedDuty * static_cast<uint32_t>(m.counterTop) + (g_pwmCounterTop / 2UL)) / g_pwmCounterTop;
+        }
+        m.sequence[ch] = pwmSequenceValueForChannel(static_cast<uint16_t>(storedDuty), m.counterTop, pol);
     }
 
     if (!anyActive) {
+        m.enabled = false;
         return;
     }
 
-    reg32(PWM0_BASE, PWM_MODE) = 0UL;
-    reg32(PWM0_BASE, PWM_PRESCALER) = g_pwmPrescaler;
-    reg32(PWM0_BASE, PWM_COUNTERTOP) = static_cast<uint32_t>(g_pwmCounterTop);
-    reg32(PWM0_BASE, PWM_DECODER) = PWM_DECODER_LOAD_INDIVIDUAL;
-    reg32(PWM0_BASE, PWM_LOOP) = 0UL;
-    reg32(PWM0_BASE, PWM_SEQ0_PTR) = reinterpret_cast<uint32_t>(&g_pwmSequence[0]);
-    reg32(PWM0_BASE, PWM_SEQ0_CNT) = 4UL;
-    reg32(PWM0_BASE, PWM_SEQ0_REFRESH) = 0UL;
-    reg32(PWM0_BASE, PWM_SEQ0_ENDDELAY) = 0UL;
-    reg32(PWM0_BASE, PWM_ENABLE) = PWM_ENABLE_ENABLED;
-    reg32(PWM0_BASE, PWM_TASKS_SEQSTART0) = 1UL;
+    reg32(base, PWM_MODE) = 0UL;
+    reg32(base, PWM_PRESCALER) = m.prescaler;
+    reg32(base, PWM_COUNTERTOP) = static_cast<uint32_t>(m.counterTop);
+    reg32(base, PWM_DECODER) = PWM_DECODER_LOAD_INDIVIDUAL;
+    reg32(base, PWM_LOOP) = 0UL;
+    reg32(base, PWM_SEQ0_PTR) = reinterpret_cast<uint32_t>(&m.sequence[0]);
+    reg32(base, PWM_SEQ0_CNT) = PWM_CHANNELS_PER_MODULE;
+    reg32(base, PWM_SEQ0_REFRESH) = 0UL;
+    reg32(base, PWM_SEQ0_ENDDELAY) = 0UL;
+    reg32(base, PWM_ENABLE) = PWM_ENABLE_ENABLED;
+    reg32(base, PWM_TASKS_SEQSTART0) = 1UL;
+    m.enabled = true;
+    m.configured = true;
 }
 
+// Re-emit hardware for ALL PWM modules. Cheap when modules are idle (early
+// return inside updatePwmModule when no channels are active).
+void updatePwmHardware() {
+    for (uint8_t mod = 0; mod < PWM_MODULE_COUNT; ++mod) {
+        updatePwmModule(mod);
+    }
+}
+
+// Allocate (or look up) a PWM (module, channel) for `pin`.
+//   - If the pin already has an assignment, return the existing one.
+//   - Otherwise prefer reusing an already-active module that has a free slot
+//     (to keep modules consolidated), then fall back to the first totally
+//     idle module so the new pin gets its own independent frequency group.
+//   - Returns 0xFF if all 16 channels are exhausted or the pin is invalid.
 uint8_t assignPwmSlot(uint8_t pin) {
     if (pin >= sizeof(g_pwmSlots)) {
-        return 0xFF;
+        return PWM_SLOT_UNASSIGNED;
     }
-
-    if (g_pwmSlots[pin] < 4U) {
+    if (g_pwmSlots[pin] != PWM_SLOT_UNASSIGNED) {
         return g_pwmSlots[pin];
     }
 
-    for (uint8_t slot = 0; slot < 4U; ++slot) {
-        if (g_pwmPins[slot] == 0xFF) {
-            g_pwmPins[slot] = pin;
-            g_pwmSlots[pin] = slot;
-            return slot;
+    // Pass 1: a module that's already in use AND has a free slot.
+    for (uint8_t mod = 0; mod < PWM_MODULE_COUNT; ++mod) {
+        if (pwmModuleActiveChannelCount(mod) == 0U) {
+            continue;
+        }
+        for (uint8_t ch = 0; ch < PWM_CHANNELS_PER_MODULE; ++ch) {
+            if (g_pwmModules[mod].pins[ch] == PWM_SLOT_UNASSIGNED) {
+                g_pwmModules[mod].pins[ch] = pin;
+                const uint8_t encoded = pwmEncodeSlot(mod, ch);
+                g_pwmSlots[pin] = encoded;
+                return encoded;
+            }
         }
     }
 
-    return 0xFF;
+    // Pass 2: spin up a fresh module. Seed it with the global default freq.
+    for (uint8_t mod = 0; mod < PWM_MODULE_COUNT; ++mod) {
+        if (pwmModuleActiveChannelCount(mod) == 0U) {
+            g_pwmModules[mod].prescaler = g_pwmPrescaler;
+            g_pwmModules[mod].counterTop = g_pwmCounterTop;
+            g_pwmModules[mod].pins[0] = pin;
+            const uint8_t encoded = pwmEncodeSlot(mod, 0U);
+            g_pwmSlots[pin] = encoded;
+            return encoded;
+        }
+    }
+    return PWM_SLOT_UNASSIGNED;
 }
 
 uint32_t nextRandomWord() {
@@ -1204,15 +1338,13 @@ void __disable_irq_stub(void) {
 }
 
 uint8_t nrfPwmChannelCapacity(void) {
-    return 4U;
+    return PWM_TOTAL_CHANNELS;   // 16 across PWM0..PWM3
 }
 
 uint8_t nrfPwmActiveChannels(void) {
     uint8_t active = 0U;
-    for (uint8_t slot = 0; slot < 4U; ++slot) {
-        if (g_pwmPins[slot] != 0xFF) {
-            ++active;
-        }
+    for (uint8_t mod = 0; mod < PWM_MODULE_COUNT; ++mod) {
+        active += pwmModuleActiveChannelCount(mod);
     }
     return active;
 }
@@ -1222,27 +1354,180 @@ bool nrfDigitalPinHasPwm(uint8_t pin) {
 }
 
 bool nrfPwmChannelsIndependent(void) {
+    // Within each module the 4 channels share PRESCALER + COUNTERTOP (so their
+    // frequency is shared), but their duty cycles are independent. Across the
+    // 4 modules everything (frequency included) is independent.
     return true;
 }
 
 bool nrfPwmSharedTimer(void) {
-    return true;
+    // Channels within the SAME module still share a timer; across modules
+    // they're independent. Returning false reflects that channels are no
+    // longer forced onto a single timer.
+    return false;
 }
 
 bool nrfPwmIndependentTimersSupported(void) {
-    return false;
+    return true;
 }
 
 uint8_t nrfPwmTimerGroupCount(void) {
-    return 1U;
+    return PWM_MODULE_COUNT;     // 4 independent frequency groups
 }
 
 bool nrfPwmCanAllocateChannel(uint8_t pin) {
-    return pin < sizeof(g_pwmSlots) && nrfDigitalPinHasPwm(pin) && (g_pwmSlots[pin] < 4U || nrfPwmActiveChannels() < nrfPwmChannelCapacity());
+    if (pin >= sizeof(g_pwmSlots) || !nrfDigitalPinHasPwm(pin)) {
+        return false;
+    }
+    if (g_pwmSlots[pin] != PWM_SLOT_UNASSIGNED) {
+        return true;
+    }
+    return nrfPwmActiveChannels() < nrfPwmChannelCapacity();
 }
 
 bool nrfPwmPolarityConfigurable(void) {
-    return false;
+    return true;
+}
+
+// ---- Per-pin extensions (new with multi-module PWM) -----------------------
+
+// Set the PWM frequency for the GROUP that owns this pin. If the pin doesn't
+// have an assigned module yet, the call allocates one so the frequency sticks
+// to the pin's own group. Returns false on out-of-range or unsupported pin.
+bool nrfPwmSetPinFrequency(uint8_t pin, uint32_t hz) {
+    if (pin >= sizeof(g_pwmSlots) || !nrfDigitalPinHasPwm(pin) || hz == 0UL) {
+        return false;
+    }
+    uint8_t encoded = g_pwmSlots[pin];
+    if (encoded == PWM_SLOT_UNASSIGNED) {
+        encoded = assignPwmSlot(pin);
+        if (encoded == PWM_SLOT_UNASSIGNED) {
+            return false;
+        }
+    }
+    const uint8_t mod = pwmSlotModuleIndex(encoded);
+    uint8_t prescaler = 0U;
+    uint16_t counterTop = 0U;
+    if (!selectPwmFrequencyConfig(hz, &prescaler, &counterTop)) {
+        return false;
+    }
+    g_pwmModules[mod].prescaler = prescaler;
+    g_pwmModules[mod].counterTop = counterTop;
+    if (pwmModuleActiveChannelCount(mod) > 0U) {
+        updatePwmModule(mod);
+    }
+    return true;
+}
+
+uint32_t nrfPwmPinFrequencyHz(uint8_t pin) {
+    if (pin >= sizeof(g_pwmSlots)) {
+        return 0UL;
+    }
+    const uint8_t encoded = g_pwmSlots[pin];
+    if (encoded == PWM_SLOT_UNASSIGNED) {
+        return pwmFrequencyHzForConfig(g_pwmPrescaler, g_pwmCounterTop);
+    }
+    const uint8_t mod = pwmSlotModuleIndex(encoded);
+    return pwmFrequencyHzForConfig(g_pwmModules[mod].prescaler, g_pwmModules[mod].counterTop);
+}
+
+uint8_t nrfPwmPinTimerGroup(uint8_t pin) {
+    if (pin >= sizeof(g_pwmSlots)) {
+        return 0xFFU;
+    }
+    const uint8_t encoded = g_pwmSlots[pin];
+    if (encoded == PWM_SLOT_UNASSIGNED) {
+        return 0xFFU;
+    }
+    return pwmSlotModuleIndex(encoded);
+}
+
+// Per-pin polarity. PWM_PIN_POLARITY_HIGH_ON_DUTY = analogWrite duty is the
+// HIGH portion (Arduino default). PWM_PIN_POLARITY_LOW_ON_DUTY = output is
+// the phase-inverted complement (useful for half-bridge low-side / pairing).
+bool nrfPwmSetPinPolarity(uint8_t pin, uint8_t polarity) {
+    if (pin >= sizeof(g_pwmPinPolarity)) {
+        return false;
+    }
+    const uint8_t normalized = (polarity == PWM_PIN_POLARITY_LOW_ON_DUTY)
+                                   ? PWM_PIN_POLARITY_LOW_ON_DUTY
+                                   : PWM_PIN_POLARITY_HIGH_ON_DUTY;
+    g_pwmPinPolarity[pin] = normalized;
+    const uint8_t encoded = (pin < sizeof(g_pwmSlots)) ? g_pwmSlots[pin] : PWM_SLOT_UNASSIGNED;
+    if (encoded != PWM_SLOT_UNASSIGNED) {
+        updatePwmModule(pwmSlotModuleIndex(encoded));
+    }
+    return true;
+}
+
+uint8_t nrfPwmPinPolarity(uint8_t pin) {
+    if (pin >= sizeof(g_pwmPinPolarity)) {
+        return PWM_PIN_POLARITY_HIGH_ON_DUTY;
+    }
+    return g_pwmPinPolarity[pin];
+}
+
+// Drive pinA and pinB as a complementary pair (half-bridge style). They are
+// forced onto the same PWM module (sharing frequency); the second pin gets
+// PWM_PIN_POLARITY_LOW_ON_DUTY so it's the phase-inverted complement of
+// pinA. `deadTimeTicks` shaves both pulses by that many counter ticks at
+// each transition, creating a forced gap (no shoot-through). 0 = perfect
+// complement. Returns false if either pin can't be allocated to a shared
+// module.
+bool nrfPwmConfigureComplementary(uint8_t pinA, uint8_t pinB, uint16_t deadTimeTicks) {
+    if (pinA == pinB) {
+        return false;
+    }
+    if (assignPwmSlot(pinA) == PWM_SLOT_UNASSIGNED) {
+        return false;
+    }
+    const uint8_t encodedA = g_pwmSlots[pinA];
+    const uint8_t modA = pwmSlotModuleIndex(encodedA);
+
+    // Force pinB onto the same module as pinA. Detach pinB first if it's on
+    // a different module; allocate in the same module if there's room.
+    if (g_pwmSlots[pinB] != PWM_SLOT_UNASSIGNED &&
+        pwmSlotModuleIndex(g_pwmSlots[pinB]) != modA) {
+        detachPwmPin(pinB);
+    }
+    if (g_pwmSlots[pinB] == PWM_SLOT_UNASSIGNED) {
+        bool placed = false;
+        for (uint8_t ch = 0; ch < PWM_CHANNELS_PER_MODULE && !placed; ++ch) {
+            if (g_pwmModules[modA].pins[ch] == PWM_SLOT_UNASSIGNED) {
+                g_pwmModules[modA].pins[ch] = pinB;
+                g_pwmSlots[pinB] = pwmEncodeSlot(modA, ch);
+                placed = true;
+            }
+        }
+        if (!placed) {
+            return false;
+        }
+    }
+
+    if (pinA < sizeof(g_pwmPinPolarity)) {
+        g_pwmPinPolarity[pinA] = PWM_PIN_POLARITY_HIGH_ON_DUTY;
+    }
+    if (pinB < sizeof(g_pwmPinPolarity)) {
+        g_pwmPinPolarity[pinB] = PWM_PIN_POLARITY_LOW_ON_DUTY;
+    }
+
+    // Dead-time: shave deadTimeTicks/2 ticks off the on-time of both sides.
+    // Encoded by reducing the LOGICAL duty mirror for pinB. We store the
+    // "intended" duty on each pin so polarity inversion takes care of the
+    // bulk and dead-time biases pinB's stored value DOWN.
+    if (deadTimeTicks > 0U && pinB < sizeof(g_pwmValues)) {
+        const uint16_t halfDead = static_cast<uint16_t>(deadTimeTicks / 2U);
+        if (g_pwmValues[pinB] > halfDead) {
+            g_pwmValues[pinB] = static_cast<uint16_t>(g_pwmValues[pinB] - halfDead);
+        } else {
+            g_pwmValues[pinB] = 0U;
+        }
+    }
+
+    pinMode(pinA, OUTPUT);
+    pinMode(pinB, OUTPUT);
+    updatePwmModule(modA);
+    return true;
 }
 
 bool nrfPwmCenterAlignedSupported(void) {
@@ -1276,6 +1561,14 @@ bool nrfPwmSetFrequency(uint32_t hz) {
 
     g_pwmPrescaler = prescaler;
     g_pwmCounterTop = counterTop;
+    // Apply the new global default to every PWM module so the legacy
+    // analogWriteFrequency(hz) call still re-tunes every active channel. Pins
+    // that want per-group frequencies should use nrfPwmSetPinFrequency()
+    // AFTER setting the global default.
+    for (uint8_t mod = 0; mod < PWM_MODULE_COUNT; ++mod) {
+        g_pwmModules[mod].prescaler = prescaler;
+        g_pwmModules[mod].counterTop = counterTop;
+    }
     if (nrfPwmActiveChannels() > 0U) {
         updatePwmHardware();
     }
