@@ -258,6 +258,9 @@ extern "C" void NFCT_IRQHandler(void) __attribute__((weak, alias("Default_Handle
 extern "C" void GPIOTE_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 extern "C" void WDT_IRQHandler(void);
 extern "C" void USBD_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void RTC0_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void RTC1_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void RTC2_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 
 // Cortex-M4 vector table for nRF52840.
 //   Index   0     = initial main stack pointer.
@@ -297,13 +300,13 @@ __attribute__((section(".isr_vector"), used)) const IsrVector g_isrVectors[] = {
     Default_Handler,                              // IRQ  8 TIMER0
     Default_Handler,                              // IRQ  9 TIMER1
     Default_Handler,                              // IRQ 10 TIMER2
-    Default_Handler,                              // IRQ 11 RTC0
+    RTC0_IRQHandler,                              // IRQ 11 RTC0
     Default_Handler,                              // IRQ 12 TEMP
     Default_Handler,                              // IRQ 13 RNG
     Default_Handler,                              // IRQ 14 ECB
     Default_Handler,                              // IRQ 15 CCM_AAR
     WDT_IRQHandler,                              // IRQ 16 WDT
-    Default_Handler,                              // IRQ 17 RTC1
+    RTC1_IRQHandler,                              // IRQ 17 RTC1
     Default_Handler,                              // IRQ 18 QDEC
     Default_Handler,                              // IRQ 19 COMP_LPCOMP
     Default_Handler,                              // IRQ 20 SWI0_EGU0
@@ -322,7 +325,7 @@ __attribute__((section(".isr_vector"), used)) const IsrVector g_isrVectors[] = {
     Default_Handler,                              // IRQ 33 PWM1
     Default_Handler,                              // IRQ 34 PWM2
     Default_Handler,                              // IRQ 35 SPIM2_SPIS2_SPI2
-    Default_Handler,                              // IRQ 36 RTC2
+    RTC2_IRQHandler,                              // IRQ 36 RTC2
     Default_Handler,                              // IRQ 37 I2S
     Default_Handler,                              // IRQ 38 FPU
     USBD_IRQHandler,                              // IRQ 39 USBD
