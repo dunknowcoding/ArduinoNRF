@@ -29,12 +29,18 @@ All project documentation lives here. Start with the [project README](../README.
 - [platform/BOARD_SUPPORT_STATUS.md](platform/BOARD_SUPPORT_STATUS.md) — support matrix
 - [platform/BOARD_SUPPORT_NOTES.md](platform/BOARD_SUPPORT_NOTES.md) · [platform/BOARD_FAMILY_MATRIX.md](platform/BOARD_FAMILY_MATRIX.md) — family notes & matrix
 
+## Peripherals (subsystem drivers)
+
+- [platform/PWM_MULTI_MODULE.md](platform/PWM_MULTI_MODULE.md) — **the 4-module / 16-channel PWM facade, per-pin frequency, polarity, complementary pairs**
+- [platform/RTC_DRIVER.md](platform/RTC_DRIVER.md) — **low-level driver for RTC0/1/2 (compare + overflow IRQs)**
+- [platform/NIMBLE_INTEGRATION_PLAN.md](platform/NIMBLE_INTEGRATION_PLAN.md) — **multi-session roadmap for full BLE via Apache Mynewt's NimBLE (no SoftDevice)**
+
 ## Platform reference (capabilities & truth)
 
 - [platform/HARDWARE_CAPABILITIES.md](platform/HARDWARE_CAPABILITIES.md) — what the core exposes
-- [platform/PWM_BEHAVIOR.md](platform/PWM_BEHAVIOR.md) · [platform/PWM_TIMER_BOUNDARIES.md](platform/PWM_TIMER_BOUNDARIES.md) — PWM model & limits
+- [platform/PWM_BEHAVIOR.md](platform/PWM_BEHAVIOR.md) · [platform/PWM_TIMER_BOUNDARIES.md](platform/PWM_TIMER_BOUNDARIES.md) — PWM model & limits (legacy single-module notes)
 - [platform/POWER_ADC_NOTES.md](platform/POWER_ADC_NOTES.md) — ADC / battery-sense behavior
-- [platform/BLE_WIFI_BOUNDARIES.md](platform/BLE_WIFI_BOUNDARIES.md) — BLE/WiFi facade boundaries
+- [platform/BLE_WIFI_BOUNDARIES.md](platform/BLE_WIFI_BOUNDARIES.md) — BLE/WiFi facade boundaries (current advertising-only stub)
 - [platform/clock_ble_low_power_menu.md](platform/clock_ble_low_power_menu.md) · [platform/storage_backend_menu.md](platform/storage_backend_menu.md) — build menus
 - [platform/REFERENCE_COMPARISON.md](platform/REFERENCE_COMPARISON.md) — comparison vs `pdcook/nRFMicro-Arduino-Core`
 - [platform/HARDWARE_CAPABILITIES.md](platform/HARDWARE_CAPABILITIES.md), [platform/BOARD_IMAGE_EVIDENCE.md](platform/BOARD_IMAGE_EVIDENCE.md), [platform/DEVBOARD_INCREMENTAL_GATES.md](platform/DEVBOARD_INCREMENTAL_GATES.md) — evidence & gating

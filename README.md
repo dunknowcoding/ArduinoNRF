@@ -120,8 +120,9 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 |---|---|
 | **GPIO / Serial / SPI / Wire** | ✅ Supported; global `Wire1`/`SPI1` exist but stay disabled on boards without verified secondary-bus pins |
 | **ADC** | ✅ SAADC-backed `analogRead`, plus `analogReadVDD()` / `analogReadVDDHDIV5()` |
-| **PWM** | ⚠️ Single shared `PWM0` group — up to 4 routed outputs sharing one frequency domain |
-| **BLE** | ⚠️ Advertising-only self-hosted facade — **not** a full connection-oriented GATT stack |
+| **PWM** | ✅ **All 4 PWM modules / 16 channels / 4 independent frequency groups** + per-pin polarity + complementary pairing with software dead-time. Tools → PWM speed picks the default carrier. See [docs/platform/PWM_MULTI_MODULE.md](docs/platform/PWM_MULTI_MODULE.md). |
+| **RTC** | ✅ Low-level driver for **RTC0/1/2** (24-bit counter, 4 compares each, overflow IRQ, LFCLK-clocked so it survives sleep). See [docs/platform/RTC_DRIVER.md](docs/platform/RTC_DRIVER.md). |
+| **BLE** | ⚠️ Advertising-only self-hosted facade today. Full BLE (connections, GATT, security, sleep) is planned via NimBLE integration — see [docs/platform/NIMBLE_INTEGRATION_PLAN.md](docs/platform/NIMBLE_INTEGRATION_PLAN.md). |
 | **EEPROM** | ✅ Emulated (see EEPROM examples) |
 | **Upload** | ✅ Hands-free serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |
