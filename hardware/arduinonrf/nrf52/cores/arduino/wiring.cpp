@@ -131,6 +131,18 @@ inline uint8_t pwmEncodeSlot(uint8_t moduleIndex, uint8_t channelIndex) {
 constexpr uint8_t PWM_PIN_POLARITY_HIGH_ON_DUTY = 0U; // default: duty = high time
 constexpr uint8_t PWM_PIN_POLARITY_LOW_ON_DUTY  = 1U; // inverse: duty = low time
 
+// Build-time defaults for the global prescaler + countertop. boards.txt's
+// `menu.pwmclock` selects high-speed / low-speed / auto via the
+// build.pwm_clock_flags slot which expands to -DNRF_PWM_DEFAULT_*. They're
+// declared this early because the per-module init macro below pastes them
+// straight into the static initializer of g_pwmModules[].
+#ifndef NRF_PWM_DEFAULT_PRESCALER
+#define NRF_PWM_DEFAULT_PRESCALER 4U
+#endif
+#ifndef NRF_PWM_DEFAULT_COUNTERTOP
+#define NRF_PWM_DEFAULT_COUNTERTOP 1023U
+#endif
+
 // Per-module state. Each PWM module is its own frequency group with up to 4
 // channels sharing prescaler + countertop, but the four modules are mutually
 // independent so different pins can run at different frequencies.
@@ -144,11 +156,15 @@ struct NrfPwmModuleState {
     bool configured;                          // sticky: do we own the peripheral?
 };
 
+// Lifted to avoid hand-syncing four copies of the build-time defaults.
+#define NRF_PWM_DEFAULT_INIT(BASE) \
+    {BASE, {0xFF, 0xFF, 0xFF, 0xFF}, (NRF_PWM_DEFAULT_PRESCALER), (NRF_PWM_DEFAULT_COUNTERTOP), {0, 0, 0, 0}, false, false}
+
 NrfPwmModuleState g_pwmModules[PWM_MODULE_COUNT] = {
-    {PWM0_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
-    {PWM1_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
-    {PWM2_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
-    {PWM3_BASE, {0xFF, 0xFF, 0xFF, 0xFF}, 4U, 1023U, {0, 0, 0, 0}, false, false},
+    NRF_PWM_DEFAULT_INIT(PWM0_BASE),
+    NRF_PWM_DEFAULT_INIT(PWM1_BASE),
+    NRF_PWM_DEFAULT_INIT(PWM2_BASE),
+    NRF_PWM_DEFAULT_INIT(PWM3_BASE),
 };
 
 // Per-pin polarity (set via analogWritePolarity). Default = HIGH_ON_DUTY.
@@ -167,9 +183,12 @@ uint32_t g_randomState = 0x6D2B79F5UL;
 // Legacy global "default" prescaler + countertop. Used as:
 //   - the seed value for newly-activated PWM modules,
 //   - the answer to legacy global getters (nrfPwmFrequencyHz, nrfPwmCounterTop, ...).
-// Per-module values in g_pwmModules[i] are the actual hardware truth.
-uint8_t g_pwmPrescaler = 4U;
-uint16_t g_pwmCounterTop = 1023U;
+// Per-module values in g_pwmModules[i] are the actual hardware truth. Build-
+// time defaults are NRF_PWM_DEFAULT_PRESCALER / NRF_PWM_DEFAULT_COUNTERTOP
+// (defined above next to NrfPwmModuleState since the static initializer pastes
+// them in directly).
+uint8_t g_pwmPrescaler = NRF_PWM_DEFAULT_PRESCALER;
+uint16_t g_pwmCounterTop = NRF_PWM_DEFAULT_COUNTERTOP;
 NrfPwmWriteStatus g_pwmLastWriteStatus = NRF_PWM_WRITE_OK;
 
 uint8_t adcHardwareResolutionBits();

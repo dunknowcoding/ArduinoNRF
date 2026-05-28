@@ -6,6 +6,7 @@ menu.bootloader=Bootloader
 menu.flashprofile=Flash
 menu.ramprofile=SRAM
 menu.buildprofile=Build Options
+menu.pwmclock=PWM speed
 
 promicro_nrf52840.name=AliExpress ProMicro nRF52840
 promicro_nrf52840.upload.tool=niusdfu
@@ -60,7 +61,8 @@ promicro_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 promicro_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 promicro_nrf52840.build.storage_reserved_bytes=16384
 promicro_nrf52840.build.usbdesc_flags=
-promicro_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.usb_vbus_flags} {build.upload_mode_flags} {build.bootloader_fallback_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags} {build.usbdesc_flags}
+promicro_nrf52840.build.pwm_clock_flags=
+promicro_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.usb_vbus_flags} {build.upload_mode_flags} {build.bootloader_fallback_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags} {build.usbdesc_flags} {build.pwm_clock_flags}
 promicro_nrf52840.menu.usbcdc.enabled=Enabled
 promicro_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
 promicro_nrf52840.menu.usbcdc.disabled=Disabled
@@ -271,6 +273,18 @@ promicro_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
 promicro_nrf52840.menu.storage.legacy=Single-page
 promicro_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 promicro_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
+
+# ----- PWM speed (default prescaler / countertop for new modules) -----------
+# All four PWM modules still support per-pin nrfPwmSetPinFrequency() at run
+# time; this menu just biases the BUILD-TIME default for analogWrite(pin, v)
+# without any explicit frequency call. The math is freq = 16 MHz / (1<<P) /
+# (top+1), so the carrier shown below is the analogWrite default.
+promicro_nrf52840.menu.pwmclock.auto=Auto (~1 kHz default carrier)
+promicro_nrf52840.menu.pwmclock.auto.build.pwm_clock_flags=
+promicro_nrf52840.menu.pwmclock.high=High-speed (~16 kHz default carrier)
+promicro_nrf52840.menu.pwmclock.high.build.pwm_clock_flags=-DNRF_PWM_DEFAULT_PRESCALER=0 -DNRF_PWM_DEFAULT_COUNTERTOP=999
+promicro_nrf52840.menu.pwmclock.low=Low-speed (~125 Hz default carrier)
+promicro_nrf52840.menu.pwmclock.low.build.pwm_clock_flags=-DNRF_PWM_DEFAULT_PRESCALER=7 -DNRF_PWM_DEFAULT_COUNTERTOP=999
 
 nicenano_v2.name=nice!nano v2 (experimental)
 nicenano_v2.upload.tool=niusdfu
