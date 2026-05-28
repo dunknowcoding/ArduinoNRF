@@ -57,8 +57,19 @@ tools.niusdfu.upload.pattern="{runtime.tools.dfu-util.path}/bin/dfu-util" {uploa
 # PowerShell open sequence on Windows. Keep boards.use_1200bps_touch=false for golang and always pass
 # -UseTouch1200 true here so upload.ps1 owns touch (115200 + 1200 + DTR drop + clone VID/PID logic).
 tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -NrfutilExe '{runtime.tools.adafruit-nrfutil.path}/adafruit-nrfutil.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort '{upload.wait_for_upload_port}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
+# Linux / macOS: Adafruit's standard cross-platform path - adafruit-nrfutil genpkg
+# + dfu serial - driven by a small stdlib-only Python script. Requires
+# adafruit-nrfutil on PATH (pip3 install --user adafruit-nrfutil). The Arduino
+# IDE handles the 1200-bps touch when use_1200bps_touch=true, but the script
+# also passes -t 1200 to adafruit-nrfutil as a safety belt.
+tools.niusdfu.upload.pattern.linux=python3 "{runtime.platform.path}/tools/niusrobotlab/upload.py" --hex "{build.path}/{build.project_name}.hex" --port {serial.port} --vid {upload.usb_vid} --pid {upload.usb_pid} --sd-req {upload.adafruit_sd_req} {upload.verbose}
+tools.niusdfu.upload.pattern.macosx=env LANG=C.UTF-8 LC_ALL=C.UTF-8 python3 "{runtime.platform.path}/tools/niusrobotlab/upload.py" --hex "{build.path}/{build.project_name}.hex" --port {serial.port} --vid {upload.usb_vid} --pid {upload.usb_pid} --sd-req {upload.adafruit_sd_req} {upload.verbose}
 tools.niusdfu.upload.params.verbose=-ArduinoIdeVerboseUpload 'true'
 tools.niusdfu.upload.params.quiet=-ArduinoIdeVerboseUpload 'false'
+tools.niusdfu.upload.params.verbose.linux=--verbose
+tools.niusdfu.upload.params.quiet.linux=
+tools.niusdfu.upload.params.verbose.macosx=--verbose
+tools.niusdfu.upload.params.quiet.macosx=
 
 debug.executable={build.path}/{build.project_name}.elf
 debug.toolchain=gcc
@@ -81,11 +92,16 @@ debug.cortex-debug.custom.overrideRestartCommands.2=c
 debug.usbgdbstub.transport=usb-cdc-gdbstub
 debug.usbgdbstub.gdb_target=localhost:3335
 debug.usbgdbstub.baudrate=115200
-debug.usbgdbstub.bridge.path={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_bridge.ps1
+debug.usbgdbstub.bridge.path={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_bridge.py
 debug.usbgdbstub.bridge.path.windows={runtime.platform.path}\tools\niusrobotlab\usb_gdbstub_bridge.ps1
+debug.usbgdbstub.bridge.path.linux={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_bridge.py
+debug.usbgdbstub.bridge.path.macosx={runtime.platform.path}/tools/niusrobotlab/usb_gdbstub_bridge.py
 debug.usbgdbstub.bridge.describe.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -Describe -Board "{build.variant}" -TcpPort 3335 -BaudRate {debug.usbgdbstub.baudrate}
 debug.usbgdbstub.bridge.listports.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -ListPorts
 debug.usbgdbstub.bridge.launch.pattern=powershell -NoProfile -ExecutionPolicy Bypass -File "{debug.usbgdbstub.bridge.path.windows}" -Board "{build.variant}" -SerialPort "{serial.port}" -TcpPort 3335 -BaudRate {debug.usbgdbstub.baudrate}
+# Linux/macOS: stdlib Python + pyserial (pyserial is already pulled in by adafruit-nrfutil).
+debug.usbgdbstub.bridge.launch.pattern.linux=python3 "{debug.usbgdbstub.bridge.path.linux}" --serial-port "{serial.port}" --tcp-port 3335 --baud {debug.usbgdbstub.baudrate} --board "{build.variant}"
+debug.usbgdbstub.bridge.launch.pattern.macosx=python3 "{debug.usbgdbstub.bridge.path.macosx}" --serial-port "{serial.port}" --tcp-port 3335 --baud {debug.usbgdbstub.baudrate} --board "{build.variant}"
 
 # debug.server.usbgdbstub.* — unused at the arduino-cli level. arduino-cli's
 # Debug command only accepts a fixed set of server-type names (openocd,

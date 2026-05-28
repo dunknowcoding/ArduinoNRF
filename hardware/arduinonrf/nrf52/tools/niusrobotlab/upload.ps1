@@ -575,7 +575,17 @@ $script:NrfBootloaderCandidates = @(
     @{ Vid = '239a'; Pid = '0029'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 876544;  Note = 'Adafruit nice!nano v2 fork'; VolumeLabel = 'NICENANO'; Model = 'nice!nano'; BoardId = 'nRF52840-nicenano' },
     @{ Vid = '239a'; Pid = '002a'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 876544;  Note = 'Adafruit Feather nRF52840 fork'; VolumeLabel = 'FTHR840BOOT'; Model = 'Feather nRF52840 Express'; BoardId = 'nRF52840-feather-express' },
     @{ Vid = '239a'; Pid = '4029'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 876544;  Note = 'Adafruit user-mode CDC (nRF52840)' },
-    @{ Vid = '1915'; Pid = '521f'; Kind = 'dfu';          Family = '';           AppStart = '0x0';     MaxSize = 1032192; Note = 'Nordic Open DFU (legacy)' }
+    # Seeed XIAO nRF52840 (and XIAO Sense): Adafruit-fork bootloader under Seeed's VID.
+    @{ Vid = '2886'; Pid = '0044'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 (Adafruit-fork, Seeed)'; VolumeLabel = 'XIAO-BOOT'; Model = 'Seeed XIAO nRF52840'; BoardId = 'nRF52840-SeeedXiao-v1' },
+    @{ Vid = '2886'; Pid = '8044'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 (runtime/app PID)'; VolumeLabel = 'XIAO-BOOT'; Model = 'Seeed XIAO nRF52840'; BoardId = 'nRF52840-SeeedXiao-v1' },
+    @{ Vid = '2886'; Pid = '0045'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 Sense'; VolumeLabel = 'XIAO-SENSE'; Model = 'Seeed XIAO nRF52840 Sense'; BoardId = 'nRF52840-SeeedXiaoSense-v1' },
+    @{ Vid = '2886'; Pid = '8045'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 Sense (runtime/app PID)'; VolumeLabel = 'XIAO-SENSE'; Model = 'Seeed XIAO nRF52840 Sense'; BoardId = 'nRF52840-SeeedXiaoSense-v1' },
+    # Makerdiary Pitaya Go: Adafruit-fork bootloader, same VID:PID in DFU and app.
+    @{ Vid = '2886'; Pid = 'f00e'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Makerdiary Pitaya Go (Adafruit-fork)'; VolumeLabel = 'PITAYAGO'; Model = 'Makerdiary Pitaya Go'; BoardId = 'PITAYAGO' },
+    # nRFMicro (joric open-hardware): Adafruit-fork bootloader under the pid.codes 1209 VID.
+    @{ Vid = '1209'; Pid = '5284'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'nRFMicro (joric, Adafruit-fork)'; VolumeLabel = 'NRFMICRO'; Model = 'nRFMicro'; BoardId = 'nRF52840-nRFMicro-v0' },
+    @{ Vid = '1209'; Pid = '5285'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'nRFMicro runtime/app PID'; VolumeLabel = 'NRFMICRO'; Model = 'nRFMicro'; BoardId = 'nRF52840-nRFMicro-v0' },
+    @{ Vid = '1915'; Pid = '521f'; Kind = 'dfu';          Family = '';           AppStart = '0x0';     MaxSize = 1032192; Note = 'Nordic Open DFU (PCA10059 USB dongle / legacy)' }
 )
 foreach ($pidByte in @('5280','5281','5282','5283','5284','5285','5286','5287','5288','5289','528a','528b','528c','528d','528e','528f')) {
     $script:NrfBootloaderCandidates += @{ Vid = '1915'; Pid = $pidByte; Kind = 'dfu'; Family = ''; AppStart = '0x0'; MaxSize = 1032192; Note = ('Nordic Open DFU clone (PID 0x{0})' -f $pidByte) }

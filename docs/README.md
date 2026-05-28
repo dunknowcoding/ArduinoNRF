@@ -4,6 +4,7 @@ All project documentation lives here. Start with the [project README](../README.
 
 ## Getting started & status
 
+- [COMPATIBILITY.md](COMPATIBILITY.md) — **OS support matrix (Windows / Linux / macOS) and real-board identity audit**
 - [VALIDATION.md](VALIDATION.md) — what's verified on real hardware, timing, and how to reproduce it
 - [release/RELEASE_NOTES_v0.0.1.md](release/RELEASE_NOTES_v0.0.1.md) — release notes
 - [release/README.md](release/README.md) · [release/PRE_RELEASE_CHECKLIST.md](release/PRE_RELEASE_CHECKLIST.md) — release flow

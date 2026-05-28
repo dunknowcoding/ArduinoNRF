@@ -88,20 +88,31 @@ See **[docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md](docs/platform/ARDUINO_IDE2_USB
 
 ## 🧩 Supported boards
 
-| Board | MCU | Notes |
-|---|---|---|
-| **AliExpress ProMicro nRF52840** | nRF52840 | Primary target — hands-free upload **and** single-cable debug verified |
-| nice!nano v2 | nRF52840 | Reference-backed LFCLK + secondary-bus metadata |
-| SuperMini nRF52840 | nRF52840 | Check VCC behavior under USB power |
-| nRFMicro nRF52840 | nRF52840 | Reference-backed secondary-bus metadata |
-| Mini nRF52840 | nRF52840 | |
-| XIAO-like nRF52840 | nRF52840 | |
-| Generic nRF52840 Dev Board | nRF52840 | |
-| Generic nRF52833 Dev Board | nRF52833 | |
-| Pitaya Go nRF52840 | nRF52840 | |
-| nRF52840 USB Dongle | nRF52840 | |
+Identities were re-checked against the upstream `Adafruit_nRF52_Bootloader` `board.h` files, the Seeed and pdcook Arduino cores, and `joric/nrfmicro`. See **[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)** for the full audit and per-board change log.
 
-Per-board reference docs live in **[docs/boards/](docs/boards/)**; the support matrix is in **[docs/platform/BOARD_SUPPORT_STATUS.md](docs/platform/BOARD_SUPPORT_STATUS.md)**.
+| Board | Bootloader VID:PID | Pipeline | Status |
+|---|---|---|---|
+| **AliExpress ProMicro nRF52840** | `0x239A:0x00B3` | Adafruit serial DFU | ✅ **Verified on hardware** (hands-free upload + single-cable debug) |
+| nice!nano v2 | `0x239A:0x00B3` | Adafruit serial DFU | Identity corrected; same pipeline as ProMicro |
+| SuperMini nRF52840 | `0x239A:0x00B3` | Adafruit serial DFU | Ships nice!nano bootloader; LED on P0.15 |
+| nRFMicro | `0x1209:0x5284` | Adafruit serial DFU | joric open-hardware; some DIY units carry nice!nano IDs instead |
+| Seeed XIAO nRF52840 (+ Sense) | `0x2886:0x0044` / `0x0045` | Adafruit serial DFU (Seeed) | Identity corrected, UF2 = `XIAO-BOOT` |
+| Makerdiary Pitaya Go | `0x2886:0xF00E` | Adafruit serial DFU | Identity corrected, UF2 = `PITAYAGO` |
+| Mini nRF52840 (AliExpress) | `auto` | varies | ⚠️ No canonical identity — auto-detect |
+| Generic nRF52840 Dev Board | `auto` | varies | ⚠️ Official Nordic DK uses **SWD via J-Link**, not USB DFU |
+| nRF52840 USB Dongle (PCA10059) | `0x1915:0x521F` | **Nordic Open DFU** | ⚠️ **Use Nordic `nrfutil` / nRF Connect — this pipeline does not apply** |
+
+Per-board reference notes live in **[docs/boards/](docs/boards/)**; the support matrix is in **[docs/platform/BOARD_SUPPORT_STATUS.md](docs/platform/BOARD_SUPPORT_STATUS.md)**.
+
+### 🖥️ OS support
+
+| OS | Hands-free upload | Single-cable debug |
+|---|---|---|
+| **Windows 10/11** | ✅ Verified (`upload.ps1`) | ✅ Verified (PowerShell bridge) |
+| **Linux** (Ubuntu / Debian / Fedora / Arch) | ✅ Implemented via `upload.py` + `adafruit-nrfutil` (untested in this revision) | ✅ Implemented via `usb_gdbstub_bridge.py` (untested) |
+| **macOS** (Intel + Apple Silicon) | ✅ Implemented via `upload.py` + `adafruit-nrfutil` (untested) | ✅ Implemented via `usb_gdbstub_bridge.py` (untested) |
+
+Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) install the shipped udev rules — see **[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)**.
 
 ## ⚙️ Capabilities & honest limits
 
