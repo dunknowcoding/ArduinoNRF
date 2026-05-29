@@ -41,6 +41,8 @@ constexpr uint32_t RADIO_CRCPOLY         = 0x538UL;
 constexpr uint32_t RADIO_CRCINIT         = 0x53CUL;
 constexpr uint32_t RADIO_RSSISAMPLE      = 0x548UL;
 constexpr uint32_t RADIO_STATE           = 0x550UL;
+constexpr uint32_t RADIO_MODECNF0        = 0x650UL;
+constexpr uint32_t RADIO_POWER           = 0xFFCUL;
 
 // SHORTS bits
 constexpr uint32_t SHORT_READY_START   = 1UL << 0;
@@ -104,6 +106,14 @@ bool NrfRadio::begin(uint8_t channel, DataRate rate, int8_t txPowerDbm) {
     nrfStartHfclk();
     dwtInit();
 
+    // Power the RADIO on. Without this, if anything previously powered it down
+    // (e.g. NrfBleRadio::end() writes RADIO_POWER=0), every config write below
+    // is ignored and the radio is silently dead. Matches the BLE driver.
+    reg32(RADIO_BASE, RADIO_POWER) = 1UL;
+    // Default (non-fast) ramp-up, like the verified BLE path. Leaving MODECNF0
+    // at its reset value risks a slower/legacy ramp on some revisions.
+    reg32(RADIO_BASE, RADIO_MODECNF0) = 0UL;
+
     reg32(RADIO_BASE, RADIO_MODE) =
         (rate == RATE_2MBIT) ? MODE_NRF_2MBIT : MODE_NRF_1MBIT;
 
@@ -131,6 +141,8 @@ bool NrfRadio::begin(uint8_t channel, DataRate rate, int8_t txPowerDbm) {
 
 void NrfRadio::end() {
     disableRadio();
+    // Power the RADIO down so a later NrfBleRadio (or re-begin) starts clean.
+    reg32(RADIO_BASE, RADIO_POWER) = 0UL;
     g_started = false;
 }
 

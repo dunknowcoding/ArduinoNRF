@@ -30,16 +30,26 @@ constexpr uint32_t NFCT_INTENCLR       = 0x308UL;
 constexpr uint32_t NFCT_ERRORSTATUS    = 0x404UL;
 constexpr uint32_t NFCT_NFCTAGSTATE    = 0x410UL;
 constexpr uint32_t NFCT_FIELDPRESENT   = 0x42CUL;
-constexpr uint32_t NFCT_FRAMEDELAYMAX  = 0x50CUL;
+// Register offsets corrected 2026-05-29 against the Nordic MDK header
+// (nrf52840.h). The prior values were guessed and wrong: every one below was
+// off, so the tag could never have worked on hardware. Authoritative layout:
+//   FRAMEDELAYMIN 0x504, FRAMEDELAYMAX 0x508, FRAMEDELAYMODE 0x50C,
+//   PACKETPTR 0x510, MAXLEN 0x514,
+//   TXD.FRAMECONFIG 0x518, TXD.AMOUNT 0x51C, RXD.FRAMECONFIG 0x520, RXD.AMOUNT 0x524,
+//   NFCID1_LAST 0x590, NFCID1_2ND_LAST 0x594, NFCID1_3RD_LAST 0x598,
+//   SENSRES 0x5A0, SELRES 0x5A4.
+constexpr uint32_t NFCT_FRAMEDELAYMAX  = 0x508UL;   // was 0x50C (= FRAMEDELAYMODE!)
 constexpr uint32_t NFCT_PACKETPTR      = 0x510UL;
 constexpr uint32_t NFCT_MAXLEN         = 0x514UL;
-constexpr uint32_t NFCT_TX_AMOUNT      = 0x518UL;
-constexpr uint32_t NFCT_RX_AMOUNT      = 0x51CUL;
-constexpr uint32_t NFCT_NFCID1_LAST      = 0x59CUL;   // bytes 4..7 of UID
-constexpr uint32_t NFCT_NFCID1_2ND_LAST  = 0x598UL;
-constexpr uint32_t NFCT_NFCID1_3RD_LAST  = 0x594UL;
-constexpr uint32_t NFCT_SENSRES        = 0x534UL;
-constexpr uint32_t NFCT_SELRES         = 0x540UL;
+constexpr uint32_t NFCT_TX_FRAMECONFIG = 0x518UL;
+constexpr uint32_t NFCT_TX_AMOUNT      = 0x51CUL;   // was 0x518 (= TXD.FRAMECONFIG)
+constexpr uint32_t NFCT_RX_FRAMECONFIG = 0x520UL;
+constexpr uint32_t NFCT_RX_AMOUNT      = 0x524UL;   // was 0x51C (= TXD.AMOUNT)
+constexpr uint32_t NFCT_NFCID1_LAST      = 0x590UL;   // bytes 4..7 of UID (was 0x59C)
+constexpr uint32_t NFCT_NFCID1_2ND_LAST  = 0x594UL;   // was 0x598
+constexpr uint32_t NFCT_NFCID1_3RD_LAST  = 0x598UL;   // was 0x594
+constexpr uint32_t NFCT_SENSRES        = 0x5A0UL;   // was 0x534
+constexpr uint32_t NFCT_SELRES         = 0x5A4UL;   // was 0x540
 
 // SHORTS / INTEN bits
 constexpr uint32_t NFCT_SHORTS_FIELDDETECTED_ACTIVATE = 1U << 0;
