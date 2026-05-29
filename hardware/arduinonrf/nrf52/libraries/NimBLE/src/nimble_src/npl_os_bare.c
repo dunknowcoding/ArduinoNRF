@@ -22,6 +22,10 @@
 #include <string.h>
 #include "nimble/nimble_npl.h"
 
+// Defined in nimble_port_bare.c - drains the host + LL event queues once,
+// non-blocking. ble_npl_sem_pend() pumps it to cooperatively wait for events.
+void nimble_port_run(void);
+
 // ---- Critical sections via PRIMASK -----------------------------------------
 
 uint32_t ble_npl_hw_enter_critical(void) {
@@ -234,6 +238,10 @@ ble_npl_time_t ble_npl_time_get(void) {
     return 0U;
 }
 
+bool ble_npl_os_started(void) {
+    return false;
+}
+
 ble_npl_error_t ble_npl_time_ms_to_ticks(uint32_t ms, ble_npl_time_t *out_ticks) {
     *out_ticks = (uint32_t)(((uint64_t)ms * BLE_NPL_TICKS_PER_SECOND) / 1000U);
     return BLE_NPL_OK;
@@ -254,6 +262,10 @@ uint32_t ble_npl_time_ticks_to_ms32(ble_npl_time_t ticks) {
 
 void ble_npl_time_delay(ble_npl_time_t ticks) {
     (void)ticks;   // M2: busy-wait via NrfTimer, or sleep via NrfPower::sleepMs
+}
+
+void *ble_npl_get_current_task_id(void) {
+    return (void *)1;
 }
 
 // ---- Mutex / Sem (flag-only - single-threaded port) -----------------------
@@ -287,11 +299,32 @@ ble_npl_error_t ble_npl_sem_deinit(struct ble_npl_sem *sem) {
     return BLE_NPL_OK;
 }
 ble_npl_error_t ble_npl_sem_pend(struct ble_npl_sem *sem, ble_npl_time_t tmo) {
-    (void)tmo;
+    // Fast path: a token is already available.
     uint32_t ctx = ble_npl_hw_enter_critical();
-    if (sem->count > 0) sem->count--;
+    if (sem->count > 0) {
+        sem->count--;
+        ble_npl_hw_exit_critical(ctx);
+        return BLE_NPL_OK;
+    }
     ble_npl_hw_exit_critical(ctx);
-    return BLE_NPL_OK;
+
+    // Cooperative wait: no RTOS, so block by PUMPING the event queues until the
+    // awaited token is posted (e.g. the host's HCI command-complete event that
+    // releases ble_hs_hci_sem). This is what makes synchronous host<->controller
+    // HCI round-trips work on bare metal. Bounded so a missing response times
+    // out instead of hanging. tmo==0 means a single non-blocking poll.
+    uint32_t spins = (tmo == 0) ? 1u : 1000000u;
+    while (spins--) {
+        nimble_port_run();   // drains host + LL queues (non-blocking)
+        ctx = ble_npl_hw_enter_critical();
+        if (sem->count > 0) {
+            sem->count--;
+            ble_npl_hw_exit_critical(ctx);
+            return BLE_NPL_OK;
+        }
+        ble_npl_hw_exit_critical(ctx);
+    }
+    return BLE_NPL_TIMEOUT;
 }
 ble_npl_error_t ble_npl_sem_release(struct ble_npl_sem *sem) {
     uint32_t ctx = ble_npl_hw_enter_critical();
@@ -320,3 +353,11 @@ void ble_npl_hw_set_isr(int irqn, void (*addr)(void)) {
         s_isr_table[irqn] = addr;
     }
 }
+
+// Real peripheral IRQ vectors for the controller-owned peripherals, dispatched
+// into the ISRs the controller registered via ble_npl_hw_set_isr(). The
+// Arduino core declares these as weak Default_Handler aliases, so these strong
+// definitions take over when the NimBLE library is linked into a sketch.
+// (The LL timer backend installs its own TIMER/RTC handlers via hal_timer.)
+void RADIO_IRQHandler(void) { if (s_isr_table[1])  s_isr_table[1](); }   // RADIO_IRQn = 1
+void RNG_IRQHandler(void)   { if (s_isr_table[13]) s_isr_table[13](); }  // RNG_IRQn  = 13

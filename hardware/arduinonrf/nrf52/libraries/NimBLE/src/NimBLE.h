@@ -3,12 +3,14 @@
 // docs/platform/NIMBLE_INTEGRATION_PLAN.md for the milestone schedule.
 //
 // SCOPE
-//   This is a SKELETON. The actual BLE host + controller requires the
-//   NimBLE source tree vendored under vendor/ (see vendor/README.md).
-//   Until then every operation returns NIMBLE_NOT_VENDORED and
-//   isAvailable() returns false. The bring-up API is intentionally
-//   minimal here so user code can be written against it now; the full
-//   GATT server / client surface lands with milestones M2..M5.
+//   This is an M1 bring-up slice. The actual BLE host + controller still
+//   requires the NimBLE source tree vendored under vendor/ (see
+//   vendor/README.md). Today begin() initializes the bare-metal porting
+//   layer, requests HFCLK, and exposes the chip BLE address. The public
+//   API can currently bridge advertising only into the repository's
+//   in-tree advertising facade; that backend still lacks a proven over-
+//   the-air controller. Real connection / GATT / security support still
+//   lands with milestones M2..M5.
 
 #pragma once
 
@@ -34,6 +36,7 @@ public:
 
     static void end();
     static bool isAvailable();
+    static void poll();
 
     // -- Advertising (M2 milestone) ----------------------------------------
 

@@ -15,17 +15,32 @@ The relevant subtrees to copy here:
 
 | Source path                                                | Destination here                  |
 |------------------------------------------------------------|-----------------------------------|
+| `nimble/include/nimble/`                                   | `vendor/include/nimble/`          |
 | `nimble/host/include/host/`                                | `vendor/include/host/`            |
 | `nimble/host/src/`                                         | `vendor/src/host/`                |
 | `nimble/host/services/`                                    | `vendor/src/services/`            |
 | `nimble/controller/include/controller/`                    | `vendor/include/controller/`      |
 | `nimble/controller/src/`                                   | `vendor/src/controller/`          |
 | `nimble/drivers/nrf5x/`                                    | `vendor/src/drivers_nrf5x/`       |
-| `nimble/transport/include/nimble/transport/`               | `vendor/include/transport/`       |
+| `nimble/transport/include/nimble/`                         | `vendor/include/nimble/`          |
 | `nimble/transport/socket/src/`                             | `vendor/src/transport_socket/`    |
-| `porting/nimble/include/`                                  | `vendor/include/porting/`         |
+| `porting/nimble/include/nimble/`                           | `vendor/include/nimble/`          |
 | `porting/npl/freertos/`                                    | `vendor/src/npl_freertos/`        |
-| (we'll adapt `npl_freertos` to bare-metal in M1)           |                                   |
+| public headers promoted for Arduino compile                | `src/nimble/`, `src/host/`, `src/controller/` |
+
+From this repository root you can stage that snapshot with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\nimble\\sync_vendor.ps1 -Clean
+```
+
+The script does two things on purpose:
+
+1. refreshes `vendor/` with the upstream staging snapshot
+2. promotes the upstream public headers into `src/` so Arduino's library build can actually resolve `nimble/...`, `host/...`, and `controller/...` includes
+
+It also writes `vendor/UPSTREAM_REVISION.txt` so future sessions can
+see exactly which `drivers/mynewt-nimble` revision the staging area came from.
 
 After vendoring set `-DNRF_NIMBLE_VENDORED=1` in
 `hardware/arduinonrf/nrf52/boards.txt` (or via a build-flag menu) so

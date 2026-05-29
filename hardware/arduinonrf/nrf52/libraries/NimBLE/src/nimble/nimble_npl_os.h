@@ -56,7 +56,7 @@ struct ble_npl_callout {
     struct ble_npl_eventq  *evq;
     uint32_t                expiration_ticks;
     bool                    active;
-    struct ble_npl_callout *next;     // intrusive list of pending callouts
+    struct ble_npl_callout *next;
 };
 
 // Mutex / Sem - cooperative scheduling makes these flag-based.
