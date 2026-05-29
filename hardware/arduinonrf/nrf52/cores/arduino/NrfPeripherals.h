@@ -238,6 +238,66 @@ public:
     static bool writeBytes(uint32_t flashAddress, const uint8_t *bytes, size_t length);
 };
 
+// ---- NrfUicr - User Information Configuration Registers --------------------
+//
+// UICR is a small non-volatile region (at 0x10001000) read by the chip at
+// boot to configure hardware that can't be changed at runtime. The two that
+// actually matter for a clone board:
+//
+//   * REGOUT0 - the GPIO high-voltage output level. Boards that drive 3.3V
+//     logic (or run a QSPI flash at 3.3V) need this bumped from the 1.8V
+//     factory default. Takes effect only after a reset.
+//   * NFCPINS - whether P0.09 / P0.10 are NFC antenna pins (default) or
+//     normal GPIO. Free up two pins by disabling NFC here. Takes effect
+//     after a reset.
+//
+// Plus 32 CUSTOMER[] words you can use for your own persistent config
+// (board revision, calibration id, ...) that survives a full chip erase
+// done through the app (UICR is only wiped by eraseAll() or a debugger
+// "recover").
+//
+// WRITE SEMANTICS: UICR is flash-like - a word only flips 1 bits to 0. From
+// the erased state (0xFFFFFFFF) you can write any value once. To rewrite a
+// word to a value needing a 0->1 flip you must eraseAll() first, which wipes
+// the ENTIRE UICR (all customer words too). setRegout0Voltage() handles the
+// common case (factory-default REGOUT0 -> a lower VOUT code) without an erase.
+//
+// All setters need a reset to take effect; they do NOT reset for you.
+class NrfUicr {
+public:
+    enum Voltage : uint8_t {
+        V1_8 = 0, V2_1 = 1, V2_4 = 2, V2_7 = 3, V3_0 = 4, V3_3 = 5,
+    };
+
+    static constexpr uint8_t CUSTOMER_COUNT = 32U;
+
+    // Read the configured GPIO high-drive output voltage. Returns V1_8 if
+    // REGOUT0 is still at its erased default.
+    static Voltage regout0Voltage();
+
+    // Set REGOUT0. Returns false if the requested code needs a 0->1 bit flip
+    // versus the current value (call eraseAll() first in that case). Reset
+    // required to take effect. THINK before raising this on a board whose
+    // peripherals aren't 3.3V tolerant.
+    static bool setRegout0Voltage(Voltage v);
+
+    // True if NFC antenna pins P0.09/P0.10 are currently configured as GPIO
+    // (i.e. NFC is disabled).
+    static bool nfcPinsAreGpio();
+
+    // Disable NFC so P0.09/P0.10 become normal GPIO. One-way without an
+    // eraseAll(). Reset required to take effect.
+    static bool setNfcPinsAsGpio();
+
+    // Customer[] persistent words (index 0..31).
+    static uint32_t readCustomer(uint8_t index);
+    static bool     writeCustomer(uint8_t index, uint32_t value);
+
+    // Wipe the ENTIRE UICR back to 0xFFFFFFFF (all customer words included).
+    // Needed before rewriting any word to a value requiring a 0->1 flip.
+    static bool eraseAll();
+};
+
 // ---- NrfPpi - Programmable Peripheral Interconnect ------------------------
 //
 // 20 user-programmable channels (PPI 0..19) + 12 pre-programmed channels for

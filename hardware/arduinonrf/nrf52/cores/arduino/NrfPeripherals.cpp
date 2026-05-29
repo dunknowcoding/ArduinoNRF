@@ -540,6 +540,93 @@ bool NrfNvmc::writeBytes(uint32_t flashAddress, const uint8_t *bytes, size_t len
 }
 
 // ============================================================================
+// NrfUicr - User Information Configuration Registers
+// ============================================================================
+
+namespace {
+constexpr uint32_t UICR_BASE        = 0x10001000UL;
+constexpr uint32_t UICR_CUSTOMER0   = 0x080UL;     // CUSTOMER[i] @ +i*4
+constexpr uint32_t UICR_NFCPINS     = 0x20CUL;
+constexpr uint32_t UICR_REGOUT0     = 0x304UL;
+
+// NVMC controls writes to UICR exactly as it does for main flash.
+constexpr uint32_t UICR_NVMC_BASE        = 0x4001E000UL;
+constexpr uint32_t UICR_NVMC_READY       = 0x400UL;
+constexpr uint32_t UICR_NVMC_CONFIG      = 0x504UL;
+constexpr uint32_t UICR_NVMC_ERASEUICR   = 0x514UL;
+constexpr uint32_t UICR_NVMC_CFG_REN     = 0UL;
+constexpr uint32_t UICR_NVMC_CFG_WEN     = 1UL;
+constexpr uint32_t UICR_NVMC_CFG_EEN     = 2UL;
+
+inline uint32_t uicrRead(uint32_t offset) {
+    return reg32(UICR_BASE, offset);
+}
+
+inline void nvmcWaitReady() {
+    while ((reg32(UICR_NVMC_BASE, UICR_NVMC_READY) & 1UL) == 0UL) {}
+}
+
+// Write one UICR word. UICR is flash-like: only 1->0 transitions stick, so
+// the caller guards the subset rule. Returns false if the value would need a
+// 0->1 flip versus the current contents.
+bool uicrWrite(uint32_t offset, uint32_t value) {
+    const uint32_t cur = uicrRead(offset);
+    if ((value & ~cur) != 0U) return false;   // would need a 0->1 flip
+    if (value == cur) return true;            // nothing to do
+    nvmcWaitReady();
+    reg32(UICR_NVMC_BASE, UICR_NVMC_CONFIG) = UICR_NVMC_CFG_WEN;
+    nvmcWaitReady();
+    reg32(UICR_BASE, offset) = value;
+    nvmcWaitReady();
+    reg32(UICR_NVMC_BASE, UICR_NVMC_CONFIG) = UICR_NVMC_CFG_REN;
+    return true;
+}
+}  // namespace
+
+NrfUicr::Voltage NrfUicr::regout0Voltage() {
+    const uint32_t v = uicrRead(UICR_REGOUT0) & 0x7U;
+    // 7 (and the erased 0xFFFFFFFF -> low bits 7) means "factory default 1.8V".
+    if (v > static_cast<uint32_t>(V3_3)) return V1_8;
+    return static_cast<Voltage>(v);
+}
+
+bool NrfUicr::setRegout0Voltage(Voltage v) {
+    // Build the target word: all bits high except the 3-bit VOUT field.
+    const uint32_t target = 0xFFFFFFF8UL | static_cast<uint32_t>(v);
+    return uicrWrite(UICR_REGOUT0, target);
+}
+
+bool NrfUicr::nfcPinsAreGpio() {
+    // NFCPINS.PROTECT bit0: 1 = NFC antenna pins (default), 0 = GPIO.
+    return (uicrRead(UICR_NFCPINS) & 0x1U) == 0U;
+}
+
+bool NrfUicr::setNfcPinsAsGpio() {
+    const uint32_t target = uicrRead(UICR_NFCPINS) & ~0x1UL;   // clear PROTECT
+    return uicrWrite(UICR_NFCPINS, target);
+}
+
+uint32_t NrfUicr::readCustomer(uint8_t index) {
+    if (index >= CUSTOMER_COUNT) return 0xFFFFFFFFUL;
+    return uicrRead(UICR_CUSTOMER0 + (static_cast<uint32_t>(index) * 4U));
+}
+
+bool NrfUicr::writeCustomer(uint8_t index, uint32_t value) {
+    if (index >= CUSTOMER_COUNT) return false;
+    return uicrWrite(UICR_CUSTOMER0 + (static_cast<uint32_t>(index) * 4U), value);
+}
+
+bool NrfUicr::eraseAll() {
+    nvmcWaitReady();
+    reg32(UICR_NVMC_BASE, UICR_NVMC_CONFIG) = UICR_NVMC_CFG_EEN;
+    nvmcWaitReady();
+    reg32(UICR_NVMC_BASE, UICR_NVMC_ERASEUICR) = 1UL;
+    nvmcWaitReady();
+    reg32(UICR_NVMC_BASE, UICR_NVMC_CONFIG) = UICR_NVMC_CFG_REN;
+    return true;
+}
+
+// ============================================================================
 // NrfPpi - peripheral interconnect
 // ============================================================================
 
