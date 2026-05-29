@@ -41,10 +41,10 @@ All project documentation lives here. Start with the [project README](../README.
 
 ## Multi-session roadmaps (large vendoring efforts)
 
-- [platform/NIMBLE_INTEGRATION_PLAN.md](platform/NIMBLE_INTEGRATION_PLAN.md) — full BLE via Apache Mynewt's NimBLE (no SoftDevice). Skeleton at [`libraries/NimBLE/`](../hardware/arduinonrf/nrf52/libraries/NimBLE/).
-- [platform/CC310_INTEGRATION_PLAN.md](platform/CC310_INTEGRATION_PLAN.md) — CryptoCell 310 hardware crypto. Skeleton at [`libraries/CC310/`](../hardware/arduinonrf/nrf52/libraries/CC310/).
-- [platform/ZIGBEE_INTEGRATION_PLAN.md](platform/ZIGBEE_INTEGRATION_PLAN.md) — IEEE 802.15.4 + Zboss. Skeleton at [`libraries/Zigbee/`](../hardware/arduinonrf/nrf52/libraries/Zigbee/).
-- [platform/THREAD_INTEGRATION_PLAN.md](platform/THREAD_INTEGRATION_PLAN.md) — Thread (OpenThread) IPv6 mesh, the protocol Matter / Apple Home / Google Home use. Skeleton at [`libraries/Thread/`](../hardware/arduinonrf/nrf52/libraries/Thread/).
+- [platform/NIMBLE_INTEGRATION_PLAN.md](platform/NIMBLE_INTEGRATION_PLAN.md) — `libraries/NimBLE/` is not done yet: parts of the Mynewt porting/NPL layer are vendored, but the real connection/GATT stack is not in-tree and `begin()` still returns `NIMBLE_NOT_VENDORED`.
+- [platform/CC310_INTEGRATION_PLAN.md](platform/CC310_INTEGRATION_PLAN.md) — `libraries/CC310/` is still a true skeleton until Nordic's `libcc_310.a` is provided; the public API exists, but operations return `CC_NOT_VENDORED`.
+- [platform/ZIGBEE_INTEGRATION_PLAN.md](platform/ZIGBEE_INTEGRATION_PLAN.md) — `libraries/Zigbee/` is still a true skeleton; the Zboss + nrf-802154 runtime is not vendored and `begin()` returns `ZIGBEE_NOT_VENDORED`.
+- [platform/THREAD_INTEGRATION_PLAN.md](platform/THREAD_INTEGRATION_PLAN.md) — `libraries/Thread/` is not done yet: OpenThread headers and some glue are present, but the actual OpenThread core + radio path are not vendored and `begin()` returns `THREAD_NOT_VENDORED`.
 
 ## Platform reference (capabilities & truth)
 
