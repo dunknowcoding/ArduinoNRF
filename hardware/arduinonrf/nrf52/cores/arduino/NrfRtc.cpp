@@ -267,7 +267,11 @@ extern "C" {
 // to. startup_nrf52.cpp declares weak aliases pointing at Default_Handler
 // for these symbols; our non-weak definitions here override them so the IRQ
 // actually reaches user callbacks.
-void RTC0_IRQHandler(void) { nrfRtc0().serviceIrq(); }
+// RTC0 handler is WEAK: when the NimBLE library is linked it owns RTC0 as the
+// BLE controller's os_cputime/hal_timer cputimer (its strong RTC0_IRQHandler in
+// npl_os_bare.c overrides this). Non-BLE sketches keep this definition for
+// nrfRtc0(). RTC1/RTC2 stay strong (the core's sleepMs etc. use them).
+__attribute__((weak)) void RTC0_IRQHandler(void) { nrfRtc0().serviceIrq(); }
 void RTC1_IRQHandler(void) { nrfRtc1().serviceIrq(); }
 void RTC2_IRQHandler(void) { nrfRtc2().serviceIrq(); }
 

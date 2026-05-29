@@ -361,3 +361,4 @@ void ble_npl_hw_set_isr(int irqn, void (*addr)(void)) {
 // (The LL timer backend installs its own TIMER/RTC handlers via hal_timer.)
 void RADIO_IRQHandler(void) { if (s_isr_table[1])  s_isr_table[1](); }   // RADIO_IRQn = 1
 void RNG_IRQHandler(void)   { if (s_isr_table[13]) s_isr_table[13](); }  // RNG_IRQn  = 13
+void RTC0_IRQHandler(void)  { if (s_isr_table[11]) s_isr_table[11](); }  // RTC0_IRQn = 11 (os_cputime/hal_timer 5)

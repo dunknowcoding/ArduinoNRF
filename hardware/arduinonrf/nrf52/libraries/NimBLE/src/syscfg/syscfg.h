@@ -147,12 +147,29 @@
 #define MYNEWT_VAL_OS_COREDUMP_CB (0)
 #endif
 
+// Combined host+controller build: the controller (LL + PHY + timer backend) is
+// vendored in this library, so the controller code paths and init MUST be
+// enabled. Without this, every `#if NIMBLE_CFG_CONTROLLER` block (incl. the
+// ble_ll_init/hal_timer_init/os_cputime_init calls in nimble_port_init) is
+// compiled out and the controller is never initialized.
+#ifndef NIMBLE_CFG_CONTROLLER
+#define NIMBLE_CFG_CONTROLLER (1)
+#endif
+
+// os_cputime rides hal_timer "5" == RTC0 @ 32768 Hz (LFCLK). TIMER0 is the BLE
+// PHY's (hardcoded in ble_phy.c), so the cputimer must NOT be timer 0. Enabling
+// TIMER_5 makes hal_timer install RTC0's ISR via ble_npl_hw_set_isr (dispatched
+// by RTC0_IRQHandler in npl_os_bare.c).
 #ifndef MYNEWT_VAL_OS_CPUTIME_FREQ
-#define MYNEWT_VAL_OS_CPUTIME_FREQ (1000000)
+#define MYNEWT_VAL_OS_CPUTIME_FREQ (32768)
 #endif
 
 #ifndef MYNEWT_VAL_OS_CPUTIME_TIMER_NUM
-#define MYNEWT_VAL_OS_CPUTIME_TIMER_NUM (0)
+#define MYNEWT_VAL_OS_CPUTIME_TIMER_NUM (5)
+#endif
+
+#ifndef MYNEWT_VAL_TIMER_5
+#define MYNEWT_VAL_TIMER_5 (1)
 #endif
 
 #ifndef MYNEWT_VAL_OS_CRASH_FILE_LINE
