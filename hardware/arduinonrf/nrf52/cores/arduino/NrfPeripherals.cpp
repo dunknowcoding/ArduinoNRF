@@ -968,9 +968,13 @@ constexpr uint32_t MWU_REGIONENCLR = 0x518UL;
 constexpr uint32_t MWU_REGION_BASE = 0x600UL;   // REGION[i].START @ +i*16
 constexpr uint32_t MWU_REGION_START_OFF = 0x000UL;
 constexpr uint32_t MWU_REGION_END_OFF   = 0x004UL;
-constexpr uint32_t MWU_PEREGION_RA      = 0x668UL;   // PERREGION[i].EVENTS_RAMATCH base
-constexpr uint32_t MWU_PEREGION_WA      = 0x66CUL;   // PERREGION[i].EVENTS_WAMATCH base
-constexpr uint32_t MWU_PEREGION_STRIDE  = 0x024UL;
+// IRQ events are EVENTS_REGION[i] @ 0x100 (verified against MDK nrf52840.h):
+// each entry is { WA @ +0x00, RA @ +0x04 }, stride 8. The prior 0x668/0x024
+// values pointed into the unrelated PERREGION block (0x400) and read garbage,
+// so serviceIrq never cleared a real event.
+constexpr uint32_t MWU_EVENTS_REGION_WA     = 0x100UL;   // EVENTS_REGION[i].WA @ +i*8
+constexpr uint32_t MWU_EVENTS_REGION_RA     = 0x104UL;   // EVENTS_REGION[i].RA @ +i*8
+constexpr uint32_t MWU_EVENTS_REGION_STRIDE = 0x008UL;
 
 constexpr uint8_t MWU_IRQ = 32U;   // MWU_IRQn
 
@@ -986,10 +990,12 @@ bool NrfMwu::watchRegion(uint8_t region, uint32_t startAddr, uint32_t endAddr,
     *reinterpret_cast<volatile uint32_t *>(MWU_BASE + MWU_REGION_BASE + (region * 16U)) = startAddr;
     *reinterpret_cast<volatile uint32_t *>(MWU_BASE + MWU_REGION_BASE + (region * 16U) + 4U) = endAddr;
 
-    // Enable read/write detection on this region.
+    // Enable read/write detection on this region. Per MDK: RGNiWA is the EVEN
+    // bit (region*2), RGNiRA the ODD bit (region*2+1). These were swapped
+    // before, which inverted catchReads vs catchWrites.
     uint32_t enableMask = 0UL;
-    if (catchReads)  enableMask |= (1UL << (region * 2U));        // RA bit
-    if (catchWrites) enableMask |= (1UL << (region * 2U + 1U));   // WA bit
+    if (catchWrites) enableMask |= (1UL << (region * 2U));        // WA bit (even)
+    if (catchReads)  enableMask |= (1UL << (region * 2U + 1U));   // RA bit (odd)
     reg32(MWU_BASE, MWU_REGIONENSET) = enableMask;
     return true;
 }
@@ -1021,15 +1027,15 @@ void NrfMwu::serviceIrq() {
     if (g_mwuCallback == nullptr) return;
     // For each region, check both event types and clear.
     for (uint8_t i = 0; i < REGION_COUNT; ++i) {
-        const uint32_t raOff = MWU_PEREGION_RA + (i * MWU_PEREGION_STRIDE);
-        const uint32_t waOff = MWU_PEREGION_WA + (i * MWU_PEREGION_STRIDE);
-        if (reg32(MWU_BASE, raOff) != 0UL) {
-            reg32(MWU_BASE, raOff) = 0UL;
-            g_mwuCallback(/*addr*/ 0UL, /*write*/ false);
-        }
+        const uint32_t waOff = MWU_EVENTS_REGION_WA + (i * MWU_EVENTS_REGION_STRIDE);
+        const uint32_t raOff = MWU_EVENTS_REGION_RA + (i * MWU_EVENTS_REGION_STRIDE);
         if (reg32(MWU_BASE, waOff) != 0UL) {
             reg32(MWU_BASE, waOff) = 0UL;
             g_mwuCallback(/*addr*/ 0UL, /*write*/ true);
+        }
+        if (reg32(MWU_BASE, raOff) != 0UL) {
+            reg32(MWU_BASE, raOff) = 0UL;
+            g_mwuCallback(/*addr*/ 0UL, /*write*/ false);
         }
     }
 }
