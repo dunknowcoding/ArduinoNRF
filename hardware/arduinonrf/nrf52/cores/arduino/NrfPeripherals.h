@@ -11,9 +11,15 @@
 //   * NrfPpi   - Programmable Peripheral Interconnect: route a peripheral
 //                 event to a peripheral task with no CPU in the path.
 //
-// Still missing (need their own dedicated driver / external hardware to
-// verify): QSPI (external flash), PDM (MEMS mic), I2S, COMP / LPCOMP,
-// EGU/SWI (software interrupt + event generator), MWU (memory watch).
+//   * NrfEgu    - software event generator + SWI on 6 channels.
+//   * NrfComp   - analog comparator. Threshold-cross IRQs, PPI events.
+//   * NrfMwu    - memory watch unit. Catch out-of-bound RAM accesses.
+//   * NrfGpioteOut - allocate a GPIOTE channel as a PPI-driven output that
+//                     toggles / sets / clears a pin with zero CPU latency.
+//
+// The audio + external-flash peripherals (QSPI / PDM / I2S) live in the
+// separate NrfMediaPeripherals.h since they're bigger and need external
+// hardware to verify.
 
 #pragma once
 
@@ -270,4 +276,165 @@ public:
     // Convenience: allocate + configure + enable in one call. Returns the
     // allocated channel or INVALID_CHANNEL.
     static uint8_t wire(uint32_t eventAddr, uint32_t taskAddr);
+};
+
+// ---- NrfEgu - software event generator + interrupt -------------------------
+//
+// 6 instances (EGU0..EGU5), each with 16 channels. Each channel has a
+// TASKS_TRIGGER register; writing 1 fires EVENTS_TRIGGERED + optional NVIC
+// IRQ. Useful for:
+//   * inter-context signaling (a callback running in low-priority hands off
+//     to a high-priority IRQ),
+//   * supplying a PPI EVENT source from software (the event-trigger reg can
+//     be set as a PPI event endpoint and the matching triggered event
+//     becomes a PPI task source),
+//   * timing-precise software-only state changes (no need to spin up a
+//     full TIMER).
+//
+// EGU IRQ numbers: EGU0=20, EGU1=21, ..., EGU5=25 (SWI0_EGU0..SWI5_EGU5).
+
+typedef void (*nrfEguCallback_t)(void);
+
+class NrfEgu {
+public:
+    static constexpr uint8_t CHANNEL_COUNT = 16U;
+
+    explicit NrfEgu(uint8_t index);   // 0..5
+
+    void trigger(uint8_t channel);
+    void attachInterrupt(uint8_t channel, nrfEguCallback_t cb);
+    void detachInterrupt(uint8_t channel);
+
+    // For PPI wiring.
+    uint32_t taskTriggerAddr(uint8_t channel) const;
+    uint32_t eventTriggeredAddr(uint8_t channel) const;
+
+    bool isValid() const { return base_ != 0U; }
+
+    // IRQ dispatch hook.
+    void serviceIrq();
+
+private:
+    uint32_t base_;
+    uint8_t  index_;
+    uint8_t  irqNumber_;
+    nrfEguCallback_t callbacks_[CHANNEL_COUNT];
+};
+
+NrfEgu &nrfEgu0();
+NrfEgu &nrfEgu1();
+NrfEgu &nrfEgu2();
+NrfEgu &nrfEgu3();
+NrfEgu &nrfEgu4();
+NrfEgu &nrfEgu5();
+
+// ---- NrfComp - analog comparator -------------------------------------------
+//
+// Compares an analog pin against either VDD * fraction (1/8..7/8) or another
+// AIN pin. Modes: single-ended (default) or differential. Fires CROSS / UP /
+// DOWN events that can drive PPI or NVIC.
+//
+// LPCOMP (low-power variant) trades features for ~1 uA quiescent. The
+// current driver covers COMP (the full-featured one); LPCOMP can be added
+// later if a sketch actually needs the lower power.
+
+typedef void (*nrfCompCallback_t)(void);
+
+class NrfComp {
+public:
+    // Analog input pin selector. AIN0..AIN7 map to specific GPIO pins
+    // (P0.02, P0.03, P0.04, P0.05, P0.28, P0.29, P0.30, P0.31 on nRF52840).
+    enum InputPin : uint8_t {
+        AIN0 = 0, AIN1 = 1, AIN2 = 2, AIN3 = 3,
+        AIN4 = 4, AIN5 = 5, AIN6 = 6, AIN7 = 7,
+    };
+
+    // Reference for single-ended comparison: VDD multiplied by the indicated
+    // fraction. For external reference use anotherAINpin().
+    enum Reference : uint8_t {
+        VDD_1_8 = 0, VDD_2_8, VDD_3_8, VDD_4_8,
+        VDD_5_8, VDD_6_8, VDD_7_8,
+    };
+
+    enum Mode : uint8_t {
+        MODE_CROSS = 0,   // IRQ on either direction
+        MODE_UP    = 1,   // IRQ only when going above threshold
+        MODE_DOWN  = 2,   // IRQ only when going below threshold
+    };
+
+    static bool begin(InputPin input, Reference ref);
+    static void end();
+
+    // Read the current comparator output: true = input above threshold.
+    static bool isAbove();
+
+    static void attachInterrupt(Mode mode, nrfCompCallback_t cb);
+    static void detachInterrupt();
+
+    // IRQ dispatch hook.
+    static void serviceIrq();
+};
+
+// ---- NrfMwu - memory watch unit -------------------------------------------
+//
+// 4 watchable regions. Each region monitors a contiguous RAM address range
+// for read and/or write access. A hit fires the MWU IRQ with the offending
+// address in MWU_PERREGION[i].EV{WA,RA}MATCH. Useful for catching:
+//   * buffer overruns into stack guard pages,
+//   * accidental writes to flash-mirrored regions,
+//   * concurrent access patterns when debugging shared state.
+//
+// PPI also exposes the events so a watch hit can directly trigger e.g. a
+// GPIO toggle for scope-trace correlation.
+
+typedef void (*nrfMwuCallback_t)(uint32_t address, bool wasWrite);
+
+class NrfMwu {
+public:
+    static constexpr uint8_t REGION_COUNT = 4U;
+
+    static bool watchRegion(uint8_t region, uint32_t startAddr, uint32_t endAddr,
+                             bool catchWrites, bool catchReads);
+    static void unwatchRegion(uint8_t region);
+    static void attachInterrupt(nrfMwuCallback_t cb);
+    static void detachInterrupt();
+
+    // IRQ dispatch.
+    static void serviceIrq();
+};
+
+// ---- NrfGpioteOut - GPIOTE output channel ----------------------------------
+//
+// Allocates one of the 8 GPIOTE channels in OUTPUT TASK mode. The pin is
+// then driven by writes to TASK_OUT (or TASK_SET / TASK_CLR), each of which
+// can be wired through PPI to fire automatically on a peripheral event.
+//
+// This complements the input-side GPIOTE that attachInterrupt() already
+// uses in the core: attachInterrupt() owns channels for input edge events;
+// allocateOutput() owns channels for jitter-free output toggling.
+
+class NrfGpioteOut {
+public:
+    enum TaskMode : uint8_t {
+        MODE_TOGGLE = 3,   // TASK_OUT toggles the pin
+        MODE_SET    = 1,   // TASK_OUT drives HIGH
+        MODE_CLEAR  = 2,   // TASK_OUT drives LOW
+    };
+
+    static constexpr uint8_t INVALID_CHANNEL = 0xFFU;
+
+    // Configure a free GPIOTE channel for output on `pin`. The pin is
+    // immediately driven to initialHigh. Returns the channel index (0..7)
+    // or INVALID_CHANNEL.
+    static uint8_t allocate(uint8_t pin, bool initialHigh = false,
+                             TaskMode taskMode = MODE_TOGGLE);
+    static void release(uint8_t channel);
+
+    // Manually trigger the task (toggle/set/clear depending on mode).
+    static void triggerOut(uint8_t channel);
+
+    // PPI helpers.
+    static uint32_t taskOutAddr(uint8_t channel);
+    static uint32_t taskSetAddr(uint8_t channel);
+    static uint32_t taskClrAddr(uint8_t channel);
 };

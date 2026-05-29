@@ -35,7 +35,8 @@ All project documentation lives here. Start with the [project README](../README.
 - [platform/RTC_DRIVER.md](platform/RTC_DRIVER.md) — low-level driver for RTC0/1/2 (compare + overflow IRQs)
 - [`cores/arduino/NrfPower.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPower.h) — power management: System ON sleep (WFI/WFE), low-power / constant-latency sub-modes, DCDC, RAM retention, SystemOFF + GPIO / NFC / USB wake sources
 - [`cores/arduino/NrfNfcTag.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfNfcTag.h) — NFC-A Type 2 tag emulation (NDEF URI / text), field detect IRQ, read count
-- [`cores/arduino/NrfPeripherals.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPeripherals.h) — small bottom-level drivers: **NrfRng** (hardware TRNG), **NrfWdt** (watchdog), **NrfTemp** (die temp sensor), **NrfQdec** (rotary encoder), **NrfTimer** (TIMER0–4), **NrfNvmc** (flash erase/write), **NrfPpi** (peripheral-to-peripheral routing)
+- [`cores/arduino/NrfPeripherals.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPeripherals.h) — **NrfRng** (TRNG), **NrfWdt** (watchdog), **NrfTemp** (die temp), **NrfQdec** (rotary encoder), **NrfTimer** (TIMER0–4), **NrfNvmc** (flash erase/write), **NrfPpi** (peripheral routing), **NrfEgu** (software events + SWI on 6 channels), **NrfComp** (analog comparator), **NrfMwu** (memory watch unit), **NrfGpioteOut** (output channels for PPI use)
+- [`cores/arduino/NrfMediaPeripherals.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfMediaPeripherals.h) — **NrfQspi** (external NOR flash), **NrfPdm** (MEMS mic), **NrfI2s** (digital audio). API complete; not verified on the reference ProMicro (no external flash/mic/codec wired) — boards with those hardware should work but need their own verification pass.
 
 ## Multi-session roadmaps (large vendoring efforts)
 

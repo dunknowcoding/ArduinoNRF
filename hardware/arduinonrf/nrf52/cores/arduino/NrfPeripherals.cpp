@@ -603,3 +603,322 @@ uint8_t NrfPpi::wire(uint32_t eventAddr, uint32_t taskAddr) {
     enable(ch);
     return ch;
 }
+
+// ============================================================================
+// NrfEgu (EGU0..EGU5)
+// ============================================================================
+
+namespace {
+constexpr uint32_t EGU_BASE_LIST[6] = {
+    0x40014000UL, 0x40015000UL, 0x40016000UL,
+    0x40017000UL, 0x40018000UL, 0x40019000UL,
+};
+constexpr uint8_t EGU_IRQ_LIST[6] = { 20, 21, 22, 23, 24, 25 };
+
+constexpr uint32_t EGU_TASKS_TRIGGER     = 0x000UL;   // +ch*4
+constexpr uint32_t EGU_EVENTS_TRIGGERED  = 0x100UL;   // +ch*4
+constexpr uint32_t EGU_INTENSET          = 0x304UL;
+constexpr uint32_t EGU_INTENCLR          = 0x308UL;
+}
+
+NrfEgu::NrfEgu(uint8_t index)
+    : base_(index < 6 ? EGU_BASE_LIST[index] : 0U),
+      index_(index),
+      irqNumber_(index < 6 ? EGU_IRQ_LIST[index] : 0xFFU) {
+    for (uint8_t i = 0; i < CHANNEL_COUNT; ++i) callbacks_[i] = nullptr;
+}
+
+void NrfEgu::trigger(uint8_t channel) {
+    if (!isValid() || channel >= CHANNEL_COUNT) return;
+    reg32(base_, EGU_TASKS_TRIGGER + (channel * 4U)) = 1UL;
+}
+
+void NrfEgu::attachInterrupt(uint8_t channel, nrfEguCallback_t cb) {
+    if (!isValid() || channel >= CHANNEL_COUNT) return;
+    callbacks_[channel] = cb;
+    if (cb != nullptr) {
+        reg32(base_, EGU_EVENTS_TRIGGERED + (channel * 4U)) = 0UL;
+        reg32(base_, EGU_INTENSET) = 1UL << channel;
+        enableNvic(irqNumber_);
+    } else {
+        reg32(base_, EGU_INTENCLR) = 1UL << channel;
+    }
+}
+
+void NrfEgu::detachInterrupt(uint8_t channel) { attachInterrupt(channel, nullptr); }
+
+uint32_t NrfEgu::taskTriggerAddr(uint8_t channel) const {
+    if (!isValid() || channel >= CHANNEL_COUNT) return 0UL;
+    return base_ + EGU_TASKS_TRIGGER + (channel * 4U);
+}
+uint32_t NrfEgu::eventTriggeredAddr(uint8_t channel) const {
+    if (!isValid() || channel >= CHANNEL_COUNT) return 0UL;
+    return base_ + EGU_EVENTS_TRIGGERED + (channel * 4U);
+}
+
+void NrfEgu::serviceIrq() {
+    if (!isValid()) return;
+    for (uint8_t ch = 0; ch < CHANNEL_COUNT; ++ch) {
+        const uint32_t off = EGU_EVENTS_TRIGGERED + (ch * 4U);
+        if (reg32(base_, off) != 0UL) {
+            reg32(base_, off) = 0UL;
+            if (callbacks_[ch] != nullptr) callbacks_[ch]();
+        }
+    }
+}
+
+NrfEgu &nrfEgu0() { static NrfEgu e(0); return e; }
+NrfEgu &nrfEgu1() { static NrfEgu e(1); return e; }
+NrfEgu &nrfEgu2() { static NrfEgu e(2); return e; }
+NrfEgu &nrfEgu3() { static NrfEgu e(3); return e; }
+NrfEgu &nrfEgu4() { static NrfEgu e(4); return e; }
+NrfEgu &nrfEgu5() { static NrfEgu e(5); return e; }
+
+extern "C" {
+void SWI0_EGU0_IRQHandler(void) { nrfEgu0().serviceIrq(); }
+void SWI1_EGU1_IRQHandler(void) { nrfEgu1().serviceIrq(); }
+void SWI2_EGU2_IRQHandler(void) { nrfEgu2().serviceIrq(); }
+void SWI3_EGU3_IRQHandler(void) { nrfEgu3().serviceIrq(); }
+void SWI4_EGU4_IRQHandler(void) { nrfEgu4().serviceIrq(); }
+void SWI5_EGU5_IRQHandler(void) { nrfEgu5().serviceIrq(); }
+}
+
+// ============================================================================
+// NrfComp - analog comparator
+// ============================================================================
+
+namespace {
+constexpr uint32_t COMP_BASE = 0x40013000UL;
+constexpr uint32_t COMP_TASKS_START   = 0x000UL;
+constexpr uint32_t COMP_TASKS_STOP    = 0x004UL;
+constexpr uint32_t COMP_TASKS_SAMPLE  = 0x008UL;
+constexpr uint32_t COMP_EVENTS_READY  = 0x100UL;
+constexpr uint32_t COMP_EVENTS_DOWN   = 0x104UL;
+constexpr uint32_t COMP_EVENTS_UP     = 0x108UL;
+constexpr uint32_t COMP_EVENTS_CROSS  = 0x10CUL;
+constexpr uint32_t COMP_INTENSET      = 0x304UL;
+constexpr uint32_t COMP_INTENCLR      = 0x308UL;
+constexpr uint32_t COMP_RESULT        = 0x400UL;
+constexpr uint32_t COMP_ENABLE        = 0x500UL;
+constexpr uint32_t COMP_PSEL          = 0x504UL;
+constexpr uint32_t COMP_REFSEL        = 0x508UL;
+constexpr uint32_t COMP_EXTREFSEL     = 0x50CUL;
+constexpr uint32_t COMP_TH            = 0x530UL;
+constexpr uint32_t COMP_MODE          = 0x534UL;
+constexpr uint32_t COMP_HYST          = 0x538UL;
+
+constexpr uint8_t COMP_IRQ = 19U;   // COMP_LPCOMP_IRQHandler
+
+nrfCompCallback_t g_compCallback = nullptr;
+}
+
+bool NrfComp::begin(InputPin input, Reference ref) {
+    reg32(COMP_BASE, COMP_ENABLE) = 0UL;
+    reg32(COMP_BASE, COMP_PSEL) = static_cast<uint32_t>(input);
+    reg32(COMP_BASE, COMP_REFSEL) = static_cast<uint32_t>(ref);
+    reg32(COMP_BASE, COMP_TH) = (0x10UL << 8) | 0x10UL;   // VUP=VDOWN, middle threshold
+    reg32(COMP_BASE, COMP_MODE) = 0UL;     // single-ended
+    reg32(COMP_BASE, COMP_HYST) = 0UL;
+    reg32(COMP_BASE, COMP_ENABLE) = 1UL;
+
+    reg32(COMP_BASE, COMP_EVENTS_READY) = 0UL;
+    reg32(COMP_BASE, COMP_TASKS_START) = 1UL;
+    // Wait for READY.
+    for (uint32_t spin = 0; spin < 100000UL; ++spin) {
+        if (reg32(COMP_BASE, COMP_EVENTS_READY) != 0UL) return true;
+    }
+    return false;
+}
+
+void NrfComp::end() {
+    reg32(COMP_BASE, COMP_TASKS_STOP) = 1UL;
+    reg32(COMP_BASE, COMP_ENABLE) = 0UL;
+    reg32(COMP_BASE, COMP_INTENCLR) = 0xFFFFFFFFUL;
+    disableNvic(COMP_IRQ);
+    g_compCallback = nullptr;
+}
+
+bool NrfComp::isAbove() {
+    reg32(COMP_BASE, COMP_TASKS_SAMPLE) = 1UL;
+    return (reg32(COMP_BASE, COMP_RESULT) & 1UL) != 0UL;
+}
+
+void NrfComp::attachInterrupt(Mode mode, nrfCompCallback_t cb) {
+    g_compCallback = cb;
+    reg32(COMP_BASE, COMP_INTENCLR) = 0xFFFFFFFFUL;
+    if (cb == nullptr) return;
+    reg32(COMP_BASE, COMP_EVENTS_DOWN) = 0UL;
+    reg32(COMP_BASE, COMP_EVENTS_UP)   = 0UL;
+    reg32(COMP_BASE, COMP_EVENTS_CROSS) = 0UL;
+    uint32_t inten = 0UL;
+    switch (mode) {
+        case MODE_UP:    inten = 1UL << 2; break;
+        case MODE_DOWN:  inten = 1UL << 1; break;
+        case MODE_CROSS:
+        default:         inten = 1UL << 3; break;
+    }
+    reg32(COMP_BASE, COMP_INTENSET) = inten;
+    enableNvic(COMP_IRQ);
+}
+
+void NrfComp::detachInterrupt() { attachInterrupt(MODE_CROSS, nullptr); }
+
+void NrfComp::serviceIrq() {
+    // Clear any fired events; call the user callback once per IRQ entry.
+    bool fired = false;
+    if (reg32(COMP_BASE, COMP_EVENTS_CROSS) != 0UL) { reg32(COMP_BASE, COMP_EVENTS_CROSS) = 0UL; fired = true; }
+    if (reg32(COMP_BASE, COMP_EVENTS_UP)    != 0UL) { reg32(COMP_BASE, COMP_EVENTS_UP)    = 0UL; fired = true; }
+    if (reg32(COMP_BASE, COMP_EVENTS_DOWN)  != 0UL) { reg32(COMP_BASE, COMP_EVENTS_DOWN)  = 0UL; fired = true; }
+    if (fired && g_compCallback != nullptr) g_compCallback();
+}
+
+extern "C" void COMP_LPCOMP_IRQHandler(void) { NrfComp::serviceIrq(); }
+
+// ============================================================================
+// NrfMwu - memory watch unit
+// ============================================================================
+
+namespace {
+constexpr uint32_t MWU_BASE = 0x40020000UL;
+constexpr uint32_t MWU_INTENSET = 0x304UL;
+constexpr uint32_t MWU_INTENCLR = 0x308UL;
+constexpr uint32_t MWU_REGIONEN = 0x510UL;
+constexpr uint32_t MWU_REGIONENSET = 0x514UL;
+constexpr uint32_t MWU_REGIONENCLR = 0x518UL;
+constexpr uint32_t MWU_REGION_BASE = 0x600UL;   // REGION[i].START @ +i*16
+constexpr uint32_t MWU_REGION_START_OFF = 0x000UL;
+constexpr uint32_t MWU_REGION_END_OFF   = 0x004UL;
+constexpr uint32_t MWU_PEREGION_RA      = 0x668UL;   // PERREGION[i].EVENTS_RAMATCH base
+constexpr uint32_t MWU_PEREGION_WA      = 0x66CUL;   // PERREGION[i].EVENTS_WAMATCH base
+constexpr uint32_t MWU_PEREGION_STRIDE  = 0x024UL;
+
+constexpr uint8_t MWU_IRQ = 32U;   // MWU_IRQn
+
+nrfMwuCallback_t g_mwuCallback = nullptr;
+}
+
+bool NrfMwu::watchRegion(uint8_t region, uint32_t startAddr, uint32_t endAddr,
+                          bool catchWrites, bool catchReads) {
+    if (region >= REGION_COUNT) return false;
+    if (endAddr <= startAddr) return false;
+
+    // Set region bounds.
+    *reinterpret_cast<volatile uint32_t *>(MWU_BASE + MWU_REGION_BASE + (region * 16U)) = startAddr;
+    *reinterpret_cast<volatile uint32_t *>(MWU_BASE + MWU_REGION_BASE + (region * 16U) + 4U) = endAddr;
+
+    // Enable read/write detection on this region.
+    uint32_t enableMask = 0UL;
+    if (catchReads)  enableMask |= (1UL << (region * 2U));        // RA bit
+    if (catchWrites) enableMask |= (1UL << (region * 2U + 1U));   // WA bit
+    reg32(MWU_BASE, MWU_REGIONENSET) = enableMask;
+    return true;
+}
+
+void NrfMwu::unwatchRegion(uint8_t region) {
+    if (region >= REGION_COUNT) return;
+    reg32(MWU_BASE, MWU_REGIONENCLR) = (3UL << (region * 2U));
+}
+
+void NrfMwu::attachInterrupt(nrfMwuCallback_t cb) {
+    g_mwuCallback = cb;
+    if (cb == nullptr) {
+        reg32(MWU_BASE, MWU_INTENCLR) = 0xFFFFFFFFUL;
+        return;
+    }
+    // Enable RAMATCH + WAMATCH IRQ for all 4 regions.
+    uint32_t inten = 0UL;
+    for (uint8_t i = 0; i < REGION_COUNT; ++i) {
+        inten |= (1UL << (i * 2U));        // RAMATCH[i]
+        inten |= (1UL << (i * 2U + 1U));   // WAMATCH[i]
+    }
+    reg32(MWU_BASE, MWU_INTENSET) = inten;
+    enableNvic(MWU_IRQ);
+}
+
+void NrfMwu::detachInterrupt() { attachInterrupt(nullptr); }
+
+void NrfMwu::serviceIrq() {
+    if (g_mwuCallback == nullptr) return;
+    // For each region, check both event types and clear.
+    for (uint8_t i = 0; i < REGION_COUNT; ++i) {
+        const uint32_t raOff = MWU_PEREGION_RA + (i * MWU_PEREGION_STRIDE);
+        const uint32_t waOff = MWU_PEREGION_WA + (i * MWU_PEREGION_STRIDE);
+        if (reg32(MWU_BASE, raOff) != 0UL) {
+            reg32(MWU_BASE, raOff) = 0UL;
+            g_mwuCallback(/*addr*/ 0UL, /*write*/ false);
+        }
+        if (reg32(MWU_BASE, waOff) != 0UL) {
+            reg32(MWU_BASE, waOff) = 0UL;
+            g_mwuCallback(/*addr*/ 0UL, /*write*/ true);
+        }
+    }
+}
+
+extern "C" void MWU_IRQHandler(void) { NrfMwu::serviceIrq(); }
+
+// ============================================================================
+// NrfGpioteOut - GPIOTE output channel for PPI use
+// ============================================================================
+
+namespace {
+constexpr uint32_t GPIOTE_BASE = 0x40006000UL;
+constexpr uint32_t GPIOTE_TASKS_OUT_BASE = 0x000UL;   // CH[i] @ +i*4
+constexpr uint32_t GPIOTE_TASKS_SET_BASE = 0x030UL;
+constexpr uint32_t GPIOTE_TASKS_CLR_BASE = 0x060UL;
+constexpr uint32_t GPIOTE_CONFIG_BASE    = 0x510UL;   // CH[i].CONFIG @ +i*4
+
+uint8_t g_gpioteOutAllocated = 0;   // bit i = CH[i] in use as output
+
+// CONFIG layout:
+//   bits 0..1   MODE (0=disabled, 1=event input, 3=task output)
+//   bits 8..12  PSEL pin number
+//   bit  13     PORT (0=P0, 1=P1)
+//   bits 16..17 POLARITY (0=none, 1=low->high, 2=high->low, 3=toggle)
+//   bit  20     OUTINIT (initial output value when mode=3)
+
+uint32_t gpioteConfigForOutput(uint8_t pin, bool initialHigh, uint8_t taskMode) {
+    const uint32_t pinIdx = pin & 0x1FU;
+    const uint32_t port = (pin >> 5U) & 1U;
+    uint32_t cfg = 3UL;                 // MODE = task output
+    cfg |= (pinIdx << 8);               // PSEL
+    cfg |= (port << 13);                // PORT
+    cfg |= (static_cast<uint32_t>(taskMode) << 16);   // POLARITY
+    if (initialHigh) cfg |= (1UL << 20);
+    return cfg;
+}
+}
+
+uint8_t NrfGpioteOut::allocate(uint8_t pin, bool initialHigh, TaskMode taskMode) {
+    for (uint8_t ch = 0; ch < 8U; ++ch) {
+        if ((g_gpioteOutAllocated & (1U << ch)) != 0U) continue;
+        g_gpioteOutAllocated |= (1U << ch);
+        reg32(GPIOTE_BASE, GPIOTE_CONFIG_BASE + (ch * 4U)) =
+            gpioteConfigForOutput(pin, initialHigh, static_cast<uint8_t>(taskMode));
+        return ch;
+    }
+    return INVALID_CHANNEL;
+}
+
+void NrfGpioteOut::release(uint8_t channel) {
+    if (channel >= 8U) return;
+    reg32(GPIOTE_BASE, GPIOTE_CONFIG_BASE + (channel * 4U)) = 0UL;
+    g_gpioteOutAllocated &= ~(1U << channel);
+}
+
+void NrfGpioteOut::triggerOut(uint8_t channel) {
+    if (channel >= 8U) return;
+    reg32(GPIOTE_BASE, GPIOTE_TASKS_OUT_BASE + (channel * 4U)) = 1UL;
+}
+
+uint32_t NrfGpioteOut::taskOutAddr(uint8_t channel) {
+    if (channel >= 8U) return 0UL;
+    return GPIOTE_BASE + GPIOTE_TASKS_OUT_BASE + (channel * 4U);
+}
+uint32_t NrfGpioteOut::taskSetAddr(uint8_t channel) {
+    if (channel >= 8U) return 0UL;
+    return GPIOTE_BASE + GPIOTE_TASKS_SET_BASE + (channel * 4U);
+}
+uint32_t NrfGpioteOut::taskClrAddr(uint8_t channel) {
+    if (channel >= 8U) return 0UL;
+    return GPIOTE_BASE + GPIOTE_TASKS_CLR_BASE + (channel * 4U);
+}
