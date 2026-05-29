@@ -35,12 +35,14 @@ All project documentation lives here. Start with the [project README](../README.
 - [platform/RTC_DRIVER.md](platform/RTC_DRIVER.md) — low-level driver for RTC0/1/2 (compare + overflow IRQs)
 - [`cores/arduino/NrfPower.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPower.h) — power management: System ON sleep (WFI/WFE), low-power / constant-latency sub-modes, DCDC, RAM retention, SystemOFF + GPIO / NFC / USB wake sources
 - [`cores/arduino/NrfNfcTag.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfNfcTag.h) — NFC-A Type 2 tag emulation (NDEF URI / text), field detect IRQ, read count
+- [`cores/arduino/NrfPeripherals.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPeripherals.h) — small bottom-level drivers: **NrfRng** (hardware TRNG), **NrfWdt** (watchdog), **NrfTemp** (die temp sensor), **NrfQdec** (rotary encoder)
 
 ## Multi-session roadmaps (large vendoring efforts)
 
-- [platform/NIMBLE_INTEGRATION_PLAN.md](platform/NIMBLE_INTEGRATION_PLAN.md) — full BLE via Apache Mynewt's NimBLE (no SoftDevice)
-- [platform/CC310_INTEGRATION_PLAN.md](platform/CC310_INTEGRATION_PLAN.md) — CryptoCell 310 hardware crypto (AES / SHA / ECC / TRNG)
-- [platform/ZIGBEE_INTEGRATION_PLAN.md](platform/ZIGBEE_INTEGRATION_PLAN.md) — IEEE 802.15.4 + Zboss
+- [platform/NIMBLE_INTEGRATION_PLAN.md](platform/NIMBLE_INTEGRATION_PLAN.md) — full BLE via Apache Mynewt's NimBLE (no SoftDevice). Skeleton at [`libraries/NimBLE/`](../hardware/arduinonrf/nrf52/libraries/NimBLE/).
+- [platform/CC310_INTEGRATION_PLAN.md](platform/CC310_INTEGRATION_PLAN.md) — CryptoCell 310 hardware crypto. Skeleton at [`libraries/CC310/`](../hardware/arduinonrf/nrf52/libraries/CC310/).
+- [platform/ZIGBEE_INTEGRATION_PLAN.md](platform/ZIGBEE_INTEGRATION_PLAN.md) — IEEE 802.15.4 + Zboss. Skeleton at [`libraries/Zigbee/`](../hardware/arduinonrf/nrf52/libraries/Zigbee/).
+- [platform/THREAD_INTEGRATION_PLAN.md](platform/THREAD_INTEGRATION_PLAN.md) — Thread (OpenThread) IPv6 mesh, the protocol Matter / Apple Home / Google Home use. Skeleton at [`libraries/Thread/`](../hardware/arduinonrf/nrf52/libraries/Thread/).
 
 ## Platform reference (capabilities & truth)
 
