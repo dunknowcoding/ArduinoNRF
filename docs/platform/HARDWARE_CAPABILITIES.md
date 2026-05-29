@@ -1,6 +1,10 @@
 ﻿# Hardware Capabilities
 
-Date: 2026-05-04
+Date: 2026-05-04 (PWM/peripheral sections updated 2026-05-29)
+
+> For the authoritative per-peripheral driver census see
+> [PERIPHERAL_DRIVER_COVERAGE.md](PERIPHERAL_DRIVER_COVERAGE.md). Every
+> discrete nRF52840 peripheral now has a bottom-level driver.
 
 ## Chip-level truth currently exposed by the core
 
@@ -18,9 +22,11 @@ Date: 2026-05-04
 
 ## PWM truth
 
-- The hardware family can provide more PWM resources than this package currently exposes.
-- The current core exposes a single shared PWM timer group with four routed channels.
-- Frequency is shared across active PWM outputs.
+- As of v0.1.0 the core exposes all four PWM modules (16 channels total) with
+  independent frequency groups, per-pin polarity, and software dead-time
+  complementary pairing. See [PWM_MULTI_MODULE.md](PWM_MULTI_MODULE.md).
+- The 2026-05-04 note below ("single shared group with four routed channels")
+  described the 0.0.1 baseline and no longer holds.
 
 ## BLE truth
 
