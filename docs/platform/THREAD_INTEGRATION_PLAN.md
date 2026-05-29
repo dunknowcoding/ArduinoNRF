@@ -24,16 +24,71 @@ For a new sketch in 2026: pick Thread if you want it to work with Apple Home / G
 
 ## Milestones
 
-### M1 — vendor + skeleton compile (1 session)
+### M1 — vendor public headers + library skeleton (DONE)
 
-- Create `libraries/Thread/` (matching the CC310 / NimBLE / Zigbee skeleton pattern in this repo).
-- Vendor OpenThread from `openthread/openthread` and `nrf-802154` from `nrfconnect/sdk-nrfxlib`. The two repos are independent and tracked at their own release cadence; pin to a known-good combination (OpenThread 0.x.x + nrf-802154 from a matching nRFConnect SDK release).
-- Provide the OpenThread platform abstraction (the `openthread/platform/` interface):
-  - `otPlatRadio*` mapping to `nrf-802154`,
-  - `otPlatAlarm*` mapping to `NrfRtc` (RTC2, to avoid clashing with NimBLE's RTC1 if both ever co-exist via time-slicing),
-  - `otPlatEntropy*` mapping to `NrfRng` (hardware TRNG) or to CC310 once vendored,
-  - `otPlatFlash*` mapping to NVMC / a reserved region for OpenThread settings.
-- Goal: a `BareMtdSetup.ino` sketch that calls `Thread.begin()` + a no-op poll loop builds and links cleanly. No air activity.
+- Created `libraries/Thread/` with the same layout as NimBLE.
+- Vendored `openthread/error.h`, `openthread/instance.h`, and **all 27**
+  `openthread/platform/*.h` headers from `openthread/openthread@main`.
+- Wrote `Thread.h` Arduino API (`begin(MTD/MED/SED)`, `joinNetwork`,
+  `onCoapGet`, `getEui64`) returning `THREAD_NOT_VENDORED` until M3.
+- Added `ThreadSmoke.ino` confirming the header tree links via
+  `__has_include` probe.
+- Status: shipped as part of commit `bef833c`. Compiles clean.
+
+### M2 — platform abstraction with real backends (DONE)
+
+- Wrote `platform_impl.cpp` implementing the OpenThread `otPlat*` contract
+  the core will pull in at M3+.
+- Real implementations (zero extra vendoring needed):
+  - `otPlatAlarmMilli*` → RTC2 @ 1 kHz via `nrfRtc2()` (avoids RTC0
+    SoftDevice clash; RTC1 reserved for NimBLE time-slice scenarios)
+  - `otPlatAlarmMicro*` → TIMER3 @ 1 MHz via `nrfTimer3()`
+  - `otPlatEntropyGet` → `NrfRng` hardware TRNG (M5 can swap to CC310 once
+    vendored, per `CC310_INTEGRATION_PLAN.md`)
+  - `otPlatRadioGetIeeeEui64` → `FICR.DEVICEID0/1` (factory-unique)
+  - `otPlatReset` / `otPlatResetToBootloader` → AIRCR + GPREGRET (same
+    path the verified hands-free upload uses)
+  - `otPlatCAlloc` / `otPlatFree` → newlib `calloc`/`free`
+- Stubs returning `OT_ERROR_NOT_IMPLEMENTED` (M3 targets): flash,
+  settings, log.
+- Status: shipped as commit `ef331c2`. ThreadSmoke compiles clean at
+  74956 bytes (7%).
+
+### M3 — vendor OpenThread core + nrf-802154 PHY (3–5 sessions, NOT 1)
+
+**Scope reality check (discovered post-M2):**
+
+- OpenThread core: **272 source files, 131,356 LOC** (`src/core/` from
+  `openthread/openthread@main`). The MTD/FTD/RADIO build flavors are
+  selected via CMake (`mtd.cmake` / `ftd.cmake` / `radio.cmake`); even
+  MTD pulls in ~150 files. Heavily interconnected — partial vendoring
+  produces a wall of link errors.
+- nrf-802154 driver: 43 C + 54 H files (~32K LOC) under
+  `nrfxlib/nrf_802154/`. Public headers depend on `hal/nrf_radio.h` and
+  the rest of Nordic's `nrfx` HAL — that's another ~5K files
+  foundational to all Nordic SDK code.
+
+**Revised M3 plan:**
+
+- **M3.a**: Vendor `nrfx` HAL subset (nRF52840-only headers + a handful
+  of HAL drivers actually called by nrf-802154). Standalone smoke test.
+- **M3.b**: Vendor `nrf-802154` driver. Provide platform shims
+  (`nrf_802154_platform_clock_*`, `nrf_802154_irq_*`) bridged to
+  `NrfClock` / NVIC. Smoke test: TX a beacon frame and confirm with a
+  USB sniffer dongle.
+- **M3.c**: Vendor OpenThread `src/core/common/`, `src/core/instance/`,
+  `src/core/mac/`, `src/core/radio/`. Wire `otPlatRadio*` to
+  `nrf-802154`. Goal: `otInstanceInitSingle()` succeeds.
+- **M3.d**: Vendor `src/core/thread/`, `src/core/meshcop/`,
+  `src/core/coap/`, `src/core/net/`. Goal: device pulls an IPv6 ULA
+  from a Border Router (the original M2 goal in the old roadmap).
+
+### M4 — was M2 / M3 in the original roadmap (1 session each, after M3)
+
+- M4: MED + UDP echo + small `Thread.onCoapGet()` wrapper.
+- M5: SED + sleep via `NrfPower::sleepMs()`. Target < 30 µA average.
+- M6: Matter pairing.
+- M7: Multi-protocol (Thread + BLE time-slice).
 
 ### M2 — PHY + commissioning hand-off (1 session)
 
