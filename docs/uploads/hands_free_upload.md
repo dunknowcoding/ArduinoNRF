@@ -59,10 +59,11 @@ sudo usermod -a -G dialout $USER     # log out / back in
 
 ## Per-board status
 
-See **[../COMPATIBILITY.md](../COMPATIBILITY.md)** for the full matrix. The path is verified on the **AliExpress ProMicro nRF52840** clone and is the *same* pipeline for all Adafruit-fork boards (nice!nano v2, SuperMini, XIAO, Pitaya Go, nRFMicro) once the corrected VID:PIDs are in place.
+See **[../COMPATIBILITY.md](../COMPATIBILITY.md)** for the full matrix. The path is verified end-to-end on the **AliExpress ProMicro nRF52840** clone. The same Adafruit serial-DFU family is packaged for nice!nano v2, SuperMini, XIAO, Pitaya Go, and nRFMicro once the corrected VID:PIDs are in place, but those boards remain modeled / reference-core rather than re-verified on physical hardware in this revision.
 
 ## When this doesn't apply
 
 - The **Nordic nRF52840 USB Dongle (PCA10059)** uses Nordic Open DFU, not Adafruit serial DFU — flash with **nRF Connect for Desktop → Programmer** or `nrfutil`.
 - The official **nRF52840-DK** (with onboard J-Link OB) is flashed via SWD — see **[swd_only_upload.md](swd_only_upload.md)**.
+- Generic `devboard_nrf52833` targets are packaged as SWD-first models rather than a USB-DFU workflow.
 - For boards stuck in an unknown state, see **[double_reset_upload.md](double_reset_upload.md)** for the manual bootloader-entry fallback.

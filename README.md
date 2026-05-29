@@ -27,7 +27,7 @@ The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, 
 |---|---|---|
 | 🔌 | **Hands-free uploads** | Click **Upload**. The firmware reboots itself into the bootloader over the USB-CDC maintenance port — **no button, no double-reset, no jumper**. |
 | 🐞 | **Single-cable debugging** | Click **Debug** in Arduino IDE 2 and get **breakpoints, step in/over/out, registers, memory, watchpoints and pause** — all over the *same* USB cable, with **no external SWD/J-Link probe**. |
-| 🧩 | **10 boards, one package** | ProMicro (*verified*), nice!nano v2, SuperMini, nRFMicro, XIAO-like, dev boards and more — installed from one Board Manager URL. |
+| 🧩 | **10 board definitions, one package** | ProMicro (*verified on hardware*), nice!nano v2, SuperMini, nRFMicro, XIAO, nRF52833/nRF52840 dev boards and more — installed from one Board Manager URL. |
 | 📋 | **Truth-oriented metadata** | ADC, PWM, BLE and bus capabilities are documented as *verified*, not aspirational. No silent overclaiming. |
 | 🛡️ | **Robust upload pipeline** | Double-click-safe, coexists with a live debug session, rejects the wrong COM with a clear message, and caches slow port scans for speed. |
 
@@ -90,6 +90,8 @@ See **[docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md](docs/platform/ARDUINO_IDE2_USB
 
 Identities were re-checked against the upstream `Adafruit_nRF52_Bootloader` `board.h` files, the Seeed and pdcook Arduino cores, and `joric/nrfmicro`. See **[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)** for the full audit and per-board change log.
 
+> ⚠️ In this revision, only the **AliExpress ProMicro nRF52840** upload/debug path is verified end-to-end on physical hardware. The other packaged board definitions are derived from the current variants, upstream identities, and smoke-test truth; some remain marked *experimental* in `boards.txt`.
+
 | Board | Bootloader VID:PID | Pipeline | Status |
 |---|---|---|---|
 | **AliExpress ProMicro nRF52840** | `0x239A:0x00B3` | Adafruit serial DFU | ✅ **Verified on hardware** (hands-free upload + single-cable debug) |
@@ -100,6 +102,7 @@ Identities were re-checked against the upstream `Adafruit_nRF52_Bootloader` `boa
 | Makerdiary Pitaya Go | `0x2886:0xF00E` | Adafruit serial DFU | Identity corrected, UF2 = `PITAYAGO` |
 | Mini nRF52840 (AliExpress) | `auto` | varies | ⚠️ No canonical identity — auto-detect |
 | Generic nRF52840 Dev Board | `auto` | varies | ⚠️ Official Nordic DK uses **SWD via J-Link**, not USB DFU |
+| Generic nRF52833 Development Board | `auto` | varies | ⚠️ Seller identity varies; packaged, but not yet re-verified on hardware in this revision |
 | nRF52840 USB Dongle (PCA10059) | `0x1915:0x521F` | **Nordic Open DFU** | ⚠️ **Use Nordic `nrfutil` / nRF Connect — this pipeline does not apply** |
 
 Per-board reference notes live in **[docs/boards/](docs/boards/)**; the support matrix is in **[docs/platform/BOARD_SUPPORT_STATUS.md](docs/platform/BOARD_SUPPORT_STATUS.md)**.

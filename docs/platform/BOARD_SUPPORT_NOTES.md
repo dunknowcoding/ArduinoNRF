@@ -1,6 +1,6 @@
 # Board Support Notes
 
-Date: 2026-05-04
+Date: 2026-05-29
 
 ## Evidence vocabulary
 
@@ -20,18 +20,18 @@ Boards:
 
 Current truth:
 
-- These are the boards with the biggest gap between the current package and the reference core.
-- `promicro_nrf52840`, `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` now declare `lfxo` as the low-frequency clock source in this repository.
-- `promicro_nrf52840` remains package-modeled for most board facts, but its current physical debug access is now aligned to SWD test pads rather than a populated SWD header.
+- `promicro_nrf52840` is now verified end-to-end on physical hardware for hands-free upload and single-cable USB-CDC debug when using the validated `bootloader=promicroserialnosd,usbcdc=enabled` path.
+- The verified ProMicro clone can expose the same `0x239A:0x00B3` family in both runtime and bootloader phases, so host tooling must disambiguate by interface / port role rather than VID:PID alone.
+- `promicro_nrf52840`, `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` all declare `lfxo` as the low-frequency clock source in this repository.
 - `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` expose secondary-bus pins in metadata and variants.
-- The core now exposes global `Wire1` and `SPI1` objects. `promicro_nrf52840` simply leaves the secondary-bus pins unassigned, while the other three ProMicro-like variants map them to concrete pins.
+- The core now exposes global `Wire1` and `SPI1` objects. `promicro_nrf52840` leaves the secondary-bus pins unassigned, while the other three ProMicro-like variants map them to concrete pins.
+- `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` still rely on modeled / reference-core evidence for upload and debug behavior in this revision even though they share the same Adafruit serial-DFU family.
 
 Known risks:
 
 - Some SuperMini-class clones may expose a VCC behavior that is unsafe to treat as always-regulated 3.3V when USB is present.
 - Battery measurement differs by board: some use `VDDHDIV5`, others use a dedicated VBAT ADC pin.
-- Upload behavior is still modeled as DFU plus optional double-reset fallback, not fully hardware-verified.
-- The currently tested `promicro_nrf52840`-class board on `COM3` did not enumerate the expected Nordic DFU VID/PID after `1200bps touch`, so hands-free USB upload cannot yet be claimed for that clone.
+- Non-ProMicro upload/debug claims in this family are still modeled as the same DFU + optional double-reset fallback, not re-verified on physical hardware in this revision.
 
 ## Remaining families
 

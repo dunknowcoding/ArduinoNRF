@@ -1,6 +1,6 @@
-﻿# Board Support Status
+# Board Support Status
 
-Date: 2026-05-04
+Date: 2026-05-29
 
 Evidence levels used in this repository:
 
@@ -11,7 +11,7 @@ Evidence levels used in this repository:
 
 | Board | Family | Evidence | Pin map | Battery model | Upload profile | Secondary buses |
 | --- | --- | --- | --- | --- | --- | --- |
-| AliExpress ProMicro nRF52840 | promicro-compatible | modeled | partial | partial | partial | modeled absent |
+| AliExpress ProMicro nRF52840 | promicro-compatible | verified + modeled | partial | partial | verified (`promicroserialnosd` USB DFU, SWD fallback) | modeled absent |
 | nice!nano v2 | promicro-compatible | modeled + reference-core | partial | partial | partial | reference-modeled present |
 | SuperMini nRF52840 | promicro-compatible | modeled + reference-core | partial | partial | partial | reference-modeled present |
 | nRFMicro nRF52840 | promicro-compatible | modeled + reference-core | partial | partial | partial | reference-modeled present |
@@ -26,4 +26,5 @@ Notes:
 
 - `partial` means the package exposes a coherent current model, but the repository still lacks a full real-board evidence chain.
 - `reference-modeled present` means the current package now exposes secondary-bus pins because the reference core and local pin numbering align, but this is not yet a real-hardware verification claim.
-- No packaged board is currently marked `verified` for hands-free upload on real hardware.
+- `verified + modeled` means at least one end-to-end path is proven on hardware while some board-specific details still rely on source review or modeled metadata.
+- The only packaged board currently marked `verified` end-to-end for hands-free upload and single-cable debug is the AliExpress ProMicro nRF52840 clone. Remaining packaged boards are still modeled / reference-core / partial in this revision.
