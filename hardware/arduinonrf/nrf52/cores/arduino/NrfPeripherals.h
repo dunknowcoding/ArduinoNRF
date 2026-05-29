@@ -375,6 +375,61 @@ public:
     static void serviceIrq();
 };
 
+// ---- NrfLpComp - low-power comparator --------------------------------------
+//
+// LPCOMP is the ~1 uA sibling of COMP. It compares an analog pin against a
+// VDD fraction (in sixteenths) and - crucially - can run while the chip is in
+// System OFF, making it the way to wake from deep sleep on an analog level
+// (e.g. a battery-low threshold, or a light/sound sensor crossing). COMP can't
+// do that; it stops in System OFF.
+//
+// IMPORTANT: LPCOMP and COMP are the SAME physical comparator block (base
+// 0x40013000, IRQ 19). Use NrfLpComp OR NrfComp, never both at once - begin()
+// on one implicitly takes the hardware from the other. Pair this with
+// NrfPower::systemOff() + a wake source for the deep-sleep-on-threshold use
+// case.
+
+typedef void (*nrfLpCompCallback_t)(void);
+
+class NrfLpComp {
+public:
+    // Same AINx pin mapping as NrfComp (P0.02..P0.05, P0.28..P0.31).
+    enum InputPin : uint8_t {
+        AIN0 = 0, AIN1 = 1, AIN2 = 2, AIN3 = 3,
+        AIN4 = 4, AIN5 = 5, AIN6 = 6, AIN7 = 7,
+    };
+
+    // Reference fraction of VDD. These enum values map 1:1 onto the LPCOMP
+    // REFSEL register, which offers the eighths (1/8..7/8) plus the ODD
+    // sixteenths (1/16, 3/16, ..., 15/16) for finer low-end thresholds. Even
+    // sixteenths are just the eighths (2/16 == 1/8), so they aren't repeated.
+    enum Reference : uint8_t {
+        VDD_1_8  = 0, VDD_2_8 = 1, VDD_3_8 = 2, VDD_4_8 = 3,
+        VDD_5_8  = 4, VDD_6_8 = 5, VDD_7_8 = 6,
+        // 7 = external AREF (not exposed by this simple API)
+        VDD_1_16 = 8, VDD_3_16 = 9, VDD_5_16 = 10, VDD_7_16 = 11,
+        VDD_9_16 = 12, VDD_11_16 = 13, VDD_13_16 = 14, VDD_15_16 = 15,
+    };
+
+    enum Mode : uint8_t {
+        MODE_CROSS = 0,   // IRQ/wake on either direction
+        MODE_UP    = 1,   // IRQ/wake only when rising past threshold
+        MODE_DOWN  = 2,   // IRQ/wake only when falling past threshold
+    };
+
+    static bool begin(InputPin input, Reference ref, bool hysteresis = false);
+    static void end();
+
+    // Current comparator output: true = input above threshold.
+    static bool isAbove();
+
+    static void attachInterrupt(Mode mode, nrfLpCompCallback_t cb);
+    static void detachInterrupt();
+
+    // IRQ dispatch hook (shared with NrfComp via COMP_LPCOMP_IRQHandler).
+    static void serviceIrq();
+};
+
 // ---- NrfMwu - memory watch unit -------------------------------------------
 //
 // 4 watchable regions. Each region monitors a contiguous RAM address range

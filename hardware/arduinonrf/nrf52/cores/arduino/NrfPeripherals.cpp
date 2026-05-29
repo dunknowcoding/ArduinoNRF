@@ -253,9 +253,9 @@ int32_t NrfQdec::readPosition() {
 
 void NrfQdec::resetPosition() {
     if (!g_qdecRunning) return;
+    // RDCLRACC captures ACC into ACCREAD and clears ACC in one shot; the
+    // clear is done by the task, so there's nothing more to read here.
     reg32(QDEC_BASE, QDEC_TASKS_RDCLRACC) = 1UL;
-    // discard the read
-    (void)reg32(QDEC_BASE, QDEC_ACCREAD);
 }
 
 bool NrfQdec::isRunning() { return g_qdecRunning; }
@@ -772,7 +772,100 @@ void NrfComp::serviceIrq() {
     if (fired && g_compCallback != nullptr) g_compCallback();
 }
 
-extern "C" void COMP_LPCOMP_IRQHandler(void) { NrfComp::serviceIrq(); }
+// ============================================================================
+// NrfLpComp - low-power comparator (shares base 0x40013000 + IRQ 19 with COMP)
+// ============================================================================
+
+namespace {
+constexpr uint32_t LPCOMP_BASE           = 0x40013000UL;
+constexpr uint32_t LPCOMP_TASKS_START    = 0x000UL;
+constexpr uint32_t LPCOMP_TASKS_STOP     = 0x004UL;
+constexpr uint32_t LPCOMP_TASKS_SAMPLE   = 0x008UL;
+constexpr uint32_t LPCOMP_EVENTS_READY   = 0x100UL;
+constexpr uint32_t LPCOMP_EVENTS_DOWN    = 0x104UL;
+constexpr uint32_t LPCOMP_EVENTS_UP      = 0x108UL;
+constexpr uint32_t LPCOMP_EVENTS_CROSS   = 0x10CUL;
+constexpr uint32_t LPCOMP_INTENSET       = 0x304UL;
+constexpr uint32_t LPCOMP_INTENCLR       = 0x308UL;
+constexpr uint32_t LPCOMP_RESULT         = 0x400UL;
+constexpr uint32_t LPCOMP_ENABLE         = 0x500UL;
+constexpr uint32_t LPCOMP_PSEL           = 0x504UL;
+constexpr uint32_t LPCOMP_REFSEL         = 0x508UL;
+constexpr uint32_t LPCOMP_ANADETECT      = 0x520UL;
+constexpr uint32_t LPCOMP_HYST           = 0x538UL;
+
+constexpr uint8_t LPCOMP_IRQ = 19U;   // COMP_LPCOMP_IRQHandler (shared)
+
+nrfLpCompCallback_t g_lpcompCallback = nullptr;
+}
+
+bool NrfLpComp::begin(InputPin input, Reference ref, bool hysteresis) {
+    reg32(LPCOMP_BASE, LPCOMP_ENABLE) = 0UL;     // takes the block from COMP too
+    reg32(LPCOMP_BASE, LPCOMP_PSEL)   = static_cast<uint32_t>(input);
+    reg32(LPCOMP_BASE, LPCOMP_REFSEL) = static_cast<uint32_t>(ref);
+    reg32(LPCOMP_BASE, LPCOMP_HYST)   = hysteresis ? 1UL : 0UL;
+    reg32(LPCOMP_BASE, LPCOMP_ANADETECT) = 0UL;  // default CROSS
+    reg32(LPCOMP_BASE, LPCOMP_ENABLE) = 1UL;     // LPCOMP enable value
+
+    reg32(LPCOMP_BASE, LPCOMP_EVENTS_READY) = 0UL;
+    reg32(LPCOMP_BASE, LPCOMP_TASKS_START)  = 1UL;
+    for (uint32_t spin = 0; spin < 100000UL; ++spin) {
+        if (reg32(LPCOMP_BASE, LPCOMP_EVENTS_READY) != 0UL) return true;
+    }
+    return false;
+}
+
+void NrfLpComp::end() {
+    reg32(LPCOMP_BASE, LPCOMP_TASKS_STOP) = 1UL;
+    reg32(LPCOMP_BASE, LPCOMP_ENABLE)     = 0UL;
+    reg32(LPCOMP_BASE, LPCOMP_INTENCLR)   = 0xFFFFFFFFUL;
+    disableNvic(LPCOMP_IRQ);
+    g_lpcompCallback = nullptr;
+}
+
+bool NrfLpComp::isAbove() {
+    reg32(LPCOMP_BASE, LPCOMP_TASKS_SAMPLE) = 1UL;
+    return (reg32(LPCOMP_BASE, LPCOMP_RESULT) & 1UL) != 0UL;
+}
+
+void NrfLpComp::attachInterrupt(Mode mode, nrfLpCompCallback_t cb) {
+    g_lpcompCallback = cb;
+    reg32(LPCOMP_BASE, LPCOMP_INTENCLR) = 0xFFFFFFFFUL;
+    if (cb == nullptr) return;
+    // ANADETECT picks which crossing the analog block flags: 0 cross, 1 up,
+    // 2 down. Drive the matching event + interrupt.
+    reg32(LPCOMP_BASE, LPCOMP_EVENTS_DOWN)  = 0UL;
+    reg32(LPCOMP_BASE, LPCOMP_EVENTS_UP)    = 0UL;
+    reg32(LPCOMP_BASE, LPCOMP_EVENTS_CROSS) = 0UL;
+    uint32_t anadetect = 0UL;
+    uint32_t inten = 0UL;
+    switch (mode) {
+        case MODE_UP:    anadetect = 1UL; inten = 1UL << 2; break;
+        case MODE_DOWN:  anadetect = 2UL; inten = 1UL << 1; break;
+        case MODE_CROSS:
+        default:         anadetect = 0UL; inten = 1UL << 3; break;
+    }
+    reg32(LPCOMP_BASE, LPCOMP_ANADETECT) = anadetect;
+    reg32(LPCOMP_BASE, LPCOMP_INTENSET)  = inten;
+    enableNvic(LPCOMP_IRQ);
+}
+
+void NrfLpComp::detachInterrupt() { attachInterrupt(MODE_CROSS, nullptr); }
+
+void NrfLpComp::serviceIrq() {
+    bool fired = false;
+    if (reg32(LPCOMP_BASE, LPCOMP_EVENTS_CROSS) != 0UL) { reg32(LPCOMP_BASE, LPCOMP_EVENTS_CROSS) = 0UL; fired = true; }
+    if (reg32(LPCOMP_BASE, LPCOMP_EVENTS_UP)    != 0UL) { reg32(LPCOMP_BASE, LPCOMP_EVENTS_UP)    = 0UL; fired = true; }
+    if (reg32(LPCOMP_BASE, LPCOMP_EVENTS_DOWN)  != 0UL) { reg32(LPCOMP_BASE, LPCOMP_EVENTS_DOWN)  = 0UL; fired = true; }
+    if (fired && g_lpcompCallback != nullptr) g_lpcompCallback();
+}
+
+// COMP and LPCOMP share IRQ 19. They're mutually exclusive, so dispatching to
+// both is safe - only the active peripheral has pending events to clear.
+extern "C" void COMP_LPCOMP_IRQHandler(void) {
+    NrfComp::serviceIrq();
+    NrfLpComp::serviceIrq();
+}
 
 // ============================================================================
 // NrfMwu - memory watch unit
