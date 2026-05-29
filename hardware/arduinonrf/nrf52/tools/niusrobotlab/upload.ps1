@@ -947,6 +947,15 @@ function Stop-NiusLingeringAdafruitNrfutil {
     }
 
     # Back-to-back uploads on Windows: leftover nrfutil or PYTHON.EXE child often keeps COM exclusive.
+    # But on the common CLEAN path there is nothing to kill, so the unconditional
+    # taskkill + ~0.6-0.85 s settle was pure dead time on every upload. Probe
+    # first (Get-Process is ~tens of ms) and only pay the kill+settle when a
+    # stale adafruit-nrfutil is actually still alive. Measured saving ~0.8 s per
+    # call on clean uploads (this runs once before touch and once before DFU).
+    $lingering = @(Get-Process -Name 'adafruit-nrfutil' -ErrorAction SilentlyContinue)
+    if ($lingering.Count -eq 0) {
+        return
+    }
     cmd /c "taskkill /F /IM adafruit-nrfutil.exe 2>nul" | Out-Null
     Start-Sleep -Milliseconds 200
     cmd /c "taskkill /F /IM adafruit-nrfutil.exe 2>nul" | Out-Null
@@ -1882,14 +1891,27 @@ function Invoke-Touch1200Transition {
     # prepulse variant does not, and used to run first and burn a full timeout
     # before we fell through to the one that works. Try the working one first;
     # keep the legacy prepulse only as a fallback for other boards.
+    # Touch order is EMPIRICALLY determined (2026-05-29 hardware measurements
+    # on the verified ProMicro clone). On the current promicroserialnosd
+    # firmware the plain "single 1200 touch" (opening the port directly at
+    # 1200 baud) does NOT trigger a reset - confirmed it leaves the board in
+    # application mode after both a 100 ms pulse AND a 2.7 s hold. Only the
+    # 115200 -> 1200 baud TRANSITION arms the firmware's reset. The prepulse
+    # variant always issues a final 1200 pulse as well, so it ALSO triggers
+    # boards that react to a plain 1200 open - it is a strict superset. Putting
+    # it first eliminates the ~5.6 s previously wasted on the doomed
+    # single-1200 attempt on every upload. single-1200 stays as a harmless
+    # fallback for any board where the prepulse variant somehow regresses.
+    # (The older comment claimed the opposite ordering; that was measured on
+    # different firmware and no longer holds - see the git history.)
     $touchModes = @(
-        [pscustomobject]@{
-            Label = 'single 1200 touch'
-            IncludePrepulse115200 = $false
-        },
         [pscustomobject]@{
             Label = 'legacy 115200->1200 touch'
             IncludePrepulse115200 = $true
+        },
+        [pscustomobject]@{
+            Label = 'single 1200 touch'
+            IncludePrepulse115200 = $false
         }
     )
 
