@@ -52,6 +52,12 @@ constexpr uint32_t NVIC_ICER0 = 0x180UL;
 constexpr uint32_t NVIC_ICPR0 = 0x280UL;
 constexpr uint8_t  RTC1_IRQ_NUMBER = 17U;
 
+// System Control Block - SCR.SEVONPEND lets a *pending* interrupt (even one
+// disabled in the NVIC) wake WFE without taking the exception. This is the
+// documented nRF52 way to block on a peripheral event from WFE.
+constexpr uint32_t SCB_SCR          = 0xE000ED10UL;
+constexpr uint32_t SCB_SCR_SEVONPEND = 1UL << 4;
+
 inline volatile uint32_t &reg32(uint32_t base, uint32_t offset) {
     return *reinterpret_cast<volatile uint32_t *>(base + offset);
 }
@@ -103,40 +109,61 @@ void NrfPower::sleepMs(uint32_t delayMs) {
         nrfStartLfclk();
     }
 
-    // Cap to 24-bit RTC range at the 1 kHz tick we'll set up below.
+    // Cap to 24-bit RTC range at the ~1 kHz tick, and floor at 2 ticks: the
+    // RTC compare can MISS a match if CC == COUNTER+1, so we need >= +2.
     if (delayMs > 0x00FFFFFFUL) {
         delayMs = 0x00FFFFFFUL;
     }
-
-    // Configure RTC1 @ ~1 kHz, schedule CC0 for `delayMs` ticks ahead. We do
-    // not touch any existing RTC1 prescaler / compare config the caller may
-    // have set up - the caller is responsible for not racing this with their
-    // own RTC1 use.
-    reg32(RTC1_BASE, RTC_TASKS_STOP) = 1UL;
-    reg32(RTC1_BASE, RTC_TASKS_CLEAR) = 1UL;
-    reg32(RTC1_BASE, RTC_PRESCALER) = RTC1_PRESCALER_FOR_1KHZ;
-    reg32(RTC1_BASE, RTC_EVENTS_COMPARE0) = 0UL;
-    reg32(RTC1_BASE, RTC_CC0) = delayMs;
-    reg32(RTC1_BASE, RTC_EVTENSET) = RTC_INTEN_COMPARE0;
-    reg32(RTC1_BASE, RTC_INTENSET) = RTC_INTEN_COMPARE0;
-
-    clearPendingNvic(RTC1_IRQ_NUMBER);
-    enableNvic(RTC1_IRQ_NUMBER);
-
-    reg32(RTC1_BASE, RTC_TASKS_START) = 1UL;
-
-    // Sleep until CC0 fires (or any other enabled IRQ wakes us first - which
-    // is fine, the caller asked for "sleep up to N ms").
-    while (reg32(RTC1_BASE, RTC_EVENTS_COMPARE0) == 0UL) {
-        sleep();
+    if (delayMs < 2UL) {
+        delayMs = 2UL;
     }
 
-    // Stop + tear down.
+    // Configure RTC1 @ ~1 kHz and schedule CC0 RELATIVE to the live counter.
+    //
+    // We deliberately do NOT clear the counter and trust it to read 0: on
+    // nRF52 TASKS_STOP / TASKS_CLEAR take up to one 32.768 kHz cycle (~31 us)
+    // to propagate, so the counter can still hold a stale, nonzero value the
+    // instant after START (measured 9342 on hardware). An ABSOLUTE CC0 then
+    // either matches at the wrong time or, if the stale counter is already past
+    // it, only fires after a full 24-bit wrap (~4.5 h) - which is exactly the
+    // "sleepMs returns in ~1 ms / or hangs" bug this replaces. Reading the
+    // running counter and arming CC0 = counter + delayMs (24-bit wrap-safe) is
+    // immune to that latency.
+    //
+    // Wake mechanism: SEVONPEND + INTEN with the RTC1 NVIC line left DISABLED.
+    // The compare asserts the RTC1 interrupt, which the NVIC latches as PENDING;
+    // SEVONPEND then wakes WFE on that pending transition WITHOUT taking the
+    // exception - so no ISR runs (no collision with NrfRtc's RTC1_IRQHandler
+    // clearing the event) and EVENTS_COMPARE0 stays latched for the poll.
+    // (EVTEN alone was tried and does NOT reliably wake WFE on this silicon -
+    // measured the counter overrunning CC0 by thousands of ticks before an
+    // unrelated event happened to wake it.)
+    reg32(SCB_SCR, 0UL) |= SCB_SCR_SEVONPEND;
+
+    reg32(RTC1_BASE, RTC_TASKS_STOP) = 1UL;
+    reg32(RTC1_BASE, RTC_PRESCALER) = RTC1_PRESCALER_FOR_1KHZ;   // writable while stopped
+    reg32(RTC1_BASE, RTC_TASKS_START) = 1UL;
+
+    const uint32_t base = reg32(RTC1_BASE, RTC_COUNTER) & 0x00FFFFFFUL;
+    reg32(RTC1_BASE, RTC_EVENTS_COMPARE0) = 0UL;
+    reg32(RTC1_BASE, RTC_CC0) = (base + delayMs) & 0x00FFFFFFUL;
+    reg32(RTC1_BASE, RTC_INTENSET) = RTC_INTEN_COMPARE0;   // -> NVIC pending (NVIC stays disabled)
+
+    // Prime the CPU event register (SEV sets it; the first WFE consumes it),
+    // then sleep until the compare pends. A spurious wake just re-checks the
+    // latched compare event and sleeps again ("sleep up to N ms" semantics).
+    __asm__ volatile("sev" : : : "memory");
+    __asm__ volatile("wfe" : : : "memory");
+    while (reg32(RTC1_BASE, RTC_EVENTS_COMPARE0) == 0UL) {
+        __asm__ volatile("dsb" : : : "memory");
+        __asm__ volatile("wfe" : : : "memory");
+    }
+
+    // Stop + tear down. Clear our INTEN, the event, and the (unserviced) NVIC
+    // pending bit so a later nrfRtc1() user doesn't inherit a stale pend.
     reg32(RTC1_BASE, RTC_TASKS_STOP) = 1UL;
     reg32(RTC1_BASE, RTC_INTENCLR) = RTC_INTEN_COMPARE0;
-    reg32(RTC1_BASE, RTC_EVTENCLR) = RTC_INTEN_COMPARE0;
     reg32(RTC1_BASE, RTC_EVENTS_COMPARE0) = 0UL;
-    disableNvic(RTC1_IRQ_NUMBER);
     clearPendingNvic(RTC1_IRQ_NUMBER);
 }
 
