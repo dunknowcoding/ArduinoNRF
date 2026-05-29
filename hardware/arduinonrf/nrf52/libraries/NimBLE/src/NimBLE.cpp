@@ -175,6 +175,7 @@ NimBLE::Status NimBLE::begin(const char *deviceName) {
     }
 
     nrfStartHfclk();
+    nrfStartLfclk();   // RTC-backed os_cputime / hal_timer + LL scheduler need LFCLK
     // Full port bring-up: eventq + mempools + LL/PHY + timer backend + transport
     // + host (ble_hs_init). Sets up the controller so the host can actually sync.
     nimble_port_init();
