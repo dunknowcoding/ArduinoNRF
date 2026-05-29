@@ -261,6 +261,11 @@ extern "C" void USBD_IRQHandler(void) __attribute__((weak, alias("Default_Handle
 extern "C" void RTC0_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 extern "C" void RTC1_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 extern "C" void RTC2_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void TIMER0_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void TIMER1_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void TIMER2_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void TIMER3_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
+extern "C" void TIMER4_IRQHandler(void) __attribute__((weak, alias("Default_Handler")));
 
 // Cortex-M4 vector table for nRF52840.
 //   Index   0     = initial main stack pointer.
@@ -297,9 +302,9 @@ __attribute__((section(".isr_vector"), used)) const IsrVector g_isrVectors[] = {
     NFCT_IRQHandler,                              // IRQ  5
     GPIOTE_IRQHandler,                            // IRQ  6
     Default_Handler,                              // IRQ  7 SAADC
-    Default_Handler,                              // IRQ  8 TIMER0
-    Default_Handler,                              // IRQ  9 TIMER1
-    Default_Handler,                              // IRQ 10 TIMER2
+    TIMER0_IRQHandler,                            // IRQ  8 TIMER0
+    TIMER1_IRQHandler,                            // IRQ  9 TIMER1
+    TIMER2_IRQHandler,                            // IRQ 10 TIMER2
     RTC0_IRQHandler,                              // IRQ 11 RTC0
     Default_Handler,                              // IRQ 12 TEMP
     Default_Handler,                              // IRQ 13 RNG
@@ -315,8 +320,8 @@ __attribute__((section(".isr_vector"), used)) const IsrVector g_isrVectors[] = {
     Default_Handler,                              // IRQ 23 SWI3_EGU3
     Default_Handler,                              // IRQ 24 SWI4_EGU4
     Default_Handler,                              // IRQ 25 SWI5_EGU5
-    Default_Handler,                              // IRQ 26 TIMER3
-    Default_Handler,                              // IRQ 27 TIMER4
+    TIMER3_IRQHandler,                            // IRQ 26 TIMER3
+    TIMER4_IRQHandler,                            // IRQ 27 TIMER4
     Default_Handler,                              // IRQ 28 PWM0
     Default_Handler,                              // IRQ 29 PDM
     Default_Handler,                              // IRQ 30 NVMC

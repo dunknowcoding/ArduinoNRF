@@ -35,7 +35,7 @@ All project documentation lives here. Start with the [project README](../README.
 - [platform/RTC_DRIVER.md](platform/RTC_DRIVER.md) — low-level driver for RTC0/1/2 (compare + overflow IRQs)
 - [`cores/arduino/NrfPower.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPower.h) — power management: System ON sleep (WFI/WFE), low-power / constant-latency sub-modes, DCDC, RAM retention, SystemOFF + GPIO / NFC / USB wake sources
 - [`cores/arduino/NrfNfcTag.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfNfcTag.h) — NFC-A Type 2 tag emulation (NDEF URI / text), field detect IRQ, read count
-- [`cores/arduino/NrfPeripherals.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPeripherals.h) — small bottom-level drivers: **NrfRng** (hardware TRNG), **NrfWdt** (watchdog), **NrfTemp** (die temp sensor), **NrfQdec** (rotary encoder)
+- [`cores/arduino/NrfPeripherals.h`](../hardware/arduinonrf/nrf52/cores/arduino/NrfPeripherals.h) — small bottom-level drivers: **NrfRng** (hardware TRNG), **NrfWdt** (watchdog), **NrfTemp** (die temp sensor), **NrfQdec** (rotary encoder), **NrfTimer** (TIMER0–4), **NrfNvmc** (flash erase/write), **NrfPpi** (peripheral-to-peripheral routing)
 
 ## Multi-session roadmaps (large vendoring efforts)
 

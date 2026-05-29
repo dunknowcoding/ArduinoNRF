@@ -1,3 +1,18 @@
+// BLE.h - the original advertising-only BLE facade.
+//
+// This library predates the planned NimBLE integration. Its scope is
+// intentionally limited to advertising payloads + a connection-less stub
+// (gattServerSupported / connectionsSupported / notificationsSupported all
+// return false). That gap is filled by the new NimBLE library when its
+// vendoring milestone lands - see:
+//
+//   libraries/NimBLE/                      <- new library (NimBLE-backed)
+//   docs/platform/NIMBLE_INTEGRATION_PLAN.md
+//
+// Existing sketches against this library keep working. New sketches that
+// need real connections / GATT / pairing should target the NimBLE library
+// once it ships (M2 of the NimBLE roadmap).
+
 #pragma once
 
 #include <string.h>
