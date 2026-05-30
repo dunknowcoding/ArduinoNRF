@@ -27,16 +27,9 @@ static struct ble_npl_eventq g_default_eventq;
 static bool g_port_initialized = false;
 
 // SWD-readable progress marker: set just before each init step so a J-Link read
-// after a fault shows which call did NOT return. ALSO mirrored to POWER.GPREGRET2
-// (0x40000520), a RETAINED register that survives the fault->bootloader reset
-// the core's fault handler performs - so the last stage is still readable even
-// after the board bounces back into the bootloader (normal .bss RAM gets
-// clobbered by the bootloader). (Bring-up debug.)
+// shows how far port init got. (Kept as cheap bring-up telemetry.)
 __attribute__((used)) volatile uint32_t g_nimble_port_stage = 0;
-#define NIMBLE_DBG_STAGE(n) do { \
-    g_nimble_port_stage = (uint32_t)(n); \
-    *(volatile uint32_t *)0x40000520UL = (uint32_t)(n); \
-} while (0)
+#define NIMBLE_DBG_STAGE(n) do { g_nimble_port_stage = (uint32_t)(n); } while (0)
 
 /* RAM vector table. The controller (ble_phy.c / ble_hw.c) installs its RADIO,
  * CCM_AAR and RNG ISRs via NVIC_SetVector(), which writes to the table at
