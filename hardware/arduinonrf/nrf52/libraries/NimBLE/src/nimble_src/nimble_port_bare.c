@@ -26,37 +26,92 @@ void os_mempool_module_init(void);
 static struct ble_npl_eventq g_default_eventq;
 static bool g_port_initialized = false;
 
+// SWD-readable progress marker: set just before each init step so a J-Link read
+// after a fault shows which call did NOT return. ALSO mirrored to POWER.GPREGRET2
+// (0x40000520), a RETAINED register that survives the fault->bootloader reset
+// the core's fault handler performs - so the last stage is still readable even
+// after the board bounces back into the bootloader (normal .bss RAM gets
+// clobbered by the bootloader). (Bring-up debug.)
+__attribute__((used)) volatile uint32_t g_nimble_port_stage = 0;
+#define NIMBLE_DBG_STAGE(n) do { \
+    g_nimble_port_stage = (uint32_t)(n); \
+    *(volatile uint32_t *)0x40000520UL = (uint32_t)(n); \
+} while (0)
+
+/* RAM vector table. The controller (ble_phy.c / ble_hw.c) installs its RADIO,
+ * CCM_AAR and RNG ISRs via NVIC_SetVector(), which writes to the table at
+ * SCB->VTOR. On this core VTOR points at the FLASH app table (0x1000), so those
+ * writes are silently dropped (flash is read-only). The IRQ then dispatches
+ * through the flash vector - fine for RADIO/RNG (the bare port defines strong
+ * forwarders) but CCM_AAR has none, so it lands in Default_Handler which RESETS
+ * the chip. That is the "host never syncs / board bounces to bootloader during
+ * ble_hs_start" failure. Relocating the table to RAM up front makes every
+ * NVIC_SetVector() stick, so all controller IRQs reach the right ISR.
+ * 64 entries (16 system + 48 peripheral), 256-byte aligned per Cortex-M VTOR. */
+static uint32_t g_ram_vectors[64] __attribute__((aligned(256)));
+
+static void nimble_relocate_vectors_to_ram(void) {
+    volatile uint32_t *vtor = (volatile uint32_t *)0xE000ED08UL;
+    if (*vtor == (uint32_t)g_ram_vectors) {
+        return;   /* already relocated */
+    }
+    const uint32_t *src = (const uint32_t *)(*vtor);
+    uint32_t ctx = ble_npl_hw_enter_critical();
+    for (int i = 0; i < 64; ++i) {
+        g_ram_vectors[i] = src[i];
+    }
+    __asm volatile("dsb" ::: "memory");
+    *vtor = (uint32_t)g_ram_vectors;
+    __asm volatile("dsb\n isb" ::: "memory");
+    ble_npl_hw_exit_critical(ctx);
+}
+
 void nimble_port_init(void) {
     if (g_port_initialized) {
         return;
     }
 
+    /* Must run BEFORE ble_ll_init()/ble_phy_init() (stage 4) so their
+     * NVIC_SetVector() calls land in a writable (RAM) vector table. */
+    NIMBLE_DBG_STAGE(0);
+    nimble_relocate_vectors_to_ram();
+
     /* Default event queue (host parent task runs on this). */
+    NIMBLE_DBG_STAGE(1);
     ble_npl_eventq_init(&g_default_eventq);
 
     /* Memory pools + system mbuf pool. */
+    NIMBLE_DBG_STAGE(2);
     os_mempool_module_init();
+    NIMBLE_DBG_STAGE(3);
     os_msys_init();
 
 #if NIMBLE_CFG_CONTROLLER
     /* Link layer (also brings up the PHY via SYSINIT-equivalent inside). */
+    NIMBLE_DBG_STAGE(4);
     ble_ll_init();
 #endif
 
     /* Transport + host. */
+    NIMBLE_DBG_STAGE(5);
     ble_transport_init();
+    NIMBLE_DBG_STAGE(6);
     ble_transport_hs_init();
 
 #if NIMBLE_CFG_CONTROLLER
     /* Timer backend the LL scheduler + os_cputime ride on. hal_timer "5" is
      * the cputimer instance; os_cputime runs it at 32768 Hz. */
+    NIMBLE_DBG_STAGE(7);
     hal_timer_init(5, NULL);
+    NIMBLE_DBG_STAGE(8);
     os_cputime_init(32768);
 #endif
 
     /* Controller transport (tells the host the controller is ready). */
+    NIMBLE_DBG_STAGE(9);
     ble_transport_ll_init();
 
+    NIMBLE_DBG_STAGE(10);
     g_port_initialized = true;
 }
 

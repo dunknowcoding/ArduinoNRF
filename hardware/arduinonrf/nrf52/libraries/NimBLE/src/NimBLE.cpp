@@ -174,6 +174,7 @@ NimBLE::Status NimBLE::begin(const char *deviceName) {
         return g_synced ? NIMBLE_OK : NIMBLE_INTERNAL;
     }
 
+    *(volatile uint32_t *)0x40000520UL = 90;   // GPREGRET2 (retained): begin() reached
     nrfStartHfclk();
     nrfStartLfclk();   // RTC-backed os_cputime / hal_timer + LL scheduler need LFCLK
     // Full port bring-up: eventq + mempools + LL/PHY + timer backend + transport
@@ -201,10 +202,14 @@ NimBLE::Status NimBLE::begin(const char *deviceName) {
     // ble_hs_start() directly; on the controller's HCI reset command-complete
     // this fires sync_cb (handleHostSync). Pump the event queue a bounded
     // number of times so the startup sequence and any HCI round-trips run.
+    *(volatile uint32_t *)0x40000520UL = 11;   // GPREGRET2: before ble_hs_start
     g_nimble_dbg_startrc = ble_hs_start();
+    *(volatile uint32_t *)0x40000520UL = 12;   // ble_hs_start returned
     for (int i = 0; i < 64 && !g_synced; ++i) {
         poll();
+        *(volatile uint32_t *)0x40000520UL = 20U + (uint32_t)i;  // per-poll progress
     }
+    *(volatile uint32_t *)0x40000520UL = 13;   // poll loop completed
     g_nimble_dbg_synced = g_synced ? 1U : 0U;
     return g_synced ? NIMBLE_OK : NIMBLE_INTERNAL;
 #else
