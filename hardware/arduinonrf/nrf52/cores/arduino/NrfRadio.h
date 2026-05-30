@@ -6,10 +6,10 @@
 // isn't BLE / 802.15.4.
 //
 // Relationship to the other RADIO users:
-//   * NrfBleRadio (NrfBleHw.h) drives the same RADIO peripheral for BLE
-//     advertising. NrfRadio drives it in proprietary mode. They are mutually
-//     exclusive - the RADIO is a single resource. begin() here takes it over;
-//     don't run a BLE advertiser at the same time.
+//   * The NimBLE controller (libraries/NimBLE) drives the same RADIO peripheral
+//     for Bluetooth Low Energy. NrfRadio drives it in proprietary mode. They
+//     are mutually exclusive - the RADIO is a single resource. begin() here
+//     takes it over; don't run NimBLE at the same time.
 //   * On the SoftDevice build profiles the SoftDevice owns the RADIO. Use
 //     this driver only on the no-SoftDevice path (promicroserialnosd), which
 //     is the verified target for this core anyway.

@@ -107,8 +107,8 @@ bool NrfRadio::begin(uint8_t channel, DataRate rate, int8_t txPowerDbm) {
     dwtInit();
 
     // Power the RADIO on. Without this, if anything previously powered it down
-    // (e.g. NrfBleRadio::end() writes RADIO_POWER=0), every config write below
-    // is ignored and the radio is silently dead. Matches the BLE driver.
+    // (e.g. NimBLE shutting its controller down writes RADIO_POWER=0), every
+    // config write below is ignored and the radio is silently dead.
     reg32(RADIO_BASE, RADIO_POWER) = 1UL;
     // Default (non-fast) ramp-up, like the verified BLE path. Leaving MODECNF0
     // at its reset value risks a slower/legacy ramp on some revisions.
@@ -141,7 +141,7 @@ bool NrfRadio::begin(uint8_t channel, DataRate rate, int8_t txPowerDbm) {
 
 void NrfRadio::end() {
     disableRadio();
-    // Power the RADIO down so a later NrfBleRadio (or re-begin) starts clean.
+    // Power the RADIO down so a later NimBLE (or re-begin) starts clean.
     reg32(RADIO_BASE, RADIO_POWER) = 0UL;
     g_started = false;
 }
