@@ -532,6 +532,40 @@
 #define MYNEWT_VAL_BLE_ROLE_PERIPHERAL (1)
 #endif
 
+/* CONTROLLER (link-layer) roles. These were undefined -> defaulted to 0, which
+ * made ble_ll_hci_le_read_bufsize() report a ZERO LE ACL buffer size (its
+ * #else branch), so the host's startup HCI handshake (LE Read Buffer Size ->
+ * set_buf_sz) failed and ble_hs never reached SYNC_STATE_GOOD. Enable them to
+ * match the host BLE_ROLE_* above so the controller supports advertising +
+ * connections and reports real buffer sizes. (Hardware-verified 2026-05-30.) */
+#ifndef MYNEWT_VAL_BLE_LL_ROLE_BROADCASTER
+#define MYNEWT_VAL_BLE_LL_ROLE_BROADCASTER (1)
+#endif
+#ifndef MYNEWT_VAL_BLE_LL_ROLE_CENTRAL
+#define MYNEWT_VAL_BLE_LL_ROLE_CENTRAL (1)
+#endif
+#ifndef MYNEWT_VAL_BLE_LL_ROLE_OBSERVER
+#define MYNEWT_VAL_BLE_LL_ROLE_OBSERVER (1)
+#endif
+#ifndef MYNEWT_VAL_BLE_LL_ROLE_PERIPHERAL
+#define MYNEWT_VAL_BLE_LL_ROLE_PERIPHERAL (1)
+#endif
+
+/* Connection-related LL config pulled in once PERIPHERAL/CENTRAL are enabled.
+ * NimBLE upstream defaults. */
+#ifndef MYNEWT_VAL_BLE_LL_SUPP_MAX_RX_BYTES
+#define MYNEWT_VAL_BLE_LL_SUPP_MAX_RX_BYTES (251)
+#endif
+#ifndef MYNEWT_VAL_BLE_LL_SUPP_MAX_TX_BYTES
+#define MYNEWT_VAL_BLE_LL_SUPP_MAX_TX_BYTES (251)
+#endif
+#ifndef MYNEWT_VAL_BLE_LL_CONN_INIT_MAX_TX_BYTES
+#define MYNEWT_VAL_BLE_LL_CONN_INIT_MAX_TX_BYTES (27)
+#endif
+#ifndef MYNEWT_VAL_BLE_LL_CONN_EVENT_END_MARGIN
+#define MYNEWT_VAL_BLE_LL_CONN_EVENT_END_MARGIN (0)
+#endif
+
 #ifndef MYNEWT_VAL_BLE_VERSION
 #define MYNEWT_VAL_BLE_VERSION (50)
 #endif

@@ -351,6 +351,17 @@ static void (*s_isr_table[64])(void) = {0};
 void ble_npl_hw_set_isr(int irqn, void (*addr)(void)) {
     if (irqn >= 0 && irqn < (int)(sizeof(s_isr_table) / sizeof(s_isr_table[0]))) {
         s_isr_table[irqn] = addr;
+        // Install the ISR DIRECTLY into the active vector table. The strong
+        // RADIO/RNG/RTC0 forwarders below don't reliably win over the Arduino
+        // core's weak Default_Handler aliases at link time (verified on
+        // hardware: an RNG IRQ during ble_hs_start hit Default_Handler ->
+        // chip reset), so don't depend on them. nimble_port_init() relocates
+        // VTOR into RAM first, so this write lands in a writable table; guard
+        // on a RAM VTOR so a stray early call never writes read-only flash.
+        uint32_t vtor = *(volatile uint32_t *)0xE000ED08UL;
+        if (vtor >= 0x20000000UL) {
+            ((volatile uint32_t *)vtor)[irqn + 16] = (uint32_t)addr;
+        }
     }
 }
 
