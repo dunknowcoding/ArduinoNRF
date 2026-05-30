@@ -4155,6 +4155,11 @@ ble_ll_conn_chan_map_update(void)
  *
  * @return 0: connection not started; 1 connecton started
  */
+/* Bring-up debug (SWD-readable): traces ble_ll_conn_periph_start. [0]=entry,
+ * [1]=pool empty, [2]=bad params, [3]=parsed conn_itvl, [4]=reached
+ * ble_ll_conn_created, [5]=its rc, [6]=created FAILED, [7]=SUCCESS. */
+__attribute__((used)) volatile uint32_t g_ll_periph_dbg[8] = {0};
+
 #if MYNEWT_VAL(BLE_LL_ROLE_PERIPHERAL)
 int
 ble_ll_conn_periph_start(uint8_t *rxbuf, uint8_t pat, struct ble_mbuf_hdr *rxhdr,
@@ -4166,6 +4171,8 @@ ble_ll_conn_periph_start(uint8_t *rxbuf, uint8_t pat, struct ble_mbuf_hdr *rxhdr
     uint8_t *inita;
     uint8_t *dptr;
     struct ble_ll_conn_sm *connsm;
+
+    g_ll_periph_dbg[0]++;
 
     /* Ignore the connection request if we are already connected*/
     inita = rxbuf + BLE_LL_PDU_HDR_LEN;
@@ -4186,6 +4193,7 @@ ble_ll_conn_periph_start(uint8_t *rxbuf, uint8_t pat, struct ble_mbuf_hdr *rxhdr
     /* Allocate a connection. If none available, dont do anything */
     connsm = ble_ll_conn_sm_get();
     if (connsm == NULL) {
+        g_ll_periph_dbg[1]++;
         return 0;
     }
 
@@ -4263,14 +4271,21 @@ ble_ll_conn_periph_start(uint8_t *rxbuf, uint8_t pat, struct ble_mbuf_hdr *rxhdr
 
     /* Set initial schedule callback */
     connsm->conn_sch.sched_cb = ble_ll_conn_event_start_cb;
+    g_ll_periph_dbg[3] = connsm->conn_itvl;
+    g_ll_periph_dbg[4]++;          /* reached ble_ll_conn_created */
     rc = ble_ll_conn_created(connsm, rxhdr);
+    g_ll_periph_dbg[5] = (uint32_t)rc;
     if (!rc) {
+        g_ll_periph_dbg[6]++;      /* ble_ll_conn_created FAILED (sched?) */
         SLIST_REMOVE(&g_ble_ll_conn_active_list, connsm, ble_ll_conn_sm, act_sle);
         STAILQ_INSERT_TAIL(&g_ble_ll_conn_free_list, connsm, free_stqe);
+    } else {
+        g_ll_periph_dbg[7]++;      /* SUCCESS - connection created */
     }
     return rc;
 
 err_periph_start:
+    g_ll_periph_dbg[2]++;          /* bad CONNECT_IND params */
     STAILQ_INSERT_TAIL(&g_ble_ll_conn_free_list, connsm, free_stqe);
     STATS_INC(ble_ll_conn_stats, periph_rxd_bad_conn_req_params);
     return 0;

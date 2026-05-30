@@ -4643,12 +4643,21 @@ ble_ll_adv_rx_req(uint8_t pdu_type, struct os_mbuf *rxpdu)
  *
  * @return 0: no connection started. 1: connection started
  */
+/* Bring-up debug (SWD-readable): traces a received CONNECT_IND through the
+ * LL slave connect path. [0]=isr saw CONNECT_IND, [1]=isr accepted (props
+ * connectable), [2]=conn_req_rxd ran, [3]=valid, [4]=invalid,
+ * [6]=advsm->props, [7]=rxinfo.flags. */
+__attribute__((used)) volatile uint32_t g_ll_conn_dbg[8] = {0};
+
 #if MYNEWT_VAL(BLE_LL_ROLE_PERIPHERAL)
 static int
 ble_ll_adv_conn_req_rxd(uint8_t *rxbuf, struct ble_mbuf_hdr *hdr,
                         struct ble_ll_adv_sm *advsm)
 {
     int valid;
+    g_ll_conn_dbg[2]++;
+    g_ll_conn_dbg[7] = hdr->rxinfo.flags;
+    g_ll_conn_dbg[6] = advsm->props;
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
     uint8_t resolved;
 #endif
@@ -4698,6 +4707,7 @@ ble_ll_adv_conn_req_rxd(uint8_t *rxbuf, struct ble_mbuf_hdr *hdr,
         }
     }
 
+    if (valid) { g_ll_conn_dbg[3]++; } else { g_ll_conn_dbg[4]++; }
     if (valid) {
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_PRIVACY)
         if (resolved) {
@@ -4899,7 +4909,11 @@ ble_ll_adv_rx_isr_start(uint8_t pdu_type)
     } else {
         /* Only accept connect requests if connectable advertising event */
         if (pdu_type == BLE_ADV_PDU_TYPE_CONNECT_IND) {
+            extern volatile uint32_t g_ll_conn_dbg[8];
+            g_ll_conn_dbg[0]++;
+            g_ll_conn_dbg[6] = advsm->props;
             if (advsm->props & BLE_HCI_LE_SET_EXT_ADV_PROP_CONNECTABLE) {
+                g_ll_conn_dbg[1]++;
                 /* Need transition to TX if extended adv */
                 rc = !(advsm->props & BLE_HCI_LE_SET_EXT_ADV_PROP_LEGACY);
             }
