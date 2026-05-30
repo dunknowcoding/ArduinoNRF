@@ -37,6 +37,8 @@ extern "C" {
 extern "C" {
 __attribute__((used)) volatile int      g_nimble_dbg_startrc = 0x7F;  // ble_hs_start() return
 __attribute__((used)) volatile uint32_t g_nimble_dbg_synced  = 0;     // g_synced after pump
+__attribute__((used)) volatile int      g_dbg_adv_step = 0;           // adv: 1=setfields 2=rsp 3=start 9=ok
+__attribute__((used)) volatile int      g_dbg_adv_rc   = 0;           // adv: failing gap rc
 }
 
 namespace {
@@ -113,11 +115,20 @@ void handleHostReset(int reason) {
 void handleHostSync() {
     g_synced = true;
 
+    // The nRF52840 has no IEEE public address, so advertising with
+    // own_addr_type=PUBLIC fails with BLE_HS_ENOADDR (21). Program a random
+    // STATIC address from the factory FICR DEVICEADDR (top 2 bits = 0b11) and
+    // advertise as RANDOM.
+    uint8_t rnd[6];
+    loadPublicAddress(rnd);
+    rnd[5] |= 0xC0;
+    ble_hs_id_set_rnd(rnd);
+
     if (ble_hs_id_infer_auto(0, &g_ownAddrType) != 0) {
-        g_ownAddrType = BLE_OWN_ADDR_PUBLIC;
+        g_ownAddrType = BLE_OWN_ADDR_RANDOM;
     }
 
-    ble_hs_id_copy_addr(BLE_ADDR_PUBLIC, g_publicAddress, nullptr);
+    ble_hs_id_copy_addr(BLE_ADDR_RANDOM, g_publicAddress, nullptr);
 
     if (g_shouldAdvertise) {
         startAdvertisingInternal();
@@ -149,19 +160,21 @@ NimBLE::Status startAdvertisingInternal() {
     rspFields.name_len = strlen(g_deviceName);
     rspFields.name_is_complete = 1;
 
-    if (ble_gap_adv_set_fields(&advFields) != 0) {
-        return NimBLE::NIMBLE_INTERNAL;
-    }
+    int advrc;
+    g_dbg_adv_step = 1;
+    advrc = ble_gap_adv_set_fields(&advFields);
+    if (advrc != 0) { g_dbg_adv_rc = advrc; return NimBLE::NIMBLE_INTERNAL; }
 
-    if (ble_gap_adv_rsp_set_fields(&rspFields) != 0) {
-        return NimBLE::NIMBLE_INTERNAL;
-    }
+    g_dbg_adv_step = 2;
+    advrc = ble_gap_adv_rsp_set_fields(&rspFields);
+    if (advrc != 0) { g_dbg_adv_rc = advrc; return NimBLE::NIMBLE_INTERNAL; }
 
-    if (ble_gap_adv_start(g_ownAddrType, nullptr, BLE_HS_FOREVER, &advParams,
-                          handleGapEvent, nullptr) != 0) {
-        return NimBLE::NIMBLE_INTERNAL;
-    }
+    g_dbg_adv_step = 3;
+    advrc = ble_gap_adv_start(g_ownAddrType, nullptr, BLE_HS_FOREVER, &advParams,
+                              handleGapEvent, nullptr);
+    if (advrc != 0) { g_dbg_adv_rc = advrc; return NimBLE::NIMBLE_INTERNAL; }
 
+    g_dbg_adv_step = 9;
     g_advertising = true;
     return NimBLE::NIMBLE_OK;
 }

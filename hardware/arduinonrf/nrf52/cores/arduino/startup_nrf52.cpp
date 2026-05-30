@@ -71,6 +71,7 @@ constexpr uint32_t kGpregretRecoveryMagic = 0x57UL; // DFU_MAGIC_UF2_RESET
 // from a running app confirms that Reset_Handler executed at least once.
 constexpr uint32_t kDiagSramAddr      = 0x20004000UL;
 constexpr uint32_t kDiagCauseSramAddr = 0x20004004UL;
+constexpr uint32_t kDiagFaultInfoSramAddr = 0x20004008UL;  // VECTACTIVE (Default) or stacked PC (HardFault)
 constexpr uint32_t kDiagResetHandlerMark = 0xA55A0001UL;  // app Reset_Handler ran
 constexpr uint32_t kDiagCauseDefaultHandler = 0xCA5E0DEFUL;
 constexpr uint32_t kDiagCauseHardFault = 0xCA5E0FA1UL;
@@ -171,6 +172,11 @@ extern "C" void Default_Handler(void) {
     // stays in the configured recovery mode instead of
     // jumping directly back to the crashing application and creating a tight
     // reset loop where USB never has time to enumerate.
+    // Capture WHICH exception/IRQ landed here (SCB->ICSR VECTACTIVE, bits 0..8)
+    // into the bootloader-persistent diag slot so a post-reset SWD read names
+    // the offending vector. For a peripheral IRQ, IRQn = VECTACTIVE - 16.
+    raw32(kDiagFaultInfoSramAddr) =
+        (*reinterpret_cast<volatile uint32_t *>(0xE000ED04UL)) & 0x1FFUL;
     raw32(kDiagCauseSramAddr) = kDiagCauseDefaultHandler;
     raw32(kGpregretAddr) = kGpregretRecoveryMagic;
     raw32(kAircrAddr) = kAircrSysresetReq;
@@ -185,6 +191,15 @@ extern "C" void HardFault_Handler(void) {
     // that a HardFault occurred (read 0x20004002 for the fault flag byte).
     *reinterpret_cast<volatile uint32_t *>(kDiagSramAddr) =
         (*reinterpret_cast<volatile uint32_t *>(kDiagSramAddr) & 0xFFFF0000UL) | 0x0000FA1UL;
+    // Capture the stacked faulting PC (exception frame offset 0x18) into the
+    // persistent diag slot so a post-reset SWD read points at the instruction
+    // that faulted. Assumes the fault was taken from an MSP context (the
+    // bare-metal Arduino case - no PSP threads).
+    {
+        uint32_t msp;
+        __asm volatile("mrs %0, msp" : "=r"(msp));
+        raw32(kDiagFaultInfoSramAddr) = reinterpret_cast<volatile uint32_t *>(msp)[6];
+    }
     raw32(kDiagCauseSramAddr) = kDiagCauseHardFault;
     raw32(kGpregretAddr) = kGpregretRecoveryMagic;
     raw32(kAircrAddr) = kAircrSysresetReq;

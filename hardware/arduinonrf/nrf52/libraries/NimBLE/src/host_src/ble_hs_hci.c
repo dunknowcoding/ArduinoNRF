@@ -306,6 +306,11 @@ ble_hs_hci_cmd_tx_no_rsp(uint16_t opcode, const void *cmd, uint8_t cmd_len)
     return rc;
 }
 
+/* Bring-up debug (SWD-readable): last HCI command + where/why it failed. */
+__attribute__((used)) volatile uint16_t g_dbg_hci_opcode = 0;
+__attribute__((used)) volatile int      g_dbg_hci_rc = 0;
+__attribute__((used)) volatile uint8_t  g_dbg_hci_step = 0;  /* 1=send 2=wait_ack 3=proc_ack 9=ok */
+
 int
 ble_hs_hci_cmd_tx(uint16_t opcode, const void *cmd, uint8_t cmd_len,
                   void *rsp, uint8_t rsp_len)
@@ -313,25 +318,32 @@ ble_hs_hci_cmd_tx(uint16_t opcode, const void *cmd, uint8_t cmd_len,
     struct ble_hs_hci_ack ack;
     int rc;
 
+    g_dbg_hci_opcode = opcode;
+    g_dbg_hci_step = 0;
+
     ble_hs_hci_lock();
     BLE_HS_DBG_ASSERT(ble_hs_hci_ack == NULL);
 
     rc = ble_hs_hci_cmd_send_buf(opcode, cmd, cmd_len);
     if (rc != 0) {
+        g_dbg_hci_step = 1; g_dbg_hci_rc = rc;
         goto done;
     }
 
     rc = ble_hs_hci_wait_for_ack();
     if (rc != 0) {
+        g_dbg_hci_step = 2; g_dbg_hci_rc = rc;
         ble_hs_sched_reset(rc);
         goto done;
     }
 
     rc = ble_hs_hci_process_ack(opcode, rsp, rsp_len, &ack);
     if (rc != 0) {
+        g_dbg_hci_step = 3; g_dbg_hci_rc = rc;
         ble_hs_sched_reset(rc);
         goto done;
     }
+    g_dbg_hci_step = 9;
 
     rc = ack.bha_status;
 
