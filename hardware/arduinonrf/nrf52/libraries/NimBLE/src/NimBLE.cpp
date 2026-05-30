@@ -19,8 +19,11 @@
 #define NRF_NIMBLE_PORTING_VENDORED 1
 extern "C" {
 #include "host/ble_gap.h"
+#include "host/ble_gatt.h"
+#include "host/ble_uuid.h"
 #include "host/ble_hs.h"
 #include "host/ble_hs_id.h"
+#include "host/ble_hs_mbuf.h"
 #include "nimble/nimble_npl.h"
 #include "nimble/nimble_port.h"
 #include "nimble/transport.h"
@@ -51,6 +54,65 @@ uint8_t g_publicAddress[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 char g_deviceName[31] = "nimble";
 bool g_portReady = false;
 uint8_t g_ownAddrType = BLE_OWN_ADDR_PUBLIC;
+
+// --- Nordic UART Service (NUS) echo GATT server -----------------------------
+// A connection/data test surface: the central writes to RX, the board echoes
+// the bytes back as a TX notification. UUIDs are the de-facto "BLE UART" ones,
+// so off-the-shelf scanners (nRF Connect, bleak) can drive it. Counters are
+// SWD-readable for hardware verification.
+uint16_t g_txValHandle = 0;
+uint16_t g_connHandle = BLE_HS_CONN_HANDLE_NONE;
+__attribute__((used)) volatile uint32_t g_rxCount = 0;       // writes received
+__attribute__((used)) volatile uint32_t g_lastRxLen = 0;     // bytes in last write
+__attribute__((used)) volatile uint32_t g_notifyCount = 0;   // notifications sent
+__attribute__((used)) volatile uint32_t g_lastConnHandle = 0xFFFF;
+uint8_t g_rxBuf[244];
+
+// 6E40000x-B5A3-F393-E0A9-E50E24DCCA9E, bytes LSB-first.
+const ble_uuid128_t NUS_SVC_UUID = BLE_UUID128_INIT(
+    0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x01,0x00,0x40,0x6e);
+const ble_uuid128_t NUS_RX_UUID = BLE_UUID128_INIT(
+    0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x02,0x00,0x40,0x6e);
+const ble_uuid128_t NUS_TX_UUID = BLE_UUID128_INIT(
+    0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x03,0x00,0x40,0x6e);
+
+int nusAccessCb(uint16_t conn_handle, uint16_t attr_handle,
+                struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    (void)conn_handle; (void)attr_handle; (void)arg;
+    if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        uint16_t len = 0;
+        ble_hs_mbuf_to_flat(ctxt->om, g_rxBuf, sizeof(g_rxBuf), &len);
+        g_lastRxLen = len;
+        g_rxCount++;
+        // Echo the bytes back to the central as a TX notification.
+        if (g_connHandle != BLE_HS_CONN_HANDLE_NONE && g_txValHandle != 0) {
+            struct os_mbuf *om = ble_hs_mbuf_from_flat(g_rxBuf, len);
+            if (om != nullptr &&
+                ble_gatts_notify_custom(g_connHandle, g_txValHandle, om) == 0) {
+                g_notifyCount++;
+            }
+        }
+    }
+    return 0;
+}
+
+const struct ble_gatt_chr_def NUS_CHRS[] = {
+    { &NUS_RX_UUID.u, nusAccessCb, nullptr, nullptr,
+      BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP, 0, nullptr },
+    { &NUS_TX_UUID.u, nusAccessCb, nullptr, nullptr,
+      BLE_GATT_CHR_F_NOTIFY, 0, &g_txValHandle },
+    { 0 },
+};
+const struct ble_gatt_svc_def NUS_SVCS[] = {
+    { BLE_GATT_SVC_TYPE_PRIMARY, &NUS_SVC_UUID.u, nullptr, NUS_CHRS },
+    { 0 },
+};
+
+int registerGattServices() {
+    int rc = ble_gatts_count_cfg(NUS_SVCS);
+    if (rc != 0) return rc;
+    return ble_gatts_add_svcs(NUS_SVCS);
+}
 
 constexpr uint32_t FICR_BASE = 0x10000000UL;
 constexpr uint32_t FICR_DEVICEADDR0 = 0x0A4UL;
@@ -87,11 +149,20 @@ int handleGapEvent(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_CONNECT:
         g_connected = (event->connect.status == 0);
         g_advertising = false;
+        if (g_connected) {
+            g_connHandle = event->connect.conn_handle;
+            g_lastConnHandle = event->connect.conn_handle;
+        }
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
         g_connected = false;
         g_advertising = false;
+        g_connHandle = BLE_HS_CONN_HANDLE_NONE;
+        // Resume advertising so the link can be re-established (robustness).
+        if (g_shouldAdvertise) {
+            startAdvertisingInternal();
+        }
         break;
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
@@ -195,6 +266,9 @@ NimBLE::Status NimBLE::begin(const char *deviceName) {
     // Set host callbacks AFTER init (ble_hs_init may reset ble_hs_cfg).
     ble_hs_cfg.reset_cb = handleHostReset;
     ble_hs_cfg.sync_cb = handleHostSync;
+    // Register the NUS echo GATT service. Must happen after ble_hs_init (done in
+    // nimble_port_init) and before ble_hs_start (which calls ble_gatts_start).
+    registerGattServices();
     g_portReady = nimble_port_get_dflt_eventq() != nullptr;
     if (!g_portReady) {
         return NIMBLE_INTERNAL;
