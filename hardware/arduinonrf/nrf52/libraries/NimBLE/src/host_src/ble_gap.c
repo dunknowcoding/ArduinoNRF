@@ -2018,6 +2018,9 @@ ble_gap_rd_rem_sup_feat_tx(uint16_t handle)
  * Processes an incoming connection-complete HCI event.
  * instance parameter is valid only for slave connection.
  */
+/* BRING-UP debug: [0]=le-meta events, [1]=last subevent, [2]=rx_conn_complete
+ * reached, [3]=conn-complete status. */
+__attribute__((used)) volatile uint32_t g_hs_dbg[4] = {0};
 int
 ble_gap_rx_conn_complete(struct ble_gap_conn_complete *evt, uint8_t instance)
 {
@@ -2025,6 +2028,12 @@ ble_gap_rx_conn_complete(struct ble_gap_conn_complete *evt, uint8_t instance)
     struct ble_gap_event event;
     struct ble_hs_conn *conn;
     int rc;
+
+    {
+        extern volatile uint32_t g_hs_dbg[4];
+        g_hs_dbg[2]++;                 /* host reached ble_gap_rx_conn_complete */
+        g_hs_dbg[3] = evt->status;     /* conn-complete status */
+    }
 
     STATS_INC(ble_gap_stats, rx_conn_complete);
 

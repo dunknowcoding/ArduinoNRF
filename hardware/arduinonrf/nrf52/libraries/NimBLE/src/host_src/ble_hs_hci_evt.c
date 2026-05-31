@@ -354,6 +354,12 @@ ble_hs_hci_evt_le_meta(uint8_t event_code, const void *data, unsigned int len)
         return BLE_HS_ECONTROLLER;
     }
 
+    {
+        extern volatile uint32_t g_hs_dbg[4];
+        g_hs_dbg[0]++;               /* host got an LE meta event */
+        g_hs_dbg[1] = ev->subevent;  /* last LE subevent code */
+    }
+
     fn = ble_hs_hci_evt_le_dispatch_find(ev->subevent);
     if (fn) {
         return fn(ev->subevent, data, len);

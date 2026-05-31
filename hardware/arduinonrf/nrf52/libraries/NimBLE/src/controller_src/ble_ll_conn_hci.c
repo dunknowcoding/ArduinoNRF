@@ -148,6 +148,15 @@ ble_ll_conn_comp_event_send(struct ble_ll_conn_sm *connsm, uint8_t status,
 
     BLE_LL_ASSERT(evbuf);
 
+    {
+        /* BRING-UP: is the conn-complete LE event enabled in the host's mask?
+         * If both are 0 the controller drops the event -> host never gets
+         * CONNECT. [1]=enh enabled, [2]=legacy enabled. */
+        extern volatile uint32_t g_ll_time_dbg[8];
+        g_ll_time_dbg[1] = ble_ll_hci_is_le_event_enabled(BLE_HCI_LE_SUBEV_ENH_CONN_COMPLETE);
+        g_ll_time_dbg[2] = ble_ll_hci_is_le_event_enabled(BLE_HCI_LE_SUBEV_CONN_COMPLETE);
+    }
+
     if (ble_ll_hci_is_le_event_enabled(BLE_HCI_LE_SUBEV_ENH_CONN_COMPLETE)) {
         hci_ev->opcode = BLE_HCI_EVCODE_LE_META;
         hci_ev->length = sizeof(*enh_ev);

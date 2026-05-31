@@ -560,8 +560,14 @@ ble_hs_enqueue_hci_event(uint8_t *hci_evt)
 {
     struct ble_npl_event *ev;
 
+    {
+        extern volatile uint32_t g_rxevt_dbg[4];
+        g_rxevt_dbg[2]++;   /* enqueue_hci_event called */
+    }
     ev = os_memblock_get(&ble_hs_hci_ev_pool);
     if (ev == NULL) {
+        extern volatile uint32_t g_rxevt_dbg[4];
+        g_rxevt_dbg[3]++;   /* pool exhausted -> event DROPPED */
         ble_transport_free(hci_evt);
     } else {
         ble_npl_event_init(ev, ble_hs_event_rx_hci_ev, hci_evt);

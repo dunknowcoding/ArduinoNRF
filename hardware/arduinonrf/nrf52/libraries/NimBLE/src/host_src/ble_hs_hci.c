@@ -394,6 +394,9 @@ ble_hs_hci_rx_ack(uint8_t *ack_ev)
     ble_npl_sem_release(&ble_hs_hci_sem);
 }
 
+/* BRING-UP debug: [0]=rx_evt calls [1]=last opcode [2]=enqueue calls [3]=pool-drop */
+__attribute__((used)) volatile uint32_t g_rxevt_dbg[4] = {0};
+
 int
 ble_hs_hci_rx_evt(uint8_t *hci_ev, void *arg)
 {
@@ -403,6 +406,12 @@ ble_hs_hci_rx_evt(uint8_t *hci_ev, void *arg)
     int enqueue;
 
     BLE_HS_DBG_ASSERT(hci_ev != NULL);
+
+    {
+        extern volatile uint32_t g_rxevt_dbg[4];
+        g_rxevt_dbg[0]++;            /* ble_hs_hci_rx_evt was called */
+        g_rxevt_dbg[1] = ev->opcode; /* event opcode (0x3E = LE_META) */
+    }
 
     switch (ev->opcode) {
     case BLE_HCI_EVCODE_COMMAND_COMPLETE:

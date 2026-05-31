@@ -1497,6 +1497,8 @@ conn_tx_pdu:
 volatile uint32_t g_ll_cev_dbg[8] = {0};   /* [6]=data_chan_index [7]=access_addr */
 /* channel-selection inputs for offline CSA verification */
 volatile uint32_t g_ll_chan_dbg[6] = {0};
+/* connection timing values for numerical verification (anchor/interval) */
+volatile uint32_t g_ll_time_dbg[8] = {0};
 
 static int
 ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
@@ -2892,6 +2894,17 @@ ble_ll_conn_created(struct ble_ll_conn_sm *connsm, struct ble_mbuf_hdr *rxhdr)
 
         connsm->periph_cur_tx_win_usecs =
             connsm->tx_win_size * BLE_LL_CONN_TX_WIN_USECS;
+        {
+            extern volatile uint32_t g_ll_time_dbg[8];
+            g_ll_time_dbg[0] = rxhdr->beg_cputime;        /* CONNECT_IND rx time (ticks) */
+            g_ll_time_dbg[1] = connsm->anchor_point;       /* first-event anchor (ticks) */
+            g_ll_time_dbg[2] = connsm->conn_itvl;          /* in 1.25ms units */
+            g_ll_time_dbg[3] = connsm->conn_itvl_ticks;    /* should ~= conn_itvl*40.96 */
+            g_ll_time_dbg[4] = connsm->tx_win_off;
+            g_ll_time_dbg[5] = connsm->tx_win_size;
+            g_ll_time_dbg[6] = usecs;                      /* anchor offset from beg_cputime (us) */
+            g_ll_time_dbg[7] = os_cputime_get32();         /* 'now' at conn creation */
+        }
         connsm->ce_end_time = connsm->anchor_point +
                               ble_ll_tmr_u2t(MYNEWT_VAL(BLE_LL_CONN_INIT_SLOTS) *
                                              BLE_LL_SCHED_USECS_PER_SLOT +
@@ -2952,6 +2965,9 @@ ble_ll_conn_created(struct ble_ll_conn_sm *connsm, struct ble_mbuf_hdr *rxhdr)
 #endif
 #if MYNEWT_VAL(BLE_LL_ROLE_PERIPHERAL)
         case BLE_LL_CONN_ROLE_PERIPHERAL:
+            /* sentinel: if g_ll_time_dbg[0]==0xC0C0C0C0 the send WAS reached
+             * (overwrites the beg_cputime set earlier in this same call). */
+            g_ll_time_dbg[0] = 0xC0C0C0C0UL;
             ble_ll_adv_send_conn_comp_ev(connsm, rxhdr);
             break;
 #endif

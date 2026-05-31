@@ -142,11 +142,17 @@ void pumpEvents() {
 
 NimBLE::Status startAdvertisingInternal();
 
+__attribute__((used)) volatile uint32_t g_gap_dbg[4] = {0};  /* [0]=#events [1]=last type [2]=connect status [3]=conn_handle */
+
 int handleGapEvent(struct ble_gap_event *event, void *arg) {
     (void)arg;
+    g_gap_dbg[0]++;
+    g_gap_dbg[1] = event->type;
 
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
+        g_gap_dbg[2] = (uint32_t)event->connect.status;
+        g_gap_dbg[3] = event->connect.conn_handle;
         g_connected = (event->connect.status == 0);
         g_advertising = false;
         if (g_connected) {
@@ -263,6 +269,17 @@ NimBLE::Status NimBLE::begin(const char *deviceName) {
     // Full port bring-up: eventq + mempools + LL/PHY + timer backend + transport
     // + host (ble_hs_init). Sets up the controller so the host can actually sync.
     nimble_port_init();
+    // CRITICAL: re-point the host event queue at the (now-valid) default queue.
+    // ble_hs_init() ran inside nimble_port_init() and called
+    // ble_hs_evq_set(nimble_port_get_dflt_eventq()) - but at that point
+    // g_port_initialized was still false, so the getter returned NULL and
+    // ble_hs_evq was left NULL. With a NULL host evq, every ASYNC host event
+    // (LE Connection Complete, Disconnect, etc.) is silently dropped by
+    // ble_hs_enqueue_hci_event -> the host never delivers BLE_GAP_EVENT_CONNECT.
+    // nimble_port_init() has completed here, so the getter now returns the real
+    // (poll-pumped) queue. (Hardware-verified: without this, the controller
+    // established the link and sent the conn-complete but the host never saw it.)
+    ble_hs_evq_set(nimble_port_get_dflt_eventq());
     // Set host callbacks AFTER init (ble_hs_init may reset ble_hs_cfg).
     ble_hs_cfg.reset_cb = handleHostReset;
     ble_hs_cfg.sync_cb = handleHostSync;

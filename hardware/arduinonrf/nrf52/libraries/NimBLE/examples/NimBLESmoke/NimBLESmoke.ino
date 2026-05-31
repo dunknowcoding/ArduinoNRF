@@ -45,5 +45,11 @@ void loop() {
     }
   }
   Serial.println();
-  delay(1000);
+  // Pump NimBLE continuously for ~1s (NOT delay()): the LL event queue must be
+  // drained promptly or a received CONNECT_IND is processed too late and the
+  // connection anchor is missed. Status print stays ~1 Hz.
+  uint32_t t = millis();
+  while (millis() - t < 1000UL) {
+    NimBLE::poll();
+  }
 }
