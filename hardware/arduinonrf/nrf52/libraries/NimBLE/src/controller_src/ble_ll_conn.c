@@ -1591,9 +1591,7 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
 #endif
 
         /* XXX: what is this really for the peripheral? */
-        /* BRING-UP: open ~3 ticks (~90us) earlier to absorb a small anchor-late
-         * offset (stays within the sched lead so it won't be flagged late). */
-        start = sch->start_time + g_ble_ll_sched_offset_ticks - 3;
+        start = sch->start_time + g_ble_ll_sched_offset_ticks;
         rc = ble_phy_rx_set_start_time(start, sch->remainder);
         g_ll_cev_dbg[3] = (uint32_t)(rc + 1);      /* rx_set_start_time rc (+1 so 0=not-run) */
         g_ll_cev_dbg[4] = start;                    /* scheduled RX start tick */
@@ -1648,12 +1646,6 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
              */
             usecs = connsm->periph_cur_tx_win_usecs + 61 +
                     (2 * connsm->periph_cur_window_widening);
-            /* BRING-UP: widen the establishment RX window to absorb a fixed
-             * anchor-timing offset (channel is verified correct; slave just
-             * never time-aligns). +3 ms END extension; the radio is opened a
-             * few ticks early in the peripheral case above. Revert once the
-             * anchor offset is root-caused. */
-            usecs += 3000;
             ble_phy_wfr_enable(BLE_PHY_WFR_ENABLE_RX, 0, usecs);
             /* Set next wakeup time to connection event end time */
             rc = BLE_LL_SCHED_STATE_RUNNING;
