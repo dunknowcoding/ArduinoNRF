@@ -1490,6 +1490,12 @@ conn_tx_pdu:
  *
  * @return int 0: scheduled item is still running. 1: schedule item is done.
  */
+/* Bring-up debug (SWD-readable): connection-event execution trace.
+ * [0]=conn_event_start_cb fired, [1]=conn rx_isr_start (radio RX began),
+ * [2]=conn rx_isr_end (radio RX completed = heard the central),
+ * [3]=last conn_state seen at event start. */
+volatile uint32_t g_ll_cev_dbg[6] = {0};
+
 static int
 ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
 {
@@ -1498,6 +1504,7 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
     uint32_t usecs;
 #endif
     uint32_t start;
+    g_ll_cev_dbg[0]++;
     struct ble_ll_conn_sm *connsm;
 
     /* XXX: note that we can extend end time here if we want. Look at this */
@@ -1584,6 +1591,9 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
         /* XXX: what is this really for the peripheral? */
         start = sch->start_time + g_ble_ll_sched_offset_ticks;
         rc = ble_phy_rx_set_start_time(start, sch->remainder);
+        g_ll_cev_dbg[3] = (uint32_t)(rc + 1);      /* rx_set_start_time rc (+1 so 0=not-run) */
+        g_ll_cev_dbg[4] = start;                    /* scheduled RX start tick */
+        g_ll_cev_dbg[5] = os_cputime_get32();       /* 'now' for late-check */
         if (rc) {
             /* End the connection event as we have no more buffers */
             STATS_INC(ble_ll_conn_stats, periph_ce_failures);
@@ -3448,6 +3458,8 @@ int
 ble_ll_conn_rx_isr_start(struct ble_mbuf_hdr *rxhdr, uint32_t aa)
 {
     struct ble_ll_conn_sm *connsm;
+    extern volatile uint32_t g_ll_cev_dbg[];
+    g_ll_cev_dbg[1]++;
 
     /*
      * Disable wait for response timer since we receive a response. We dont
@@ -3675,6 +3687,8 @@ int
 ble_ll_conn_rx_isr_end(uint8_t *rxbuf, struct ble_mbuf_hdr *rxhdr)
 {
     int rc;
+    extern volatile uint32_t g_ll_cev_dbg[];
+    g_ll_cev_dbg[2]++;
     uint8_t hdr_byte;
     uint8_t hdr_sn;
     uint8_t hdr_nesn;
