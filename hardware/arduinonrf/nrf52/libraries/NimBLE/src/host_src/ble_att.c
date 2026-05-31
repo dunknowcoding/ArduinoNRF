@@ -523,6 +523,9 @@ ble_att_send_outstanding_after_response(uint16_t conn_handle)
     ble_hs_unlock();
 }
 
+/* BRING-UP debug: ATT PDUs reaching the server. */
+__attribute__((used)) volatile uint32_t g_att_dbg[4] = {0};
+
 static int
 ble_att_rx_extended(uint16_t conn_handle, uint16_t cid, struct os_mbuf **om)
 {
@@ -535,6 +538,16 @@ ble_att_rx_extended(uint16_t conn_handle, uint16_t cid, struct os_mbuf **om)
     rc = os_mbuf_copydata(*om, 0, 1, &op);
     if (rc != 0) {
         return BLE_HS_EMSGSIZE;
+    }
+
+    {
+        /* BRING-UP: which ATT PDUs reach the server. [0]=count [1]=last op
+         * [2]=count of READ_GROUP_TYPE(0x10) [3]=last handler rc. MTU=0x02,
+         * FIND_INFO=0x04, READ_TYPE=0x08, READ_GROUP_TYPE=0x10. */
+        extern volatile uint32_t g_att_dbg[4];
+        g_att_dbg[0]++;
+        g_att_dbg[1] = op;
+        if (op == 0x10) g_att_dbg[2]++;
     }
 
     if (cid == BLE_L2CAP_CID_ATT && ble_att_is_response_op(op)) {
@@ -553,6 +566,10 @@ ble_att_rx_extended(uint16_t conn_handle, uint16_t cid, struct os_mbuf **om)
     os_mbuf_adj(*om, 1);
 
     rc = entry->bde_fn(conn_handle, cid, om);
+    {
+        extern volatile uint32_t g_att_dbg[4];
+        g_att_dbg[3] = (uint32_t)rc;   /* last handler return code */
+    }
     if (rc != 0) {
         if (rc == BLE_HS_ENOTSUP) {
             ble_att_rx_handle_unknown_request(op, conn_handle, cid, om);

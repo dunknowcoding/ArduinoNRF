@@ -20,7 +20,9 @@
 extern "C" {
 #include "host/ble_gap.h"
 #include "host/ble_gatt.h"
+#include "host/ble_att.h"
 #include "host/ble_uuid.h"
+#include "os/os_mbuf.h"
 #include "host/ble_hs.h"
 #include "host/ble_hs_id.h"
 #include "host/ble_hs_mbuf.h"
@@ -103,15 +105,55 @@ const struct ble_gatt_chr_def NUS_CHRS[] = {
       BLE_GATT_CHR_F_NOTIFY, 0, &g_txValHandle },
     { 0 },
 };
-const struct ble_gatt_svc_def NUS_SVCS[] = {
-    { BLE_GATT_SVC_TYPE_PRIMARY, &NUS_SVC_UUID.u, nullptr, NUS_CHRS },
+// Standard GAP (0x1800) + GATT (0x1801) services. The base ble_svc_gap/gatt
+// modules aren't vendored, so register them by hand. Many centrals (incl.
+// Windows/bleak) probe the GAP service (Device Name) during discovery via a
+// Find-By-Type-Value before continuing; without it, discovery stalls.
+const ble_uuid16_t GAP_SVC_UUID      = BLE_UUID16_INIT(0x1800);
+const ble_uuid16_t GAP_DEVNAME_UUID  = BLE_UUID16_INIT(0x2A00);
+const ble_uuid16_t GAP_APPEAR_UUID   = BLE_UUID16_INIT(0x2A01);
+const ble_uuid16_t GATT_SVC_UUID     = BLE_UUID16_INIT(0x1801);
+const ble_uuid16_t GATT_SVC_CHG_UUID = BLE_UUID16_INIT(0x2A05);
+
+int gapAccessCb(uint16_t conn_handle, uint16_t attr_handle,
+                struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    (void)conn_handle; (void)attr_handle; (void)arg;
+    if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) {
+        return BLE_ATT_ERR_UNLIKELY;
+    }
+    uint16_t uuid = ble_uuid_u16(ctxt->chr->uuid);
+    if (uuid == 0x2A00) {   // Device Name
+        return os_mbuf_append(ctxt->om, g_deviceName, strlen(g_deviceName)) == 0
+                   ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    if (uuid == 0x2A01) {   // Appearance (0 = unknown)
+        uint16_t appearance = 0;
+        return os_mbuf_append(ctxt->om, &appearance, sizeof(appearance)) == 0
+                   ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
+const struct ble_gatt_chr_def GAP_CHRS[] = {
+    { &GAP_DEVNAME_UUID.u, gapAccessCb, nullptr, nullptr, BLE_GATT_CHR_F_READ, 0, nullptr },
+    { &GAP_APPEAR_UUID.u,  gapAccessCb, nullptr, nullptr, BLE_GATT_CHR_F_READ, 0, nullptr },
+    { 0 },
+};
+const struct ble_gatt_chr_def GATT_CHRS[] = {
+    { &GATT_SVC_CHG_UUID.u, gapAccessCb, nullptr, nullptr, BLE_GATT_CHR_F_INDICATE, 0, nullptr },
+    { 0 },
+};
+const struct ble_gatt_svc_def ALL_SVCS[] = {
+    { BLE_GATT_SVC_TYPE_PRIMARY, &GAP_SVC_UUID.u,  nullptr, GAP_CHRS },
+    { BLE_GATT_SVC_TYPE_PRIMARY, &GATT_SVC_UUID.u, nullptr, GATT_CHRS },
+    { BLE_GATT_SVC_TYPE_PRIMARY, &NUS_SVC_UUID.u,  nullptr, NUS_CHRS },
     { 0 },
 };
 
 int registerGattServices() {
-    int rc = ble_gatts_count_cfg(NUS_SVCS);
+    int rc = ble_gatts_count_cfg(ALL_SVCS);
     if (rc != 0) return rc;
-    return ble_gatts_add_svcs(NUS_SVCS);
+    return ble_gatts_add_svcs(ALL_SVCS);
 }
 
 constexpr uint32_t FICR_BASE = 0x10000000UL;
