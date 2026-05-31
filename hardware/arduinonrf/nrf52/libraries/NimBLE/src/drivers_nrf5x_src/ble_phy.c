@@ -170,7 +170,7 @@ struct ble_phy_obj
 static struct ble_phy_obj g_ble_phy_data;
 
 /* Bring-up debug (SWD-readable): radio ISR activity counters. */
-__attribute__((used)) volatile uint32_t g_phy_isr_dbg[4] = {0};
+__attribute__((used)) volatile uint32_t g_phy_isr_dbg[6] = {0};
 
 /* XXX: if 27 byte packets desired we can make this smaller */
 /* Global transmit/receive buffer */
@@ -1491,12 +1491,21 @@ ble_phy_isr(void)
     uint32_t irq_en;
 
     /* Bring-up debug (SWD-readable): [0]=total radio ISRs, [1]=ADDRESS events
-     * (heard a packet start), [2]=END events, [3]=DISABLED events. */
-    extern volatile uint32_t g_phy_isr_dbg[4];
+     * (heard a packet start), [2]=END events, [3]=DISABLED events,
+     * [4]=radio ISRs while LL is in CONNECTION state (radio ramped up for a
+     * conn event), [5]=ADDRESS events in CONNECTION state (central's packet
+     * actually heard). [4]==0 => radio never RX-enabled for conn events
+     * (arming/PPI bug); [4]>0 && [5]==0 => RX-enabled but missed the packet
+     * (timing/channel). */
+    extern volatile uint32_t g_phy_isr_dbg[6];
     g_phy_isr_dbg[0]++;
     if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[1]++;
     if (NRF_RADIO->EVENTS_END)     g_phy_isr_dbg[2]++;
     if (NRF_RADIO->EVENTS_DISABLED) g_phy_isr_dbg[3]++;
+    if (ble_ll_state_get() == BLE_LL_STATE_CONNECTION) {
+        g_phy_isr_dbg[4]++;
+        if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[5]++;
+    }
 
     os_trace_isr_enter();
 
