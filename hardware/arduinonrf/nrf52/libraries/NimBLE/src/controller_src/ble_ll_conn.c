@@ -1494,7 +1494,7 @@ conn_tx_pdu:
  * [0]=conn_event_start_cb fired, [1]=conn rx_isr_start (radio RX began),
  * [2]=conn rx_isr_end (radio RX completed = heard the central),
  * [3]=last conn_state seen at event start. */
-volatile uint32_t g_ll_cev_dbg[6] = {0};
+volatile uint32_t g_ll_cev_dbg[8] = {0};   /* [6]=data_chan_index [7]=access_addr */
 
 static int
 ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
@@ -1594,6 +1594,8 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
         g_ll_cev_dbg[3] = (uint32_t)(rc + 1);      /* rx_set_start_time rc (+1 so 0=not-run) */
         g_ll_cev_dbg[4] = start;                    /* scheduled RX start tick */
         g_ll_cev_dbg[5] = os_cputime_get32();       /* 'now' for late-check */
+        g_ll_cev_dbg[6] = connsm->data_chan_index;  /* listening channel (0..36) */
+        g_ll_cev_dbg[7] = connsm->access_addr;      /* link access address */
         if (rc) {
             /* End the connection event as we have no more buffers */
             STATS_INC(ble_ll_conn_stats, periph_ce_failures);

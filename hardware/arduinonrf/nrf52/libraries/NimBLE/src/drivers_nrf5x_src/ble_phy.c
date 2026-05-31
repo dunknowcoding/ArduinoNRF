@@ -169,6 +169,9 @@ struct ble_phy_obj
 };
 static struct ble_phy_obj g_ble_phy_data;
 
+/* Bring-up debug (SWD-readable): radio ISR activity counters. */
+__attribute__((used)) volatile uint32_t g_phy_isr_dbg[4] = {0};
+
 /* XXX: if 27 byte packets desired we can make this smaller */
 /* Global transmit/receive buffer */
 static uint32_t g_ble_phy_tx_buf[(BLE_PHY_MAX_PDU_LEN + 3) / 4];
@@ -1486,6 +1489,14 @@ static void
 ble_phy_isr(void)
 {
     uint32_t irq_en;
+
+    /* Bring-up debug (SWD-readable): [0]=total radio ISRs, [1]=ADDRESS events
+     * (heard a packet start), [2]=END events, [3]=DISABLED events. */
+    extern volatile uint32_t g_phy_isr_dbg[4];
+    g_phy_isr_dbg[0]++;
+    if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[1]++;
+    if (NRF_RADIO->EVENTS_END)     g_phy_isr_dbg[2]++;
+    if (NRF_RADIO->EVENTS_DISABLED) g_phy_isr_dbg[3]++;
 
     os_trace_isr_enter();
 
