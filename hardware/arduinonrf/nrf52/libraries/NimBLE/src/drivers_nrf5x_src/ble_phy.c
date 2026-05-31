@@ -171,6 +171,10 @@ static struct ble_phy_obj g_ble_phy_data;
 
 /* Bring-up debug (SWD-readable): radio ISR activity counters. */
 __attribute__((used)) volatile uint32_t g_phy_isr_dbg[6] = {0};
+/* Bring-up debug: conn-event RX hardware-chain observation (see rx_set_start_time). */
+__attribute__((used)) volatile uint32_t g_dbg_rxchain[8] = {0};
+/* Bring-up debug: HFCLKSTAT sampled when a conn-event RX is armed. */
+__attribute__((used)) volatile uint32_t g_dbg_hfclk = 0;
 
 /* XXX: if 27 byte packets desired we can make this smaller */
 /* Global transmit/receive buffer */
@@ -1928,6 +1932,14 @@ ble_phy_rx_set_start_time(uint32_t cputime, uint8_t rem_usecs)
 
     /* Start rx */
     rc = ble_phy_rx();
+
+    /* BRING-UP: is HFCLK on the crystal (HFXO) when we arm a conn-event RX?
+     * The radio needs HFXO to actually receive; on HFINT it still ramps to Rx
+     * but can't demodulate. HFCLKSTAT bit16=running, bit0 SRC(0=RC,1=XTAL). */
+    {
+        extern volatile uint32_t g_dbg_hfclk;
+        g_dbg_hfclk = *(volatile uint32_t *)0x4000040CUL;
+    }
 
     /*
      * If we enabled receiver but were late, let's return proper error code so

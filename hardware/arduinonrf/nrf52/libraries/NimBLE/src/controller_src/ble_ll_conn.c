@@ -1495,6 +1495,8 @@ conn_tx_pdu:
  * [2]=conn rx_isr_end (radio RX completed = heard the central),
  * [3]=last conn_state seen at event start. */
 volatile uint32_t g_ll_cev_dbg[8] = {0};   /* [6]=data_chan_index [7]=access_addr */
+/* channel-selection inputs for offline CSA verification */
+volatile uint32_t g_ll_chan_dbg[6] = {0};
 
 static int
 ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
@@ -1589,13 +1591,26 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
 #endif
 
         /* XXX: what is this really for the peripheral? */
-        start = sch->start_time + g_ble_ll_sched_offset_ticks;
+        /* BRING-UP: open ~3 ticks (~90us) earlier to absorb a small anchor-late
+         * offset (stays within the sched lead so it won't be flagged late). */
+        start = sch->start_time + g_ble_ll_sched_offset_ticks - 3;
         rc = ble_phy_rx_set_start_time(start, sch->remainder);
         g_ll_cev_dbg[3] = (uint32_t)(rc + 1);      /* rx_set_start_time rc (+1 so 0=not-run) */
         g_ll_cev_dbg[4] = start;                    /* scheduled RX start tick */
         g_ll_cev_dbg[5] = os_cputime_get32();       /* 'now' for late-check */
         g_ll_cev_dbg[6] = connsm->data_chan_index;  /* listening channel (0..36) */
         g_ll_cev_dbg[7] = connsm->access_addr;      /* link access address */
+        {
+            extern volatile uint32_t g_ll_chan_dbg[6];
+            g_ll_chan_dbg[0] = connsm->hop_inc;
+            g_ll_chan_dbg[1] = connsm->data_chan_index;
+            g_ll_chan_dbg[2] = connsm->last_unmapped_chan;
+            g_ll_chan_dbg[3] = connsm->chan_map_used | (connsm->flags.csa2 << 8) |
+                               ((uint32_t)connsm->event_cntr << 16);
+            g_ll_chan_dbg[4] = connsm->chan_map[0] | (connsm->chan_map[1] << 8) |
+                               (connsm->chan_map[2] << 16) | ((uint32_t)connsm->chan_map[3] << 24);
+            g_ll_chan_dbg[5] = connsm->chan_map[4];
+        }
         if (rc) {
             /* End the connection event as we have no more buffers */
             STATS_INC(ble_ll_conn_stats, periph_ce_failures);
@@ -1633,6 +1648,12 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
              */
             usecs = connsm->periph_cur_tx_win_usecs + 61 +
                     (2 * connsm->periph_cur_window_widening);
+            /* BRING-UP: widen the establishment RX window to absorb a fixed
+             * anchor-timing offset (channel is verified correct; slave just
+             * never time-aligns). +3 ms END extension; the radio is opened a
+             * few ticks early in the peripheral case above. Revert once the
+             * anchor offset is root-caused. */
+            usecs += 3000;
             ble_phy_wfr_enable(BLE_PHY_WFR_ENABLE_RX, 0, usecs);
             /* Set next wakeup time to connection event end time */
             rc = BLE_LL_SCHED_STATE_RUNNING;
