@@ -169,8 +169,9 @@ struct ble_phy_obj
 };
 static struct ble_phy_obj g_ble_phy_data;
 
-/* Bring-up debug (SWD-readable): radio ISR activity counters. */
-__attribute__((used)) volatile uint32_t g_phy_isr_dbg[6] = {0};
+/* Bring-up debug (SWD-readable): radio ISR activity counters.
+ * [6]=ble_phy_tx calls in CONNECTION state (slave response/ACK TX attempts). */
+__attribute__((used)) volatile uint32_t g_phy_isr_dbg[8] = {0};
 /* Bring-up debug: conn-event RX hardware-chain observation (see rx_set_start_time). */
 __attribute__((used)) volatile uint32_t g_dbg_rxchain[8] = {0};
 /* Bring-up debug: HFCLKSTAT sampled when a conn-event RX is armed. */
@@ -1501,7 +1502,7 @@ ble_phy_isr(void)
      * actually heard). [4]==0 => radio never RX-enabled for conn events
      * (arming/PPI bug); [4]>0 && [5]==0 => RX-enabled but missed the packet
      * (timing/channel). */
-    extern volatile uint32_t g_phy_isr_dbg[6];
+    extern volatile uint32_t g_phy_isr_dbg[8];
     g_phy_isr_dbg[0]++;
     if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[1]++;
     if (NRF_RADIO->EVENTS_END)     g_phy_isr_dbg[2]++;
@@ -1962,6 +1963,11 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
     uint8_t hdr_byte;
     uint32_t state;
     uint32_t shortcuts;
+
+    {
+        extern volatile uint32_t g_phy_isr_dbg[8];
+        if (ble_ll_state_get() == BLE_LL_STATE_CONNECTION) g_phy_isr_dbg[6]++;
+    }
 
     if (g_ble_phy_data.phy_transition_late) {
         ble_phy_disable();
