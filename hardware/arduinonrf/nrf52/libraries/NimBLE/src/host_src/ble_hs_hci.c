@@ -457,7 +457,10 @@ ble_hs_hci_frag_alloc(uint16_t frag_size, void *arg)
     struct os_mbuf *om;
 
     /* Prefer the dedicated one-element fragment pool. */
-#if MYNEWT_VAL(BLE_CONTROLLER)
+    /* ArduinoNRF: reserve the controller's ble_mbuf_hdr in combined builds; see
+     * the note in ble_hs_mbuf.c (BLE_CONTROLLER is undefined here, the local
+     * controller is selected via NIMBLE_CFG_CONTROLLER). */
+#if MYNEWT_VAL(BLE_CONTROLLER) || NIMBLE_CFG_CONTROLLER
     om = os_mbuf_get_pkthdr(&ble_hs_hci_frag_mbuf_pool, sizeof(struct ble_mbuf_hdr));
 #else
     om = os_mbuf_get_pkthdr(&ble_hs_hci_frag_mbuf_pool, 0);

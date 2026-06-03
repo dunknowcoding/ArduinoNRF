@@ -30,7 +30,16 @@ ble_hs_mbuf_gen_pkt(uint16_t leading_space)
     struct os_mbuf *om;
     int rc;
 
-#if MYNEWT_VAL(BLE_CONTROLLER)
+    /* ArduinoNRF: this is a COMBINED host+controller build (NIMBLE_CFG_CONTROLLER
+     * == 1). The local link layer stamps a `struct ble_mbuf_hdr` into the mbuf's
+     * user-header area (BLE_MBUF_HDR_PTR) and, while transmitting, writes
+     * txinfo.pyld_len there (ble_ll_conn.c). If we reserve no user header, that
+     * field overlaps the packet data and the controller corrupts the on-air
+     * L2CAP length byte. Upstream gates this on MYNEWT_VAL(BLE_CONTROLLER), but
+     * that symbol is undefined in our syscfg (the controller is selected via
+     * NIMBLE_CFG_CONTROLLER instead), so it wrongly took the host-only path.
+     * Reserve the header whenever the local controller is present. */
+#if MYNEWT_VAL(BLE_CONTROLLER) || NIMBLE_CFG_CONTROLLER
     om = os_msys_get_pkthdr(0, sizeof(struct ble_mbuf_hdr));
 #else
     om = os_msys_get_pkthdr(0, 0);
