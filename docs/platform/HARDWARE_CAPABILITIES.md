@@ -30,5 +30,10 @@ Date: 2026-05-04 (PWM/peripheral sections updated 2026-05-29)
 
 ## BLE truth
 
-- BLE is currently an advertising-only self-hosted facade.
-- There is no connection-oriented GATT server, notification path, or OTA DFU stack in the current package.
+- Connection-oriented BLE is provided by the vendored **NimBLE** stack
+  (`libraries/NimBLE/`): advertising, connections, MTU exchange, and full GATT
+  (services / characteristics / descriptors / notifications) are verified on
+  hardware against Windows, Android, and board-to-board.
+- The legacy self-hosted `BLE` facade remains advertising-only and is superseded
+  by NimBLE for anything beyond advertising.
+- No SoftDevice and no OTA-DFU-over-BLE stack are shipped.

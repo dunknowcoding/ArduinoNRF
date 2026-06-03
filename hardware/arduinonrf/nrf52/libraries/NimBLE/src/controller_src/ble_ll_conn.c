@@ -133,6 +133,10 @@ struct ble_ll_conn_global_params g_ble_ll_conn_params;
 
 #if MYNEWT_VAL(BLE_LL_ROLE_PERIPHERAL) || MYNEWT_VAL(BLE_LL_ROLE_CENTRAL)
 
+#ifndef NIMBLE_BRINGUP_DEBUG
+#define NIMBLE_BRINGUP_DEBUG 0
+#endif
+
 /* This is a dummy structure we use for the empty PDU */
 struct ble_ll_empty_pdu
 {
@@ -848,6 +852,12 @@ ble_ll_conn_wait_txend(void *arg)
     struct ble_ll_conn_sm *connsm;
 
     connsm = (struct ble_ll_conn_sm *)arg;
+    extern volatile uint32_t g_term_flow_dbg[8];
+    g_term_flow_dbg[4]++;
+    if (connsm->flags.empty_pdu_txd && connsm->flags.terminate_ind_rxd) {
+        connsm->flags.terminate_ind_rxd_acked = 1;
+        g_term_flow_dbg[5]++;
+    }
     ble_ll_conn_current_sm_over(connsm);
 }
 
@@ -1087,6 +1097,58 @@ ble_ll_conn_adjust_pyld_len(struct ble_ll_conn_sm *connsm, uint16_t pyld_len)
     return ret;
 }
 
+/* BRING-UP debug: [0]=ble_ll_conn_tx_pdu calls, [1]=data PDUs dequeued from
+ * conn_txq (llid!=CTRL, pktlen>0), [2]=max data-PDU cur_txlen prepared for the
+ * radio, [3]=CTRL PDUs dequeued. */
+__attribute__((used)) volatile uint32_t g_tx_dbg[4] = {0};
+/* BRING-UP debug: [0]=data PDUs fully sent AND ACK'd by the central (response
+ * actually reached the peer), [1]=no-ACK events while a data PDU is pending
+ * (central never acknowledged -> retransmitting), [2]=total tx ACK-success,
+ * [3]=total tx no-ACK. */
+__attribute__((used)) volatile uint32_t g_ack_dbg[4] = {0};
+/* BRING-UP debug: [0]=L2CAP (ATT/SMP) data PDUs handed up to the host,
+ * [1]=control PDUs received from peer, [2]=duplicate-SN drops, [3]=last
+ * delivered L2CAP byte count. */
+__attribute__((used)) volatile uint32_t g_rxd_dbg[4] = {0};
+/* BRING-UP debug: non-empty PDUs silently dropped as duplicates (SN desync). */
+__attribute__((used)) volatile uint32_t g_dupdrop[4] = {0};
+/* BRING-UP debug: ring of last 8 transmitted header bytes + seqnum state. */
+__attribute__((used)) volatile uint32_t g_txhdr[8] = {0};
+__attribute__((used)) volatile uint32_t g_txhdr_i = 0;
+/* BRING-UP debug: ring of received L2CAP-start ATT opcodes (rxbuf[6]). */
+__attribute__((used)) volatile uint32_t g_rxatt[8] = {0};
+__attribute__((used)) volatile uint32_t g_rxatt_i = 0;
+__attribute__((used)) volatile uint32_t g_ctl_acl_bytes_dbg[4] = {0};
+__attribute__((used)) volatile uint32_t g_ctl_acl_stage_dbg[8] = {0};
+/* TEST: 1 = peripheral keeps RX armed after its reply (catch pipelined follow-up).
+ * Tested = does NOT fix it (the central stops pushing the FIND_INFO data PDU over
+ * the air after FTV regardless), so left at 0. */
+#define ARDUINONRF_PERIPH_ALWAYS_RX 0
+/* BRING-UP debug: reply opportunities after RX. [0]=reply-needed,
+ * [1]=reply-sent-now, [2]=reply-deferred-by-timing,
+ * [3]=last rx len | llid<<16 | opcode<<24. */
+__attribute__((used)) volatile uint32_t g_reply_dbg[4] = {0};
+/* BRING-UP debug: response latency in conn events. [0]=event_cntr at last
+ * non-empty RX (request), [1]=event_cntr at last response enqueue, [2]=max
+ * delta (events between request and response), [3]=last delta. */
+__attribute__((used)) volatile uint32_t g_lat[4] = {0};
+/* JOINT-DEBUG point D: dequeued TX mbuf first bytes (L2CAP-length bisection). */
+__attribute__((used)) volatile uint32_t g_txD[4] = {0};
+__attribute__((used)) volatile uint32_t g_txD_i = 0;
+/* JOINT-DEBUG point E: TX mbuf first bytes at enqueue_pkt exit. */
+__attribute__((used)) volatile uint32_t g_txE[4] = {0};
+__attribute__((used)) volatile uint32_t g_txE_i = 0;
+/* JOINT-DEBUG: physical address of the DATA_START TX mbuf's om_data, so a DWT
+ * hardware watchpoint can catch whatever overwrites the L2CAP length byte. */
+__attribute__((used)) volatile uint32_t g_txEaddr = 0;
+/* BRING-UP debug: peripheral-latency event skipping. */
+__attribute__((used)) volatile uint32_t g_skip[4] = {0};
+/* BRING-UP debug: connection RX CRC health. */
+__attribute__((used)) volatile uint32_t g_crc[4] = {0};
+/* BRING-UP debug: ring of control opcodes the peripheral transmits. */
+__attribute__((used)) volatile uint32_t g_txctrl[8] = {0};
+__attribute__((used)) volatile uint32_t g_txctrl_i = 0;
+
 static int
 ble_ll_conn_tx_pdu(struct ble_ll_conn_sm *connsm)
 {
@@ -1113,6 +1175,10 @@ ble_ll_conn_tx_pdu(struct ble_ll_conn_sm *connsm)
     uint8_t opcode;
 #endif
 
+    if (NIMBLE_BRINGUP_DEBUG) {
+        g_tx_dbg[0]++;
+    }
+
     /* For compiler warnings... */
     ble_hdr = NULL;
     m = NULL;
@@ -1123,6 +1189,8 @@ ble_ll_conn_tx_pdu(struct ble_ll_conn_sm *connsm)
         /* We just received terminate indication.
          * Just send empty packet as an ACK
          */
+        extern volatile uint32_t g_term_flow_dbg[8];
+        g_term_flow_dbg[2]++;
         connsm->flags.empty_pdu_txd = 1;
         goto conn_tx_pdu;
     }
@@ -1194,11 +1262,42 @@ ble_ll_conn_tx_pdu(struct ble_ll_conn_sm *connsm)
         pktlen = pkthdr->omp_len;
         if (llid == BLE_LL_LLID_CTRL) {
             cur_txlen = pktlen;
+            /* Record the control opcode dequeued for TX. This is low-volume and
+             * lets us correlate peer requests with our on-air LL responses. */
+            extern volatile uint32_t g_txctrl[8];
+            extern volatile uint32_t g_txctrl_i;
+            g_txctrl[g_txctrl_i & 7] = m->om_data[0];
+            g_txctrl_i++;
             ble_ll_ctrl_tx_start(connsm, m);
+            if (NIMBLE_BRINGUP_DEBUG) {
+                g_tx_dbg[3]++;
+            }
         } else {
             cur_txlen = ble_ll_conn_adjust_pyld_len(connsm, pktlen);
+            if (NIMBLE_BRINGUP_DEBUG && (pktlen > 0)) {
+                g_tx_dbg[1]++;
+                if (cur_txlen > g_tx_dbg[2]) { g_tx_dbg[2] = cur_txlen; }
+            }
         }
         ble_hdr->txinfo.pyld_len = cur_txlen;
+
+        {
+            /* JOINT-DEBUG point D: the dequeued mbuf's first bytes + pyld_len,
+             * read directly. Bisects enqueue(point-B)->dequeue->pducb(point-C)
+             * for the L2CAP-length corruption. [0]=om_data[0..3],
+             * [1]=pyld_len|om_len<<8. */
+            extern volatile uint32_t g_txD[4];
+            extern volatile uint32_t g_txD_i;
+            uint8_t _llid2 = ble_hdr->txinfo.hdr_byte & BLE_LL_DATA_HDR_LLID_MASK;
+            if (_llid2 == BLE_LL_LLID_DATA_START && cur_txlen >= 5 && g_txD_i < 4) {
+                const uint8_t *_d = m->om_data;
+                uint32_t _k = (g_txD_i & 1) * 2;
+                g_txD[_k] = _d[0] | ((uint32_t)_d[1] << 8) |
+                            ((uint32_t)_d[2] << 16) | ((uint32_t)_d[3] << 24);
+                g_txD[_k + 1] = cur_txlen | ((uint32_t)m->om_len << 8);
+                g_txD_i++;
+            }
+        }
 
         /* NOTE: header was set when first enqueued */
         hdr_byte = ble_hdr->txinfo.hdr_byte;
@@ -1334,6 +1433,20 @@ conn_tx_pdu:
     /* Set the header byte in the outgoing frame */
     ble_hdr->txinfo.hdr_byte = hdr_byte;
 
+    {
+        /* BRING-UP: ring of the last 8 TX header bytes actually transmitted
+         * (bit2=NESN, bit3=SN, bit4=MD, bits0-1=LLID) + the seqnum state, to
+         * resolve whether the board's ACK (NESN) is correct during the deadlock
+         * where the central retransmits forever. */
+        extern volatile uint32_t g_txhdr[8];
+        extern volatile uint32_t g_txhdr_i;
+        g_txhdr[g_txhdr_i & 7] = hdr_byte
+                                 | ((uint32_t)(connsm->tx_seqnum & 1) << 8)
+                                 | ((uint32_t)(connsm->next_exp_seqnum & 1) << 9)
+                                 | ((uint32_t)(connsm->last_rxd_sn) << 16);
+        g_txhdr_i++;
+    }
+
     /*
      * If we are a peripheral, check to see if this transmission will end the
      * connection event. We will end the connection event if we have
@@ -1347,16 +1460,24 @@ conn_tx_pdu:
      *  We could do this. Now, we just keep going and hope that we dont
      *  overrun next scheduled item.
      */
-    if ((connsm->flags.terminate_ind_rxd) ||
+    if ((connsm->flags.terminate_ind_rxd)
+#if !ARDUINONRF_PERIPH_ALWAYS_RX
+        ||
         (CONN_IS_PERIPHERAL(connsm) && (md == 0) &&
          (connsm->cons_rxd_bad_crc == 0) &&
          ((connsm->last_rxd_hdr_byte & BLE_LL_DATA_HDR_MD_MASK) == 0) &&
          ((connsm->flags.empty_pdu_txd) ||
-          !ble_ll_ctrl_is_terminate_ind(hdr_byte, m->om_data[0])))) {
+          !ble_ll_ctrl_is_terminate_ind(hdr_byte, m->om_data[0])))
+#endif
+        ) {
         /* We will end the connection event */
         end_transition = BLE_PHY_TRANSITION_NONE;
         txend_func = ble_ll_conn_wait_txend;
     } else {
+        /* WORKAROUND (ArduinoNRF): a peripheral that ends the event right after
+         * its reply can miss the central's *pipelined* follow-up PDU (e.g. the
+         * FIND_INFORMATION_REQ WinRT sends straight after FIND_BY_TYPE_VALUE).
+         * Keeping the RX armed (TX_RX) lets us catch it; costs a bit of power. */
         /* Wait for a response here */
         end_transition = BLE_PHY_TRANSITION_TX_RX;
         txend_func = NULL;
@@ -1449,6 +1570,10 @@ conn_tx_pdu:
     /* Set transmit end callback */
     ble_phy_set_txend_cb(txend_func, connsm);
     rc = ble_phy_tx(ble_ll_tx_mbuf_pducb, m, end_transition);
+    if (connsm->flags.terminate_ind_rxd) {
+        extern volatile uint32_t g_term_flow_dbg[8];
+        g_term_flow_dbg[3] = (uint32_t)rc;
+    }
     if (!rc) {
         /* Log transmit on connection state */
         cur_txlen = ble_hdr->txinfo.pyld_len;
@@ -1461,7 +1586,9 @@ conn_tx_pdu:
         /* Increment packets transmitted */
         if (connsm->flags.empty_pdu_txd) {
             if (connsm->flags.terminate_ind_rxd) {
+                extern volatile uint32_t g_term_flow_dbg[8];
                 connsm->flags.terminate_ind_rxd_acked = 1;
+                g_term_flow_dbg[6]++;
             }
             STATS_INC(ble_ll_conn_stats, tx_empty_pdus);
         } else if ((hdr_byte & BLE_LL_DATA_HDR_LLID_MASK) == BLE_LL_LLID_CTRL) {
@@ -1494,11 +1621,13 @@ conn_tx_pdu:
  * [0]=conn_event_start_cb fired, [1]=conn rx_isr_start (radio RX began),
  * [2]=conn rx_isr_end (radio RX completed = heard the central),
  * [3]=last conn_state seen at event start. */
-volatile uint32_t g_ll_cev_dbg[8] = {0};   /* [6]=data_chan_index [7]=access_addr */
+__attribute__((used)) volatile uint32_t g_ll_cev_dbg[8] = {0};   /* [6]=data_chan_index [7]=access_addr */
+__attribute__((used)) volatile uint32_t g_term_flow_dbg[8] = {0};
+__attribute__((used)) volatile uint32_t g_conn_end_dbg[4] = {0};
 /* channel-selection inputs for offline CSA verification */
-volatile uint32_t g_ll_chan_dbg[6] = {0};
+__attribute__((used)) volatile uint32_t g_ll_chan_dbg[6] = {0};
 /* connection timing values for numerical verification (anchor/interval) */
-volatile uint32_t g_ll_time_dbg[8] = {0};
+__attribute__((used)) volatile uint32_t g_ll_time_dbg[8] = {0};
 
 static int
 ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
@@ -1600,17 +1729,14 @@ ble_ll_conn_event_start_cb(struct ble_ll_sched_item *sch)
         g_ll_cev_dbg[5] = os_cputime_get32();       /* 'now' for late-check */
         g_ll_cev_dbg[6] = connsm->data_chan_index;  /* listening channel (0..36) */
         g_ll_cev_dbg[7] = connsm->access_addr;      /* link access address */
-        {
-            extern volatile uint32_t g_ll_chan_dbg[6];
-            g_ll_chan_dbg[0] = connsm->hop_inc;
-            g_ll_chan_dbg[1] = connsm->data_chan_index;
-            g_ll_chan_dbg[2] = connsm->last_unmapped_chan;
-            g_ll_chan_dbg[3] = connsm->chan_map_used | (connsm->flags.csa2 << 8) |
-                               ((uint32_t)connsm->event_cntr << 16);
-            g_ll_chan_dbg[4] = connsm->chan_map[0] | (connsm->chan_map[1] << 8) |
-                               (connsm->chan_map[2] << 16) | ((uint32_t)connsm->chan_map[3] << 24);
-            g_ll_chan_dbg[5] = connsm->chan_map[4];
-        }
+        g_ll_chan_dbg[0] = connsm->hop_inc;
+        g_ll_chan_dbg[1] = connsm->data_chan_index;
+        g_ll_chan_dbg[2] = connsm->last_unmapped_chan;
+        g_ll_chan_dbg[3] = connsm->chan_map_used | (connsm->flags.csa2 << 8) |
+                           ((uint32_t)connsm->event_cntr << 16);
+        g_ll_chan_dbg[4] = connsm->chan_map[0] | (connsm->chan_map[1] << 8) |
+                           (connsm->chan_map[2] << 16) | ((uint32_t)connsm->chan_map[3] << 24);
+        g_ll_chan_dbg[5] = connsm->chan_map[4];
         if (rc) {
             /* End the connection event as we have no more buffers */
             STATS_INC(ble_ll_conn_stats, periph_ce_failures);
@@ -2221,6 +2347,14 @@ ble_ll_conn_end(struct ble_ll_conn_sm *connsm, uint8_t ble_err)
     struct os_mbuf_pkthdr *pkthdr;
     os_sr_t sr;
 
+    g_conn_end_dbg[0]++;
+    g_conn_end_dbg[1] = connsm->conn_handle;
+    g_conn_end_dbg[2] = ble_err;
+    g_conn_end_dbg[3] =
+        (connsm->flags.terminate_ind_rxd ? 1U : 0U) |
+        (connsm->flags.terminate_ind_rxd_acked ? 2U : 0U) |
+        (connsm->flags.terminate_ind_txd ? 4U : 0U);
+
     /* Remove scheduler events just in case */
     ble_ll_sched_rmv_elem(&connsm->conn_sch);
 
@@ -2319,7 +2453,9 @@ ble_ll_conn_end(struct ble_ll_conn_sm *connsm, uint8_t ble_err)
      */
     if (ble_err && (ble_err != BLE_ERR_UNK_CONN_ID ||
                     connsm->flags.terminate_ind_rxd)) {
+        g_conn_end_dbg[3] |= 0x100u;
         ble_ll_disconn_comp_event_send(connsm, ble_err);
+        g_conn_end_dbg[3] |= 0x200u;
     }
 
     /* Put connection state machine back on free list */
@@ -2484,6 +2620,16 @@ ble_ll_conn_next_event(struct ble_ll_conn_sm *connsm)
                          !connsm->flags.chanmap_update_sched &&
                          connsm->flags.pkt_rxd;
 
+    {
+        /* BRING-UP: does the peripheral skip events (latency)? [0]=#times
+         * use_periph_latency true, [1]=periph_latency, [2]=next_is_subrated,
+         * [3]=periph_use_latency flag. */
+        extern volatile uint32_t g_skip[4];
+        if (use_periph_latency) { g_skip[0]++; }
+        g_skip[1] = connsm->periph_latency;
+        g_skip[2] = next_is_subrated;
+        g_skip[3] = connsm->flags.periph_use_latency;
+    }
     if (next_is_subrated) {
         next_event_cntr = base_event_cntr + subrate_factor;
         if (use_periph_latency) {
@@ -2682,6 +2828,9 @@ ble_ll_conn_next_event(struct ble_ll_conn_sm *connsm)
      */
     if (connsm->flags.chanmap_update_sched &&
         ((int16_t)(connsm->chanmap_instant - connsm->event_cntr) <= 0)) {
+        extern volatile uint32_t g_chanmap_dbg[8];
+        g_chanmap_dbg[6]++;
+        g_chanmap_dbg[7] = connsm->event_cntr;
 
         /* XXX: there is a chance that the control packet is still on
          * the queue of the central. This means that we never successfully
@@ -3008,6 +3157,12 @@ ble_ll_conn_event_end(struct ble_npl_event *ev)
     ble_ll_scan_chk_resume();
 
     /* If we have transmitted the terminate IND successfully, we are done */
+    if (connsm->flags.terminate_ind_rxd || connsm->flags.terminate_ind_rxd_acked) {
+        g_term_flow_dbg[7] = 0x100u |
+            (connsm->flags.terminate_ind_rxd ? 1U : 0U) |
+            (connsm->flags.terminate_ind_rxd_acked ? 2U : 0U) |
+            (connsm->flags.empty_pdu_txd ? 4U : 0U);
+    }
     if ((connsm->flags.terminate_ind_txd) ||
         (connsm->flags.terminate_ind_rxd &&
          connsm->flags.terminate_ind_rxd_acked)) {
@@ -3023,6 +3178,11 @@ ble_ll_conn_event_end(struct ble_npl_event *ev)
         ble_ll_conn_end(connsm, ble_err);
         return;
     }
+
+    g_term_flow_dbg[7] =
+        (connsm->flags.terminate_ind_rxd ? 1U : 0U) |
+        (connsm->flags.terminate_ind_rxd_acked ? 2U : 0U) |
+        (connsm->flags.empty_pdu_txd ? 4U : 0U);
 
     /* Remove any connection end events that might be enqueued */
     ble_ll_event_remove(&connsm->conn_ev_end);
@@ -3489,7 +3649,6 @@ int
 ble_ll_conn_rx_isr_start(struct ble_mbuf_hdr *rxhdr, uint32_t aa)
 {
     struct ble_ll_conn_sm *connsm;
-    extern volatile uint32_t g_ll_cev_dbg[];
     g_ll_cev_dbg[1]++;
 
     /*
@@ -3570,6 +3729,20 @@ ble_ll_conn_rx_data_pdu(struct os_mbuf *rxpdu, struct ble_mbuf_hdr *hdr)
     llid = hdr_byte & BLE_LL_DATA_HDR_LLID_MASK;
     rxd_sn = hdr_byte & BLE_LL_DATA_HDR_SN_MASK;
 
+    {
+        /* BRING-UP: ring of every received non-empty L2CAP-start DATA PDU's ATT
+         * opcode (rxbuf[6]) + len + SN, captured BEFORE the dup check, to prove
+         * whether the central's pipelined FIND_INFORMATION_REQ (0x04) after FTV
+         * actually arrives at the controller (and with what SN). */
+        extern volatile uint32_t g_rxatt[8];
+        extern volatile uint32_t g_rxatt_i;
+        if (llid == BLE_LL_LLID_DATA_START && acl_len >= 5) {
+            g_rxatt[g_rxatt_i & 7] = rxbuf[6] | ((uint32_t)acl_len << 8)
+                                     | ((uint32_t)(rxd_sn ? 1 : 0) << 16);
+            g_rxatt_i++;
+        }
+    }
+
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
     if (BLE_MBUF_HDR_MIC_FAILURE(hdr)) {
         /* MIC failure is expected on retransmissions since packet counter does
@@ -3643,6 +3816,25 @@ ble_ll_conn_rx_data_pdu(struct os_mbuf *rxpdu, struct ble_mbuf_hdr *hdr)
      */
     if (rxd_sn == connsm->last_rxd_sn) {
        STATS_INC(ble_ll_conn_stats, data_pdu_rx_dup);
+       g_rxd_dbg[2]++;
+       {
+           /* BRING-UP: flag if a NON-EMPTY PDU (real ATT/control request) is
+            * being silently dropped as a duplicate -> SN desync would eat the
+            * central's discovery requests. [0]=count, [1]=acl_len|llid<<16. */
+           extern volatile uint32_t g_dupdrop[4];
+           if (acl_len > 0) {
+               /* Does the ISR ACK mechanism (next_exp_seqnum) agree this is a
+                * duplicate? "new" per ISR iff (rxd_sn!=0)==(next_exp_seqnum!=0).
+                * If it says NEW while last_rxd_sn says dup -> FALSE duplicate =
+                * board desync bug. If it agrees -> TRUE dup (central resending
+                * because our ACK was lost). */
+               int isr_says_new = ((rxd_sn != 0) == (connsm->next_exp_seqnum != 0));
+               g_dupdrop[0]++;
+               g_dupdrop[1] = (rxd_sn ? 1 : 0) | ((connsm->next_exp_seqnum ? 1 : 0) << 4)
+                              | ((uint32_t)connsm->last_rxd_sn << 8) | ((uint32_t)hdr_byte << 16);
+               if (isr_says_new) { g_dupdrop[2]++; } else { g_dupdrop[3]++; }
+           }
+       }
        goto conn_rx_data_pdu_end;
    }
 
@@ -3661,6 +3853,7 @@ ble_ll_conn_rx_data_pdu(struct os_mbuf *rxpdu, struct ble_mbuf_hdr *hdr)
     if (llid == BLE_LL_LLID_CTRL) {
         /* Process control frame */
         STATS_INC(ble_ll_conn_stats, rx_ctrl_pdus);
+        g_rxd_dbg[1]++;
         if (ble_ll_ctrl_rx_pdu(connsm, rxpdu)) {
             STATS_INC(ble_ll_conn_stats, rx_malformed_ctrl_pdus);
         }
@@ -3668,15 +3861,34 @@ ble_ll_conn_rx_data_pdu(struct os_mbuf *rxpdu, struct ble_mbuf_hdr *hdr)
         /* Count # of received l2cap frames and byes */
         STATS_INC(ble_ll_conn_stats, rx_l2cap_pdus);
         STATS_INCN(ble_ll_conn_stats, rx_l2cap_bytes, acl_len);
+        g_ctl_acl_stage_dbg[0] = get_le32(rxbuf + 0);
+        g_ctl_acl_stage_dbg[1] = get_le32(rxbuf + 4);
 
-        /* NOTE: there should be at least two bytes available */
-        BLE_LL_ASSERT(OS_MBUF_LEADINGSPACE(rxpdu) >= 2);
-        os_mbuf_prepend(rxpdu, 2);
+        /* Strip the 2-byte LL data header, then prepend a full HCI ACL header
+         * so the host sees pure L2CAP payload after removing the ACL header.
+         */
+        os_mbuf_adj(rxpdu, BLE_LL_PDU_HDR_LEN);
+        rxbuf = rxpdu->om_data;
+        g_ctl_acl_stage_dbg[2] = get_le32(rxbuf + 0);
+        g_ctl_acl_stage_dbg[3] = get_le32(rxbuf + 4);
+        BLE_LL_ASSERT(OS_MBUF_LEADINGSPACE(rxpdu) >= BLE_HCI_DATA_HDR_SZ);
+        os_mbuf_prepend(rxpdu, BLE_HCI_DATA_HDR_SZ);
         rxbuf = rxpdu->om_data;
 
         acl_hdr = (llid << 12) | connsm->conn_handle;
         put_le16(rxbuf, acl_hdr);
         put_le16(rxbuf + 2, acl_len);
+        g_ctl_acl_bytes_dbg[0] = get_le32(rxbuf + 0);
+        g_ctl_acl_bytes_dbg[1] = get_le32(rxbuf + 4);
+        g_ctl_acl_bytes_dbg[2] = OS_MBUF_PKTLEN(rxpdu);
+        g_ctl_acl_bytes_dbg[3] = OS_MBUF_LEADINGSPACE(rxpdu);
+        g_ctl_acl_stage_dbg[4] = get_le32(rxbuf + 0);
+        g_ctl_acl_stage_dbg[5] = get_le32(rxbuf + 4);
+        g_ctl_acl_stage_dbg[6] = OS_MBUF_PKTLEN(rxpdu);
+        g_ctl_acl_stage_dbg[7] = OS_MBUF_LEADINGSPACE(rxpdu);
+        g_rxd_dbg[0]++;
+        g_rxd_dbg[3] = acl_len;
+        g_lat[0] = connsm->event_cntr;   /* request arrived this conn event */
         ble_transport_to_hs_acl(rxpdu);
     }
 
@@ -3718,7 +3930,6 @@ int
 ble_ll_conn_rx_isr_end(uint8_t *rxbuf, struct ble_mbuf_hdr *rxhdr)
 {
     int rc;
-    extern volatile uint32_t g_ll_cev_dbg[];
     g_ll_cev_dbg[2]++;
     uint8_t hdr_byte;
     uint8_t hdr_sn;
@@ -3751,6 +3962,17 @@ ble_ll_conn_rx_isr_end(uint8_t *rxbuf, struct ble_mbuf_hdr *rxhdr)
      */
     if (!BLE_MBUF_HDR_CRC_OK(rxhdr)) {
         alloc_rxpdu = false;
+    }
+
+    if (NIMBLE_BRINGUP_DEBUG) {
+        /* BRING-UP: connection RX CRC health. [0]=CRC-OK, [1]=CRC-fail,
+         * [2]=last rx hdr_byte, [3]=last rx pyld_len. A high CRC-fail count or
+         * fails on non-empty PDUs means the central's requests are corrupted on
+         * arrival (whitening/timing) and never reach the host. */
+        extern volatile uint32_t g_crc[4];
+        if (BLE_MBUF_HDR_CRC_OK(rxhdr)) { g_crc[0]++; } else { g_crc[1]++; }
+        g_crc[2] = hdr_byte;
+        g_crc[3] = rx_pyld_len;
     }
 
 #if MYNEWT_PKG_apache_mynewt_nimble__nimble_transport_common_hci_ipc
@@ -3879,10 +4101,13 @@ ble_ll_conn_rx_isr_end(uint8_t *rxbuf, struct ble_mbuf_hdr *rxhdr)
             if ((hdr_nesn && conn_sn) || (!hdr_nesn && !conn_sn)) {
                 /* We did not get an ACK. Must retry the PDU */
                 STATS_INC(ble_ll_conn_stats, data_pdu_txf);
+                g_ack_dbg[3]++;
+                if (connsm->cur_tx_pdu) { g_ack_dbg[1]++; }
             } else {
                 /* Transmit success */
                 connsm->tx_seqnum ^= 1;
                 STATS_INC(ble_ll_conn_stats, data_pdu_txg);
+                g_ack_dbg[2]++;
 
                 /* If we transmitted the empty pdu, clear flag */
                 if (connsm->flags.empty_pdu_txd) {
@@ -3920,6 +4145,7 @@ ble_ll_conn_rx_isr_end(uint8_t *rxbuf, struct ble_mbuf_hdr *rxhdr)
                     if (txhdr->txinfo.offset >= OS_MBUF_PKTLEN(txpdu)) {
                         /* If l2cap pdu, increment # of completed packets */
                         if (txhdr->txinfo.pyld_len != 0) {
+                            g_ack_dbg[0]++;
 #if (BLETEST_THROUGHPUT_TEST == 1)
                             bletest_completed_pkt(connsm->conn_handle);
 #endif
@@ -3960,6 +4186,8 @@ chk_rx_terminate_ind:
             (rx_pyld_len == (1 + BLE_LL_CTRL_TERMINATE_IND_LEN))) {
             connsm->flags.terminate_ind_rxd = 1;
             connsm->rxd_disconnect_reason = rxbuf[3];
+            g_term_flow_dbg[0]++;
+            g_term_flow_dbg[1] = rxbuf[3];
         }
 
         switch (connsm->conn_role) {
@@ -3985,8 +4213,26 @@ chk_rx_terminate_ind:
     if (rx_pyld_len && connsm->flags.encrypted) {
         rx_pyld_len += BLE_LL_DATA_MIC_LEN;
     }
-    if (reply && ble_ll_conn_can_send_next_pdu(connsm, begtime, add_usecs)) {
-        rc = ble_ll_conn_tx_pdu(connsm);
+    if (reply) {
+        uint32_t reply_sig;
+        int can_reply_now;
+
+        reply_sig = (uint32_t)rx_pyld_len |
+                ((uint32_t)(hdr_byte & BLE_LL_DATA_HDR_LLID_MASK) << 16);
+        if (BLE_LL_LLID_IS_CTRL(hdr_byte)) {
+            reply_sig |= ((uint32_t)opcode << 24);
+        }
+
+        g_reply_dbg[0]++;
+        g_reply_dbg[3] = reply_sig;
+
+        can_reply_now = ble_ll_conn_can_send_next_pdu(connsm, begtime, add_usecs);
+        if (can_reply_now) {
+            g_reply_dbg[1]++;
+            rc = ble_ll_conn_tx_pdu(connsm);
+        } else {
+            g_reply_dbg[2]++;
+        }
     }
 
 conn_exit:
@@ -4125,6 +4371,26 @@ ble_ll_conn_enqueue_pkt(struct ble_ll_conn_sm *connsm, struct os_mbuf *om,
     }
     connsm->conn_txq_num_data_pkt += num_pkt;
     OS_EXIT_CRITICAL(sr);
+
+    {
+        /* JOINT-DEBUG point E: om_data after the queue insert (enqueue_pkt exit).
+         * Splits point-B(tx_pkt_in entry) -> point-D(dequeue) for the L2CAP-len
+         * corruption. [0]=om_data[0..3], [1]=hdr_byte|num_pkt<<8|qdepth<<16. */
+        extern volatile uint32_t g_txE[4];
+        extern volatile uint32_t g_txE_i;
+        extern volatile uint32_t g_txEaddr;
+        uint8_t _llid3 = hdr_byte & BLE_LL_DATA_HDR_LLID_MASK;
+        if (_llid3 == BLE_LL_LLID_DATA_START && OS_MBUF_PKTLEN(om) >= 5 && g_txE_i < 4) {
+            const uint8_t *_d = om->om_data;
+            uint32_t _k = (g_txE_i & 1) * 2;
+            g_txE[_k] = _d[0] | ((uint32_t)_d[1] << 8) |
+                        ((uint32_t)_d[2] << 16) | ((uint32_t)_d[3] << 24);
+            g_txE[_k + 1] = hdr_byte | ((uint32_t)num_pkt << 8) |
+                            ((uint32_t)connsm->conn_txq_num_data_pkt << 16);
+            g_txEaddr = (uint32_t)om->om_data;
+            g_txE_i++;
+        }
+    }
 }
 
 /**
@@ -4149,6 +4415,32 @@ ble_ll_conn_tx_pkt_in(struct os_mbuf *om, uint16_t handle, uint16_t length)
     /* See if we have an active matching connection handle */
     conn_handle = handle & 0x0FFF;
     connsm = ble_ll_conn_find_by_handle(conn_handle);
+    {
+        /* JOINT-DEBUG point B: L2CAP PDU (HCI hdr stripped) entering controller
+         * from host. om_data[0..1]=L2CAP length field. */
+        extern volatile uint32_t g_txB[8];
+        extern volatile uint32_t g_txB_i;
+        if (length >= 5 && OS_MBUF_PKTLEN(om) >= 5) {
+            uint8_t _b[6] = {0};
+            os_mbuf_copydata(om, 0, 6, _b);
+            uint32_t _k = (g_txB_i & 3) * 2;
+            g_txB[_k] = _b[0] | ((uint32_t)_b[1] << 8) |
+                        ((uint32_t)_b[2] << 16) | ((uint32_t)_b[3] << 24);
+            g_txB[_k + 1] = _b[4] | ((uint32_t)_b[5] << 8) |
+                            ((uint32_t)length << 16);
+            g_txB_i++;
+        }
+    }
+    {
+        extern volatile uint32_t g_acl_dbg[4];
+        if (connsm) { g_acl_dbg[2]++; } else { g_acl_dbg[3]++; }
+        if (connsm) {
+            uint32_t d = (connsm->event_cntr - g_lat[0]) & 0xFFFF;
+            g_lat[1] = connsm->event_cntr;
+            g_lat[3] = d;
+            if (d > g_lat[2] && d < 0x8000) { g_lat[2] = d; }
+        }
+    }
     if (connsm) {
         /* Construct LL header in buffer (NOTE: pb already checked) */
         pb = handle & 0x3000;

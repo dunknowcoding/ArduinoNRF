@@ -7,9 +7,10 @@
 [![platform](https://img.shields.io/badge/platform-Arduino-00979D)](https://www.arduino.cc/)
 [![mcu](https://img.shields.io/badge/MCU-nRF52840%20%2F%20nRF52833-0a7bbb)](https://www.nordicsemi.com/)
 [![boards](https://img.shields.io/badge/boards-10-success)](#-supported-boards)
-[![version](https://img.shields.io/badge/version-0.0.1-blue)](docs/release/RELEASE_NOTES_v0.0.1.md)
+[![version](https://img.shields.io/badge/version-0.2.0-blue)](docs/release/RELEASE_NOTES_v0.2.0.md)
 [![upload](https://img.shields.io/badge/upload-no%20button%2C%20one%20cable-brightgreen)](#-hands-free-uploads)
 [![debug](https://img.shields.io/badge/debug-USB%20CDC%20GDB%20stub-orange)](#-single-cable-debugging)
+[![ble](https://img.shields.io/badge/BLE-NimBLE%20GATT%20verified-blueviolet)](#-bluetooth-low-energy-nimble)
 
 *Flash and debug an AliExpress ProMicro nRF52840 — the kind with no reset button and no SWD header — over a single USB cable, straight from the Arduino IDE.*
 
@@ -86,6 +87,34 @@ See **[docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md](docs/platform/ARDUINO_IDE2_USB
 
 ---
 
+## 🔵 Bluetooth Low Energy (NimBLE)
+
+`libraries/NimBLE/` vendors the **Apache Mynewt NimBLE** host *and* link-layer
+controller and runs them on a bare-metal cooperative port (no SoftDevice, no
+RTOS) — the sketch just calls `NimBLE::poll()` from `loop()`. The board is a
+real BLE peripheral that a phone or PC can connect to and fully discover.
+
+Verified on hardware (AliExpress ProMicro nRF52840):
+
+- ✅ Advertising, connection, and **MTU exchange** (256 B)
+- ✅ **Full GATT discovery** — services, characteristics, and descriptors — from
+  **Windows** (bleak / WinRT), **Android** (nRF Connect), and **board-to-board**
+  (a second board acting as GATT central)
+- ✅ Standard **GAP (0x1800)** + **GATT (0x1801)** services plus a **Nordic UART**
+  service, with notify / write characteristics
+- ✅ USB-CDC `Serial` keeps working concurrently for logging
+
+```cpp
+#include <NimBLE.h>
+void setup() { NimBLE::begin("MyBoard"); NimBLE::startAdvertising(); }
+void loop()  { NimBLE::poll(); }   // pump the host + controller
+```
+
+Start from **`examples/NimBLESmoke`**. The other wireless stacks (CC310 crypto,
+Zigbee, Thread) are still skeletons — see the capability table below.
+
+---
+
 ## 🧩 Supported boards
 
 Identities were re-checked against the upstream `Adafruit_nRF52_Bootloader` `board.h` files, the Seeed and pdcook Arduino cores, and `joric/nrfmicro`. See **[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)** for the full audit and per-board change log.
@@ -129,7 +158,7 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **NFC-A Tag** | ✅ Type 2 tag emulation (NDEF **URL** / **text** records), auto-collision-resolution via NFCT hardware. See [`NrfNfcTag.h`](hardware/arduinonrf/nrf52/cores/arduino/NrfNfcTag.h) + `examples/NfcTag`. |
 | **All small peripherals** | ✅ **TRNG** (`NrfRng`), die **temp sensor** (`NrfTemp`), **watchdog** (`NrfWdt`), **rotary decoder** (`NrfQdec`), **TIMER0–4** w/ 6 CC each (`NrfTimer`), **flash erase/write** (`NrfNvmc`), **PPI** (peripheral-to-peripheral routing) (`NrfPpi`), **EGU/SWI** (software events + IRQ on 6×16 channels) (`NrfEgu`), **analog comparator** (`NrfComp`), **memory watch unit** (`NrfMwu`), **GPIOTE output channels** for PPI use (`NrfGpioteOut`). All in [`NrfPeripherals.h`](hardware/arduinonrf/nrf52/cores/arduino/NrfPeripherals.h) + examples `PeripheralsDemo`, `TimerNvmcPpi`, `EguCompGpiotePpi`. |
 | **Media peripherals** | ⚠️ **QSPI** (external NOR flash), **PDM** (MEMS mic), **I2S** (digital audio) drivers exist in [`NrfMediaPeripherals.h`](hardware/arduinonrf/nrf52/cores/arduino/NrfMediaPeripherals.h). API + register sequences complete per nRF52840 PS, but unverified — the reference ProMicro has none of those external chips wired. XIAO Sense (PDM) / Pitaya Go (QSPI) / custom audio boards should work, please test. |
-| **BLE** | ⚠️ The shipped `BLE` library is still advertising-only. [`libraries/NimBLE/`](hardware/arduinonrf/nrf52/libraries/NimBLE/) is **not done yet**: the Arduino-facing API exists and parts of the Mynewt porting/NPL layer are vendored, but `begin()` still returns `NIMBLE_NOT_VENDORED`, `isAvailable()` stays `false`, and there is no real connection/GATT stack in-tree yet. See [docs/platform/NIMBLE_INTEGRATION_PLAN.md](docs/platform/NIMBLE_INTEGRATION_PLAN.md). |
+| **BLE (NimBLE)** | ✅ **Working over-the-air BLE.** [`libraries/NimBLE/`](hardware/arduinonrf/nrf52/libraries/NimBLE/) vendors the Apache Mynewt NimBLE host **and** controller on a bare-metal cooperative port. Advertising, connection, MTU exchange, and full GATT service / characteristic / descriptor discovery are **verified on hardware** against Windows (bleak/WinRT), Android (nRF Connect), and board-to-board. See **[§ Bluetooth Low Energy (NimBLE)](#-bluetooth-low-energy-nimble)** and `examples/NimBLESmoke`. |
 | **CC310 (crypto)** | ⚠️ [`libraries/CC310/`](hardware/arduinonrf/nrf52/libraries/CC310/) is still a true skeleton: the public API is defined, but without Nordic's `libcc_310.a` every operation returns `CC_NOT_VENDORED` and `isAvailable()` stays `false`. Roadmap: [docs/platform/CC310_INTEGRATION_PLAN.md](docs/platform/CC310_INTEGRATION_PLAN.md). |
 | **Zigbee / 802.15.4** | ⚠️ [`libraries/Zigbee/`](hardware/arduinonrf/nrf52/libraries/Zigbee/) is still a true skeleton: the API surface is present, but `begin()` / `sendOnOff()` return `ZIGBEE_NOT_VENDORED`, `isAvailable()` is `false`, and the Zboss + nrf-802154 stack is not in-tree yet. Roadmap: [docs/platform/ZIGBEE_INTEGRATION_PLAN.md](docs/platform/ZIGBEE_INTEGRATION_PLAN.md). |
 | **Thread (OpenThread)** | ⚠️ [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is **not done yet**: OpenThread headers, some platform glue, and smoke wiring are present, but the real OpenThread core + nrf-802154 radio path are not vendored, `begin()` returns `THREAD_NOT_VENDORED`, and `isAvailable()` / `isAttached()` stay `false`. Roadmap: [docs/platform/THREAD_INTEGRATION_PLAN.md](docs/platform/THREAD_INTEGRATION_PLAN.md). |
@@ -146,7 +175,7 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 Everything beyond this README lives under **[docs/](docs/)** — start at **[docs/README.md](docs/README.md)** for the full index. Highlights:
 
 - 🧪 **[docs/VALIDATION.md](docs/VALIDATION.md)** — what's been tested on real hardware, and how to reproduce it
-- 🔼 **[docs/uploads/](docs/uploads/)** — hands-free, double-reset, and SWD-only upload routes
+- 🔼 **[docs/uploads/hands_free_upload.md](docs/uploads/hands_free_upload.md)** — hands-free upload, plus the double-reset and SWD-probe fallbacks
 - 🐞 **[docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md](docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md)** — single-cable debug setup
 - 🧷 **[docs/platform/USB_1200_TOUCH_V1_FIX.md](docs/platform/USB_1200_TOUCH_V1_FIX.md)** — the firmware fixes behind hands-free upload
 - 🧩 **[docs/boards/](docs/boards/)** — per-board reference

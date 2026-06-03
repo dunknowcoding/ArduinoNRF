@@ -103,6 +103,11 @@ STAILQ_HEAD(ble_l2cap_sig_proc_list, ble_l2cap_sig_proc);
 
 static struct ble_l2cap_sig_proc_list ble_l2cap_sig_procs;
 
+__attribute__((used)) volatile uint32_t g_l2sig_hdr[16] = {0};
+__attribute__((used)) volatile uint32_t g_l2sig_rc[16] = {0};
+__attribute__((used)) volatile uint32_t g_l2sig_i = 0;
+__attribute__((used)) volatile uint32_t g_l2sig_rejects = 0;
+
 typedef int ble_l2cap_sig_rx_fn(uint16_t conn_handle,
                                 struct ble_l2cap_sig_hdr *hdr,
                                 struct os_mbuf **om);
@@ -1869,6 +1874,7 @@ ble_l2cap_sig_rx(struct ble_l2cap_chan *chan, struct os_mbuf **om)
     struct ble_l2cap_sig_hdr hdr;
     ble_l2cap_sig_rx_fn *rx_cb;
     uint16_t conn_handle;
+    uint32_t slot;
     int rc;
 
     conn_handle = chan->conn_handle;
@@ -1895,6 +1901,11 @@ ble_l2cap_sig_rx(struct ble_l2cap_chan *chan, struct os_mbuf **om)
         return BLE_HS_EBADDATA;
     }
 
+    slot = g_l2sig_i & 0x0f;
+    g_l2sig_hdr[slot] = (uint32_t)hdr.op |
+                        ((uint32_t)hdr.identifier << 8) |
+                        ((uint32_t)hdr.length << 16);
+
     rx_cb = ble_l2cap_sig_dispatch_get(hdr.op);
     if (rx_cb == NULL) {
         rc = BLE_HS_EREJECT;
@@ -1902,7 +1913,11 @@ ble_l2cap_sig_rx(struct ble_l2cap_chan *chan, struct os_mbuf **om)
         rc = rx_cb(conn_handle, &hdr, om);
     }
 
+    g_l2sig_rc[slot] = (uint32_t)(uint16_t)rc;
+    g_l2sig_i++;
+
     if (rc) {
+        g_l2sig_rejects++;
         ble_l2cap_sig_reject_tx(conn_handle, hdr.identifier,
                                         BLE_L2CAP_SIG_ERR_CMD_NOT_UNDERSTOOD,
                                         NULL, 0);

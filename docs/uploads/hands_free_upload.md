@@ -64,6 +64,6 @@ See **[../COMPATIBILITY.md](../COMPATIBILITY.md)** for the full matrix. The path
 ## When this doesn't apply
 
 - The **Nordic nRF52840 USB Dongle (PCA10059)** uses Nordic Open DFU, not Adafruit serial DFU — flash with **nRF Connect for Desktop → Programmer** or `nrfutil`.
-- The official **nRF52840-DK** (with onboard J-Link OB) is flashed via SWD — see **[swd_only_upload.md](swd_only_upload.md)**.
+- The official **nRF52840-DK** (with onboard J-Link OB) is flashed via SWD with an external probe (OpenOCD / pyOCD / `JLink.exe`).
 - Generic `devboard_nrf52833` targets are packaged as SWD-first models rather than a USB-DFU workflow.
-- For boards stuck in an unknown state, see **[double_reset_upload.md](double_reset_upload.md)** for the manual bootloader-entry fallback.
+- For boards stuck in an unknown state, use the **manual double-reset** fallback: tap the reset button twice quickly to force the bootloader, which presents the DFU serial port, then upload normally.

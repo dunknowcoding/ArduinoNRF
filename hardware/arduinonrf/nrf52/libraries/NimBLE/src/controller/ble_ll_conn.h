@@ -133,6 +133,7 @@ struct ble_ll_conn_sm_flags {
 #if MYNEWT_VAL(BLE_LL_CONN_INIT_AUTO_DLE)
     uint32_t pending_initiate_dle : 1;
 #endif
+    uint32_t pending_peer_dle_apply : 1;
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LL_ENHANCED_CONN_UPDATE)
     uint8_t subrate_trans : 1;
     uint8_t subrate_ind_txd : 1;
@@ -231,6 +232,10 @@ struct ble_ll_conn_sm
     uint16_t eff_max_tx_time;
     uint16_t eff_max_rx_time;
     uint16_t ota_max_rx_time;
+    uint16_t pending_rem_max_tx_time;
+    uint16_t pending_rem_max_rx_time;
+    uint8_t pending_rem_max_tx_octets;
+    uint8_t pending_rem_max_rx_octets;
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_CODED_PHY)
     uint16_t host_req_max_tx_time;
     uint16_t host_req_max_rx_time;

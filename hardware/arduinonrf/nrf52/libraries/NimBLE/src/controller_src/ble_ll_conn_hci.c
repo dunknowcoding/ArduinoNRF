@@ -428,11 +428,17 @@ ble_ll_auth_pyld_tmo_event_send(struct ble_ll_conn_sm *connsm)
  *
  * @param reason The BLE error code to send as a disconnect reason
  */
+__attribute__((used)) volatile uint32_t g_disc_evt_send_dbg[4] = {0};
+
 void
 ble_ll_disconn_comp_event_send(struct ble_ll_conn_sm *connsm, uint8_t reason)
 {
     struct ble_hci_ev_disconn_cmp *ev;
     struct ble_hci_ev *hci_ev;
+
+    g_disc_evt_send_dbg[0]++;
+    g_disc_evt_send_dbg[1] = connsm->conn_handle;
+    g_disc_evt_send_dbg[2] = reason;
 
     if (ble_ll_hci_is_event_enabled(BLE_HCI_EVCODE_DISCONN_CMP)) {
         hci_ev = ble_transport_alloc_evt(0);
@@ -447,7 +453,12 @@ ble_ll_disconn_comp_event_send(struct ble_ll_conn_sm *connsm, uint8_t reason)
             ev->reason = reason;
 
             ble_ll_hci_event_send(hci_ev);
+            g_disc_evt_send_dbg[3] = 1;
+        } else {
+            g_disc_evt_send_dbg[3] = 2;
         }
+    } else {
+        g_disc_evt_send_dbg[3] = 3;
     }
 }
 

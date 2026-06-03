@@ -1309,8 +1309,14 @@ void
 ble_gap_rx_disconn_complete(const struct ble_hci_ev_disconn_cmp *ev)
 {
 #if NIMBLE_BLE_CONNECT
+    __attribute__((used)) static volatile uint32_t g_gap_disc_rx_dbg[4] = {0};
     struct ble_gap_event event;
     uint16_t handle = le16toh(ev->conn_handle);
+
+    g_gap_disc_rx_dbg[0]++;
+    g_gap_disc_rx_dbg[1] = handle;
+    g_gap_disc_rx_dbg[2] = ev->status;
+    g_gap_disc_rx_dbg[3] = ev->reason;
 
     STATS_INC(ble_gap_stats, rx_disconnect);
 

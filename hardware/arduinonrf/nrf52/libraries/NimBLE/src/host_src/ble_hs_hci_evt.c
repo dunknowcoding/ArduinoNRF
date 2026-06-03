@@ -208,12 +208,26 @@ ble_hs_hci_evt_le_dispatch_find(uint8_t event_code)
 }
 
 #if NIMBLE_BLE_CONNECT
+__attribute__((used)) volatile uint32_t g_disc_evt_host_dbg[4] = {0};
+__attribute__((used)) volatile uint32_t g_acl_proc_dbg[8] = {0};
+__attribute__((used)) volatile uint32_t g_acl_proc_bytes_dbg[4] = {0};
+
 static int
 ble_hs_hci_evt_disconn_complete(uint8_t event_code, const void *data,
                                 unsigned int len)
 {
     const struct ble_hci_ev_disconn_cmp *ev = data;
     struct ble_hs_conn *conn;
+
+    g_disc_evt_host_dbg[0]++;
+    g_disc_evt_host_dbg[1] = len;
+    if (len >= sizeof(*ev)) {
+        g_disc_evt_host_dbg[2] = le16toh(ev->conn_handle);
+        g_disc_evt_host_dbg[3] = ((uint32_t)ev->status << 8) | ev->reason;
+    } else {
+        g_disc_evt_host_dbg[2] = 0xFFFFFFFFu;
+        g_disc_evt_host_dbg[3] = 0xFFFFFFFFu;
+    }
 
     if (len != sizeof(*ev)) {
         return BLE_HS_ECONTROLLER;
@@ -1107,13 +1121,23 @@ ble_hs_hci_evt_acl_process(struct os_mbuf *om)
     struct hci_data_hdr hci_hdr;
     uint16_t conn_handle;
     uint8_t pb;
+    uint8_t dbg_pre[8] = {0};
+    uint8_t dbg_post[8] = {0};
     int rc;
 
+    (void)os_mbuf_copydata(om, 0, sizeof(dbg_pre), dbg_pre);
+    g_acl_proc_bytes_dbg[0] = get_le32(dbg_pre + 0);
+    g_acl_proc_bytes_dbg[1] = get_le32(dbg_pre + 4);
     rc = ble_hs_hci_util_data_hdr_strip(om, &hci_hdr);
+    g_acl_proc_dbg[0]++;
+    g_acl_proc_dbg[1] = (uint32_t)rc;
     if (rc != 0) {
         os_mbuf_free_chain(om);
         return rc;
     }
+    (void)os_mbuf_copydata(om, 0, sizeof(dbg_post), dbg_post);
+    g_acl_proc_bytes_dbg[2] = get_le32(dbg_post + 0);
+    g_acl_proc_bytes_dbg[3] = get_le32(dbg_post + 4);
 
 #if (BLETEST_THROUGHPUT_TEST == 0)
 #if !BLE_MONITOR
@@ -1127,7 +1151,13 @@ ble_hs_hci_evt_acl_process(struct os_mbuf *om)
 #endif
 #endif
 
+    g_acl_proc_dbg[2] = BLE_HCI_DATA_HANDLE(hci_hdr.hdh_handle_pb_bc);
+    g_acl_proc_dbg[3] = BLE_HCI_DATA_PB(hci_hdr.hdh_handle_pb_bc);
+    g_acl_proc_dbg[4] = hci_hdr.hdh_len;
+    g_acl_proc_dbg[5] = OS_MBUF_PKTHDR(om)->omp_len;
+
     if (hci_hdr.hdh_len != OS_MBUF_PKTHDR(om)->omp_len) {
+        g_acl_proc_dbg[6] = BLE_HS_EBADDATA;
         os_mbuf_free_chain(om);
         return BLE_HS_EBADDATA;
     }
@@ -1135,6 +1165,7 @@ ble_hs_hci_evt_acl_process(struct os_mbuf *om)
     conn_handle = BLE_HCI_DATA_HANDLE(hci_hdr.hdh_handle_pb_bc);
     pb = BLE_HCI_DATA_PB(hci_hdr.hdh_handle_pb_bc);
     rc = ble_l2cap_rx(conn_handle, pb, om);
+    g_acl_proc_dbg[6] = (uint32_t)rc;
 
     return rc;
 #else

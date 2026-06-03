@@ -58,6 +58,8 @@ static struct ble_npl_event ble_hs_ev_tx_notifications;
 static struct ble_npl_event ble_hs_ev_reset;
 
 static struct ble_npl_event ble_hs_ev_start_stage1;
+
+__attribute__((used)) volatile uint32_t g_hs_acl_dbg[8] = {0};
 static struct ble_npl_event ble_hs_ev_start_stage2;
 
 uint8_t ble_hs_sync_state;
@@ -515,7 +517,9 @@ ble_hs_event_tx_notify(struct ble_npl_event *ev)
 static void
 ble_hs_event_rx_data(struct ble_npl_event *ev)
 {
+    g_hs_acl_dbg[3]++;
     ble_hs_process_rx_data_queue();
+    g_hs_acl_dbg[4]++;
 }
 
 static void
@@ -674,12 +678,17 @@ ble_hs_rx_data(struct os_mbuf *om, void *arg)
 {
     int rc;
 
+    g_hs_acl_dbg[1]++;
+    g_hs_acl_dbg[5] = (uint32_t)om;
+    g_hs_acl_dbg[6] = (uint32_t)ble_hs_evq;
+
     /* If flow control is enabled, mark this packet with its corresponding
      * connection handle.
      */
     ble_hs_flow_track_data_mbuf(om);
 
     rc = ble_mqueue_put(&ble_hs_rx_q, ble_hs_evq, om);
+    g_hs_acl_dbg[2] = (uint32_t)rc;
     if (rc != 0) {
         os_mbuf_free_chain(om);
         return BLE_HS_EOS;
@@ -826,6 +835,8 @@ ble_transport_to_hs_evt_impl(void *buf)
 int
 ble_transport_to_hs_acl_impl(struct os_mbuf *om)
 {
+    g_hs_acl_dbg[0]++;
+    g_hs_acl_dbg[7] = (uint32_t)om;
     return ble_hs_rx_data(om, NULL);
 }
 

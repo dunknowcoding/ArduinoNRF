@@ -1028,12 +1028,45 @@ ble_ll_rx_pdu_in(struct os_mbuf *rxpdu)
  *
  * @param txpdu Pointer to transmit packet
  */
+/* BRING-UP debug: [0]=host->controller ACL packets reaching the LL TX queue,
+ * [1]=last pktlen, [2]=conn_tx_pkt_in connsm FOUND (enqueued),
+ * [3]=conn_tx_pkt_in connsm NOT-FOUND (response dropped). */
+__attribute__((used)) volatile uint32_t g_acl_dbg[4] = {0};
+/* BRING-UP debug: ring of first 16 bytes of last 4 host->controller ACL pkts. */
+__attribute__((used)) volatile uint32_t g_aclpkt[16] = {0};
+__attribute__((used)) volatile uint32_t g_aclpkt_i = 0;
 void
 ble_ll_acl_data_in(struct os_mbuf *txpkt)
 {
     os_sr_t sr;
     struct os_mbuf_pkthdr *pkthdr;
 
+    {
+        /* BRING-UP: [0]=host->ctlr ACL packets (ATT responses etc) reaching the
+         * controller TX queue. [1]=pktlen of the last one. */
+        extern volatile uint32_t g_acl_dbg[4];
+        g_acl_dbg[0]++;
+        g_acl_dbg[1] = OS_MBUF_PKTLEN(txpkt);
+    }
+    {
+        /* BRING-UP: capture first 16 bytes of each host->controller ACL packet
+         * = HCI ACL hdr (handle:2,len:2) + L2CAP hdr (len:2,cid:2) + ATT. Lets
+         * us verify the L2CAP framing the controller will put on air. */
+        extern volatile uint32_t g_aclpkt[16];
+        extern volatile uint32_t g_aclpkt_i;
+        uint8_t b[16] = {0};
+        uint16_t l = OS_MBUF_PKTLEN(txpkt);
+        uint32_t base;
+        int i;
+        if (l > 16) l = 16;
+        os_mbuf_copydata(txpkt, 0, l, b);
+        base = (g_aclpkt_i & 3) * 4;
+        for (i = 0; i < 4; i++) {
+            g_aclpkt[base + i] = b[i*4] | (b[i*4+1] << 8) |
+                                 (b[i*4+2] << 16) | ((uint32_t)b[i*4+3] << 24);
+        }
+        g_aclpkt_i++;
+    }
     pkthdr = OS_MBUF_PKTHDR(txpkt);
     OS_ENTER_CRITICAL(sr);
     STAILQ_INSERT_TAIL(&g_ble_ll_data.ll_tx_pkt_q, pkthdr, omp_next);
@@ -1308,6 +1341,20 @@ ble_ll_rx_end(uint8_t *rxbuf, struct ble_mbuf_hdr *rxhdr)
     return rc;
 }
 
+/* JOINT-DEBUG (two-board): TX-frame captures. point B = mbuf at controller entry
+ * (ble_ll_conn_tx_pkt_in), point C = bytes written to the radio (pducb). Each is
+ * a ring of the last 4 L2CAP-start data PDUs, word pairs [b0..3],[b4..5|len|hdr].
+ * SWD-readable on board1, and board2's sketch prints them over Serial. */
+__attribute__((used)) volatile uint32_t g_txB[8] = {0};
+__attribute__((used)) volatile uint32_t g_txB_i = 0;
+__attribute__((used)) volatile uint32_t g_txC[8] = {0};
+__attribute__((used)) volatile uint32_t g_txC_i = 0;
+/* JOINT-DEBUG point PRE: what pducb sees on the queued mbuf at radio time,
+ * read DIRECTLY (not via copydata) BEFORE the copy. [0]=om_data[0..3],
+ * [1]=offset|pyld_len<<8|om_len<<16, captured once per L2CAP-start DATA PDU. */
+__attribute__((used)) volatile uint32_t g_txPRE[4] = {0};
+__attribute__((used)) volatile uint32_t g_txPRE_i = 0;
+
 uint8_t
 ble_ll_tx_mbuf_pducb(uint8_t *dptr, void *pducb_arg, uint8_t *hdr_byte)
 {
@@ -1318,8 +1365,41 @@ ble_ll_tx_mbuf_pducb(uint8_t *dptr, void *pducb_arg, uint8_t *hdr_byte)
     BLE_LL_ASSERT(txpdu);
     ble_hdr = BLE_MBUF_HDR_PTR(txpdu);
 
+    {
+        uint8_t _llid = ble_hdr->txinfo.hdr_byte & 0x03;
+        uint8_t _pl = ble_hdr->txinfo.pyld_len;
+        if (_pl >= 5 && _llid == 0x02 && g_txPRE_i < 4) {
+            const uint8_t *_d = txpdu->om_data;
+            uint32_t _k = (g_txPRE_i & 1) * 2;
+            g_txPRE[_k] = _d[0] | ((uint32_t)_d[1] << 8) |
+                          ((uint32_t)_d[2] << 16) | ((uint32_t)_d[3] << 24);
+            g_txPRE[_k + 1] = ble_hdr->txinfo.offset |
+                              ((uint32_t)_pl << 8) | ((uint32_t)txpdu->om_len << 16);
+            g_txPRE_i++;
+        }
+    }
+
     os_mbuf_copydata(txpdu, ble_hdr->txinfo.offset, ble_hdr->txinfo.pyld_len,
                      dptr);
+
+    {
+        /* JOINT-DEBUG point C: bytes the pducb wrote to the radio payload (this
+         * is literally what goes on air). dptr[0..1]=L2CAP len, [2..3]=CID,
+         * [4..]=ATT. Ring of last 4 L2CAP-start data PDUs. */
+        extern volatile uint32_t g_txC[8];
+        extern volatile uint32_t g_txC_i;
+        uint8_t _llid = ble_hdr->txinfo.hdr_byte & 0x03;
+        uint8_t _pl = ble_hdr->txinfo.pyld_len;
+        if (_pl >= 5 && _llid == 0x02) {
+            uint32_t _k = (g_txC_i & 3) * 2;
+            g_txC[_k] = dptr[0] | ((uint32_t)dptr[1] << 8) |
+                        ((uint32_t)dptr[2] << 16) | ((uint32_t)dptr[3] << 24);
+            g_txC[_k + 1] = dptr[4] | ((uint32_t)dptr[5] << 8) |
+                            ((uint32_t)_pl << 16) |
+                            ((uint32_t)ble_hdr->txinfo.hdr_byte << 24);
+            g_txC_i++;
+        }
+    }
 
     *hdr_byte = ble_hdr->txinfo.hdr_byte;
 

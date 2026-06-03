@@ -13,7 +13,7 @@ stack (those are libraries with their own roadmaps).
 | --- | --- | --- |
 | CLOCK (HFCLK/LFCLK) | `nrfStartHfclk` / `nrfStartLfclk` (NrfClock) | |
 | POWER (sleep/OFF/DCDC/RAM-retention) | `NrfPower` | SystemOFF + GPIO/NFC/USB wake |
-| RADIO — BLE advertising | `NrfBleRadio` (NrfBleHw) | advertising-only facade |
+| RADIO — BLE (NimBLE) | NimBLE link-layer controller (`libraries/NimBLE/`) | full host+controller: adv, connections, GATT (HW-verified). `NrfBleRadio` facade is advertising-only/legacy |
 | RADIO — proprietary 2.4 GHz | `NrfRadio` | NEW: raw packet TX/RX, 1/2 Mbit, CRC, RSSI |
 | UARTE0/1 | `HardwareSerial` | |
 | SPIM0-3 | `SPI` | master |
@@ -50,8 +50,10 @@ stack (those are libraries with their own roadmaps).
 - **NrfEcb** — `selfTest()` runs the FIPS-197 AES-128 known-answer vector on
   the device; deterministic, hardware-verifiable on a single board.
 - **NrfCcm / NrfAar** — register-correct per the PS; BLE-PDU framing follows
-  the spec. End-to-end verification comes when the NimBLE controller (NimBLE
-  M2) drives them with a real BLE peer.
+  the spec. The NimBLE stack itself is hardware-verified for unencrypted GATT;
+  CCM (link encryption) / AAR (private-address resolution) are exercised only
+  once a paired/bonded peer drives them, which is not yet part of the verified
+  path.
 - **NrfLpComp** — register-correct; shares the comparator block + IRQ 19 with
   COMP (mutually exclusive). Exercised by `examples/CryptoLpComp`.
 - **NrfRadio** — register-correct per the PS; an on-air link needs a second

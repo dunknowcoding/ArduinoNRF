@@ -2,9 +2,16 @@
 
 Date: 2026-05-04
 
-This package currently ships an advertising-only self-hosted BLE facade. It does not ship a SoftDevice, Bluefruit compatibility layer, or a connection-oriented GATT implementation.
+This package ships **two** BLE surfaces. The full connection-oriented stack is
+**NimBLE** (`libraries/NimBLE/`): a vendored Apache Mynewt host + link-layer
+controller providing advertising, connections, MTU exchange, and complete GATT
+(services / characteristics / descriptors / notifications), verified on hardware
+against Windows, Android, and board-to-board. Separately, the legacy self-hosted
+`BLE` facade documented below remains **advertising-only**. The package does
+**not** ship a SoftDevice or a Bluefruit compatibility layer — use NimBLE, not
+the `BLE` facade, for connections and GATT.
 
-## BLE truth in the current package
+## Legacy `BLE` facade truth (advertising-only; superseded by NimBLE)
 
 - `BLE.begin()` only succeeds when the active board metadata declares a low-frequency clock source.
 - `BLE.gattServerSupported()` is `false`.

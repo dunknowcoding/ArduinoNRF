@@ -67,6 +67,27 @@ __pycache__/
 .pytest_cache/
 
 # ============================================================
+# Dev-only BLE bring-up / WinRT debug scratch (not needed by users).
+# These are ad-hoc probes and host-side test drivers used while
+# debugging the NimBLE stack; the shipped package does not need them.
+# ============================================================
+tools/nimble/
+tools/tmp_*.py
+tools/clear_ble_device_cache.ps1
+scripts/win_serial_inventory.py
+*.etl
+*.gdb
+*_log.txt
+
+# Debug-instrumented BLE example sketches (reference internal debug
+# globals like g_txhdr/g_rxatt; for bring-up only, not user-facing).
+hardware/arduinonrf/nrf52/libraries/NimBLE/examples/NimBLECentralDbg/
+hardware/arduinonrf/nrf52/libraries/NimBLE/examples/NimBLEPeriphDbg/
+hardware/arduinonrf/nrf52/libraries/NimBLE/examples/BleCentralProbe/
+hardware/arduinonrf/nrf52/libraries/NimBLE/examples/BleCentralLoopbackProbe/
+hardware/arduinonrf/nrf52/libraries/NimBLE/examples/NimBLEPeripheralTest/
+
+# ============================================================
 # OS / editor noise
 # ============================================================
 .DS_Store

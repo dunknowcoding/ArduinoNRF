@@ -480,8 +480,15 @@
 #define MYNEWT_VAL_BLE_ISO_TEST (0)
 #endif
 
+/* NOTE: MUST be >= 2. A known NimBLE bug makes the host break ATT/GATT service
+ * discovery *after* a successful MTU exchange when this is 1 (the central
+ * connects, exchanges MTU, then GetGattServices/discovery stalls or fails on
+ * both Windows WinRT and Android). Reproducible in upstream bleprph by setting
+ * connections 3->1; does not occur at 2 or 3. See Apache Mynewt dev list
+ * "Exchanging MTU breaks when maximum number of concurrent connections is set
+ * to 1". We only ever use one link, but the pool must be sized >1. */
 #ifndef MYNEWT_VAL_BLE_MAX_CONNECTIONS
-#define MYNEWT_VAL_BLE_MAX_CONNECTIONS (1)
+#define MYNEWT_VAL_BLE_MAX_CONNECTIONS (3)
 #endif
 
 #ifndef MYNEWT_VAL_BLE_MAX_PERIODIC_SYNCS
@@ -553,6 +560,13 @@
 
 /* Connection-related LL config pulled in once PERIPHERAL/CENTRAL are enabled.
  * NimBLE upstream defaults. */
+/* Data Length Extension. Windows/WinRT and Android centrals send LL_LENGTH_REQ
+ * during connection setup; without DLE enabled the controller answers
+ * LL_UNKNOWN_RSP, and some central stacks abort discovery and send
+ * LL_TERMINATE_IND. Enabling DLE makes the controller answer LL_LENGTH_RSP. */
+#ifndef MYNEWT_VAL_BLE_LL_CFG_FEAT_DATA_LEN_EXT
+#define MYNEWT_VAL_BLE_LL_CFG_FEAT_DATA_LEN_EXT (1)
+#endif
 #ifndef MYNEWT_VAL_BLE_LL_SUPP_MAX_RX_BYTES
 #define MYNEWT_VAL_BLE_LL_SUPP_MAX_RX_BYTES (251)
 #endif

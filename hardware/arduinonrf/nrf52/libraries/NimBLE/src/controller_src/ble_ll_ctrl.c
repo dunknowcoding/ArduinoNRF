@@ -208,6 +208,9 @@ ble_ll_ctrl_phy_update_cancel(struct ble_ll_conn_sm *connsm, uint8_t ble_err)
 }
 #endif
 
+/* BRING-UP debug: LL_LENGTH_REQ received params + configured minimums. */
+__attribute__((used)) volatile uint32_t g_len_dbg[6] = {0};
+
 static int
 ble_ll_ctrl_len_proc(struct ble_ll_conn_sm *connsm, uint8_t *dptr)
 {
@@ -220,24 +223,42 @@ ble_ll_ctrl_len_proc(struct ble_ll_conn_sm *connsm, uint8_t *dptr)
     ctrl_req.max_tx_bytes = get_le16(dptr + 4);
     ctrl_req.max_tx_time = get_le16(dptr + 6);
 
+    {
+        /* BRING-UP: [0..3]=rx_bytes,rx_time,tx_bytes,tx_time received;
+         * [4]=BYTES_MIN; [5]=TIME_MIN. */
+        extern volatile uint32_t g_len_dbg[6];
+        g_len_dbg[0] = ctrl_req.max_rx_bytes;
+        g_len_dbg[1] = ctrl_req.max_rx_time;
+        g_len_dbg[2] = ctrl_req.max_tx_bytes;
+        g_len_dbg[3] = ctrl_req.max_tx_time;
+        g_len_dbg[4] = BLE_LL_CONN_SUPP_BYTES_MIN;
+        g_len_dbg[5] = BLE_LL_CONN_SUPP_TIME_MIN;
+    }
+
     if ((ctrl_req.max_rx_bytes < BLE_LL_CONN_SUPP_BYTES_MIN) ||
         (ctrl_req.max_rx_time < BLE_LL_CONN_SUPP_TIME_MIN) ||
         (ctrl_req.max_tx_bytes < BLE_LL_CONN_SUPP_BYTES_MIN) ||
         (ctrl_req.max_tx_time < BLE_LL_CONN_SUPP_TIME_MIN)) {
         rc = 1;
     } else {
-        /* Update parameters */
-        connsm->rem_max_rx_time = ctrl_req.max_rx_time;
-        connsm->rem_max_tx_time = ctrl_req.max_tx_time;
-        connsm->rem_max_rx_octets = ctrl_req.max_rx_bytes;
-        connsm->rem_max_tx_octets = ctrl_req.max_tx_bytes;
-
-        /* Recalculate effective connection parameters */
-        ble_ll_conn_update_eff_data_len(connsm);
+        connsm->pending_rem_max_rx_time = ctrl_req.max_rx_time;
+        connsm->pending_rem_max_tx_time = ctrl_req.max_tx_time;
+        connsm->pending_rem_max_rx_octets = ctrl_req.max_rx_bytes;
+        connsm->pending_rem_max_tx_octets = ctrl_req.max_tx_bytes;
         rc = 0;
     }
 
     return rc;
+}
+
+static void
+ble_ll_ctrl_len_apply_pending(struct ble_ll_conn_sm *connsm)
+{
+    connsm->rem_max_rx_time = connsm->pending_rem_max_rx_time;
+    connsm->rem_max_tx_time = connsm->pending_rem_max_tx_time;
+    connsm->rem_max_rx_octets = connsm->pending_rem_max_rx_octets;
+    connsm->rem_max_tx_octets = connsm->pending_rem_max_tx_octets;
+    ble_ll_conn_update_eff_data_len(connsm);
 }
 
 /**
@@ -2518,6 +2539,7 @@ ble_ll_ctrl_rx_chanmap_req(struct ble_ll_conn_sm *connsm, uint8_t *dptr)
 {
     uint16_t instant;
     uint16_t conn_events;
+    uint8_t chan_map_used;
 
 #if MYNEWT_VAL(BLE_LL_ROLE_CENTRAL)
     if (connsm->conn_role == BLE_LL_CONN_ROLE_CENTRAL) {
@@ -2528,7 +2550,8 @@ ble_ll_ctrl_rx_chanmap_req(struct ble_ll_conn_sm *connsm, uint8_t *dptr)
     /* Minimum number of channels is 2.
      * If invalid map was provided we have to end the connection.
      */
-    if (ble_ll_utils_chan_map_used_get(dptr) < 2) {
+    chan_map_used = ble_ll_utils_chan_map_used_get(dptr);
+    if (chan_map_used < 2) {
         ble_ll_conn_timeout(connsm, BLE_ERR_INV_LMP_LL_PARM);
         return BLE_ERR_MAX;
     }
@@ -2539,6 +2562,15 @@ ble_ll_ctrl_rx_chanmap_req(struct ble_ll_conn_sm *connsm, uint8_t *dptr)
     /* If instant is in the past, we have to end the connection */
     instant = get_le16(dptr + BLE_LL_CHAN_MAP_LEN);
     conn_events = (instant - connsm->event_cntr) & 0xFFFF;
+    {
+        extern volatile uint32_t g_chanmap_dbg[8];
+        g_chanmap_dbg[0]++;
+        g_chanmap_dbg[1] = connsm->event_cntr;
+        g_chanmap_dbg[2] = instant;
+        g_chanmap_dbg[3] = conn_events;
+        g_chanmap_dbg[4] = chan_map_used;
+        g_chanmap_dbg[5] = dptr[4];
+    }
     if (conn_events >= 32767) {
         ble_ll_conn_timeout(connsm, BLE_ERR_INSTANT_PASSED);
     } else {
@@ -2876,6 +2908,15 @@ ble_ll_ctrl_chk_proc_start(struct ble_ll_conn_sm *connsm)
  * @param om
  * @param connsm
  */
+/* BRING-UP debug: ring buffer of control-PDU (rx-opcode<<8 | rsp-opcode). */
+__attribute__((used)) volatile uint32_t g_ctrl_op[16] = {0};
+__attribute__((used)) volatile uint32_t g_ctrl_idx = 0;
+/* BRING-UP debug: last channel-map request/apply state.
+ * [0]=req count [1]=event_cntr at req [2]=instant [3]=events until instant
+ * [4]=requested channels used [5]=last requested map byte 4
+ * [6]=apply count [7]=event_cntr at apply */
+__attribute__((used)) volatile uint32_t g_chanmap_dbg[8] = {0};
+
 int
 ble_ll_ctrl_rx_pdu(struct ble_ll_conn_sm *connsm, struct os_mbuf *om)
 {
@@ -3016,6 +3057,8 @@ ble_ll_ctrl_rx_pdu(struct ble_ll_conn_sm *connsm, struct os_mbuf *om)
             goto ll_ctrl_send_rsp;
         }
 
+        connsm->flags.pending_peer_dle_apply = 1;
+
         /*
          * If we have not started this procedure ourselves and it is
          * pending, no need to perform it.
@@ -3040,6 +3083,10 @@ ble_ll_ctrl_rx_pdu(struct ble_ll_conn_sm *connsm, struct os_mbuf *om)
             if (ble_ll_ctrl_len_proc(connsm, dptr)) {
                 rc = -1;
                 rsp_opcode = BLE_LL_CTRL_UNKNOWN_RSP;
+            }
+
+            if (rsp_opcode == BLE_ERR_MAX) {
+                ble_ll_ctrl_len_apply_pending(connsm);
             }
 
             /* Stop the control procedure */
@@ -3140,6 +3187,15 @@ ble_ll_ctrl_rx_pdu(struct ble_ll_conn_sm *connsm, struct os_mbuf *om)
 
     /* Free mbuf or send response */
 ll_ctrl_send_rsp:
+    {
+        /* BRING-UP: ring of (rx-opcode<<8 | rsp-opcode). rsp 0xFF = no
+         * response sent. Lets us spot an unanswered control procedure that
+         * blocks the central's ATT discovery. */
+        extern volatile uint32_t g_ctrl_op[16];
+        extern volatile uint32_t g_ctrl_idx;
+        g_ctrl_op[g_ctrl_idx & 15] = ((uint32_t)opcode << 8) | (uint32_t)rsp_opcode;
+        g_ctrl_idx++;
+    }
     if (rsp_opcode == BLE_ERR_MAX) {
         os_mbuf_free_chain(om);
     } else {
@@ -3297,6 +3353,12 @@ ble_ll_ctrl_tx_done(struct os_mbuf *txpdu, struct ble_ll_conn_sm *connsm)
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
         connsm->enc_data.enc_state = CONN_ENC_S_UNENCRYPTED;
 #endif
+        break;
+    case BLE_LL_CTRL_LENGTH_RSP:
+        if (connsm->flags.pending_peer_dle_apply) {
+            connsm->flags.pending_peer_dle_apply = 0;
+            ble_ll_ctrl_len_apply_pending(connsm);
+        }
         break;
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
     case BLE_LL_CTRL_PAUSE_ENC_REQ:

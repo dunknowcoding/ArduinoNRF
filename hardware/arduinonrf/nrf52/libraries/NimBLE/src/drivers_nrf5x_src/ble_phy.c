@@ -74,6 +74,10 @@ extern void tm_tick(void);
 
 #include <controller/ble_ll_pdu.h>
 
+#ifndef NIMBLE_BRINGUP_DEBUG
+#define NIMBLE_BRINGUP_DEBUG 0
+#endif
+
 /*
  * NOTE: This code uses a couple of PPI channels so care should be taken when
  *       using PPI somewhere else.
@@ -1347,6 +1351,10 @@ ble_phy_rx_end_isr(void)
     if (is_late) {
         phy_ppi_timer0_compare0_to_radio_txen_disable();
         g_ble_phy_data.phy_transition_late = 1;
+        g_dbg_rxchain[0]++;
+        g_dbg_rxchain[1] = tx_time;
+        g_dbg_rxchain[2] = radio_time;
+        g_dbg_rxchain[3] = NRF_TIMER0->CC[2];
     }
 
     /*
@@ -1502,14 +1510,16 @@ ble_phy_isr(void)
      * actually heard). [4]==0 => radio never RX-enabled for conn events
      * (arming/PPI bug); [4]>0 && [5]==0 => RX-enabled but missed the packet
      * (timing/channel). */
-    extern volatile uint32_t g_phy_isr_dbg[8];
-    g_phy_isr_dbg[0]++;
-    if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[1]++;
-    if (NRF_RADIO->EVENTS_END)     g_phy_isr_dbg[2]++;
-    if (NRF_RADIO->EVENTS_DISABLED) g_phy_isr_dbg[3]++;
-    if (ble_ll_state_get() == BLE_LL_STATE_CONNECTION) {
-        g_phy_isr_dbg[4]++;
-        if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[5]++;
+    if (NIMBLE_BRINGUP_DEBUG) {
+        extern volatile uint32_t g_phy_isr_dbg[8];
+        g_phy_isr_dbg[0]++;
+        if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[1]++;
+        if (NRF_RADIO->EVENTS_END)     g_phy_isr_dbg[2]++;
+        if (NRF_RADIO->EVENTS_DISABLED) g_phy_isr_dbg[3]++;
+        if (ble_ll_state_get() == BLE_LL_STATE_CONNECTION) {
+            g_phy_isr_dbg[4]++;
+            if (NRF_RADIO->EVENTS_ADDRESS) g_phy_isr_dbg[5]++;
+        }
     }
 
     os_trace_isr_enter();
@@ -1937,7 +1947,7 @@ ble_phy_rx_set_start_time(uint32_t cputime, uint8_t rem_usecs)
     /* BRING-UP: is HFCLK on the crystal (HFXO) when we arm a conn-event RX?
      * The radio needs HFXO to actually receive; on HFINT it still ramps to Rx
      * but can't demodulate. HFCLKSTAT bit16=running, bit0 SRC(0=RC,1=XTAL). */
-    {
+    if (NIMBLE_BRINGUP_DEBUG) {
         extern volatile uint32_t g_dbg_hfclk;
         g_dbg_hfclk = *(volatile uint32_t *)0x4000040CUL;
     }
@@ -1964,12 +1974,16 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
     uint32_t state;
     uint32_t shortcuts;
 
-    {
+    if (NIMBLE_BRINGUP_DEBUG) {
         extern volatile uint32_t g_phy_isr_dbg[8];
         if (ble_ll_state_get() == BLE_LL_STATE_CONNECTION) g_phy_isr_dbg[6]++;
     }
 
     if (g_ble_phy_data.phy_transition_late) {
+        g_dbg_rxchain[4]++;
+        g_dbg_rxchain[5] = g_ble_phy_data.phy_state;
+        g_dbg_rxchain[6] = NRF_RADIO->STATE;
+        g_dbg_rxchain[7] = g_ble_phy_data.phy_transition;
         ble_phy_disable();
         STATS_INC(ble_phy_stats, tx_late);
         return BLE_PHY_ERR_TX_LATE;
@@ -2066,6 +2080,10 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
         STATS_INCN(ble_phy_stats, tx_bytes, payload_len + BLE_LL_PDU_HDR_LEN);
         rc = BLE_ERR_SUCCESS;
     } else {
+        g_dbg_rxchain[4]++;
+        g_dbg_rxchain[5] = state;
+        g_dbg_rxchain[6] = end_trans;
+        g_dbg_rxchain[7] = g_ble_phy_data.phy_transition;
         ble_phy_disable();
         STATS_INC(ble_phy_stats, tx_late);
         rc = BLE_PHY_ERR_RADIO_STATE;

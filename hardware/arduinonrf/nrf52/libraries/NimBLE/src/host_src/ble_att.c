@@ -525,6 +525,12 @@ ble_att_send_outstanding_after_response(uint16_t conn_handle)
 
 /* BRING-UP debug: ATT PDUs reaching the server. */
 __attribute__((used)) volatile uint32_t g_att_dbg[4] = {0};
+/* BRING-UP debug: ring of last 16 RX ATT PDUs (16 bytes each) and last 16 TX
+ * response PDUs, for byte-level inspection of the discovery exchange. */
+__attribute__((used)) volatile uint32_t g_attrx[64] = {0};
+__attribute__((used)) volatile uint32_t g_attrx_i = 0;
+__attribute__((used)) volatile uint32_t g_atttx[64] = {0};
+__attribute__((used)) volatile uint32_t g_atttx_i = 0;
 
 static int
 ble_att_rx_extended(uint16_t conn_handle, uint16_t cid, struct os_mbuf **om)
@@ -548,6 +554,24 @@ ble_att_rx_extended(uint16_t conn_handle, uint16_t cid, struct os_mbuf **om)
         g_att_dbg[0]++;
         g_att_dbg[1] = op;
         if (op == 0x10) g_att_dbg[2]++;
+    }
+
+    {
+        /* BRING-UP: capture first 16 bytes of each RX ATT PDU (ring of 16). */
+        extern volatile uint32_t g_attrx[64];
+        extern volatile uint32_t g_attrx_i;
+        uint8_t b[16] = {0};
+        uint16_t l = OS_MBUF_PKTLEN(*om);
+        uint32_t base;
+        int i;
+        if (l > 16) l = 16;
+        os_mbuf_copydata(*om, 0, l, b);
+        base = (g_attrx_i & 15) * 4;
+        for (i = 0; i < 4; i++) {
+            g_attrx[base + i] = b[i*4] | (b[i*4+1] << 8) |
+                                (b[i*4+2] << 16) | ((uint32_t)b[i*4+3] << 24);
+        }
+        g_attrx_i++;
     }
 
     if (cid == BLE_L2CAP_CID_ATT && ble_att_is_response_op(op)) {

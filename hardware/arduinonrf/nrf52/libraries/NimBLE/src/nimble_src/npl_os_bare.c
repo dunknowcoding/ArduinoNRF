@@ -166,6 +166,27 @@ void ble_npl_event_run(struct ble_npl_event *ev) {
 
 static struct ble_npl_callout *s_callout_list = NULL;
 
+static void ble_npl_callout_unlink_locked(struct ble_npl_callout *co) {
+    struct ble_npl_callout *prev = NULL;
+    struct ble_npl_callout *cur = s_callout_list;
+
+    while (cur) {
+        struct ble_npl_callout *next = cur->next;
+        if (cur == co) {
+            if (prev) {
+                prev->next = next;
+            } else {
+                s_callout_list = next;
+            }
+            cur->next = NULL;
+            cur = next;
+            continue;
+        }
+        prev = cur;
+        cur = next;
+    }
+}
+
 void ble_npl_callout_init(struct ble_npl_callout *co, struct ble_npl_eventq *evq,
                            ble_npl_event_fn *fn, void *arg) {
     memset(co, 0, sizeof(*co));
@@ -181,6 +202,7 @@ void ble_npl_callout_deinit(struct ble_npl_callout *co) {
 ble_npl_error_t ble_npl_callout_reset(struct ble_npl_callout *co,
                                        ble_npl_time_t ticks) {
     uint32_t ctx = ble_npl_hw_enter_critical();
+    ble_npl_callout_unlink_locked(co);
     co->active = true;
     co->expiration_ticks = ticks;   // M2 will translate to absolute RTC ticks
     // Insert at head of pending list (M2 will sort by expiration).
@@ -193,19 +215,7 @@ ble_npl_error_t ble_npl_callout_reset(struct ble_npl_callout *co,
 void ble_npl_callout_stop(struct ble_npl_callout *co) {
     uint32_t ctx = ble_npl_hw_enter_critical();
     co->active = false;
-    // Remove from pending list.
-    struct ble_npl_callout *prev = NULL;
-    struct ble_npl_callout *cur = s_callout_list;
-    while (cur) {
-        if (cur == co) {
-            if (prev) prev->next = cur->next;
-            else      s_callout_list = cur->next;
-            cur->next = NULL;
-            break;
-        }
-        prev = cur;
-        cur = cur->next;
-    }
+    ble_npl_callout_unlink_locked(co);
     ble_npl_hw_exit_critical(ctx);
 }
 

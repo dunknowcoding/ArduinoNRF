@@ -880,6 +880,7 @@ uint32_t nextRandomWord() {
 // startup-level hook so future board profiles can reintroduce lightweight
 // maintenance without changing the main loop contract.
 extern "C" void nrfWdtFeed(void);
+extern "C" void nrfNimbleYieldPoll(void) __attribute__((weak));
 
 extern "C" void SysTick_Handler(void) {
     ++g_millis;
@@ -900,6 +901,9 @@ void initVariant(void) {
 
 void yield(void) {
     nrfUsbSerialBackend().poll();
+    if (nrfNimbleYieldPoll != nullptr) {
+        nrfNimbleYieldPoll();
+    }
     // Honor an IDE 2 "Pause" (host Ctrl-C/0x03) while the sketch runs free:
     // the GDB stub is dormant between halts, so this is where a break byte is
     // turned into a pended DebugMon halt. No-op unless a debug session is live.

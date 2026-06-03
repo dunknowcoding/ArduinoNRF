@@ -30,6 +30,8 @@ extern "C" {
 #include "nimble/nimble_port.h"
 #include "nimble/transport.h"
 #include "nimble/transport_impl.h"
+#include "services/gap/ble_svc_gap.h"
+#include "services/gatt/ble_svc_gatt.h"
 }
 #else
 #define NRF_NIMBLE_PORTING_VENDORED 0
@@ -52,10 +54,20 @@ bool g_advertising = false;
 bool g_connected = false;
 bool g_synced = false;
 bool g_shouldAdvertise = false;
+bool g_pumpingEvents = false;
+bool g_connParamUpdatePending = false;
+bool g_connParamUpdateReady = false;
+uint8_t g_connParamUpdateAttempts = 0;
 uint8_t g_publicAddress[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 char g_deviceName[31] = "nimble";
 bool g_portReady = false;
 uint8_t g_ownAddrType = BLE_OWN_ADDR_PUBLIC;
+
+constexpr uint16_t kPreferredConnItvlMin = 12;   // 15 ms
+constexpr uint16_t kPreferredConnItvlMax = 24;   // 30 ms
+constexpr uint16_t kPreferredConnLatency = 0;
+constexpr uint16_t kPreferredConnTimeout = 200;  // 2 s
+constexpr uint8_t kMaxConnParamUpdateAttempts = 8;
 
 // --- Nordic UART Service (NUS) echo GATT server -----------------------------
 // A connection/data test surface: the central writes to RX, the board echoes
@@ -78,6 +90,7 @@ const ble_uuid128_t NUS_RX_UUID = BLE_UUID128_INIT(
 const ble_uuid128_t NUS_TX_UUID = BLE_UUID128_INIT(
     0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x03,0x00,0x40,0x6e);
 
+
 int nusAccessCb(uint16_t conn_handle, uint16_t attr_handle,
                 struct ble_gatt_access_ctxt *ctxt, void *arg) {
     (void)conn_handle; (void)attr_handle; (void)arg;
@@ -94,69 +107,41 @@ int nusAccessCb(uint16_t conn_handle, uint16_t attr_handle,
                 g_notifyCount++;
             }
         }
-    }
-    return 0;
-}
-
-const struct ble_gatt_chr_def NUS_CHRS[] = {
-    { &NUS_RX_UUID.u, nusAccessCb, nullptr, nullptr,
-      BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP, 0, nullptr },
-    { &NUS_TX_UUID.u, nusAccessCb, nullptr, nullptr,
-      BLE_GATT_CHR_F_NOTIFY, 0, &g_txValHandle },
-    { 0 },
-};
-// Standard GAP (0x1800) + GATT (0x1801) services. The base ble_svc_gap/gatt
-// modules aren't vendored, so register them by hand. Many centrals (incl.
-// Windows/bleak) probe the GAP service (Device Name) during discovery via a
-// Find-By-Type-Value before continuing; without it, discovery stalls.
-const ble_uuid16_t GAP_SVC_UUID      = BLE_UUID16_INIT(0x1800);
-const ble_uuid16_t GAP_DEVNAME_UUID  = BLE_UUID16_INIT(0x2A00);
-const ble_uuid16_t GAP_APPEAR_UUID   = BLE_UUID16_INIT(0x2A01);
-const ble_uuid16_t GATT_SVC_UUID     = BLE_UUID16_INIT(0x1801);
-const ble_uuid16_t GATT_SVC_CHG_UUID = BLE_UUID16_INIT(0x2A05);
-
-int gapAccessCb(uint16_t conn_handle, uint16_t attr_handle,
-                struct ble_gatt_access_ctxt *ctxt, void *arg) {
-    (void)conn_handle; (void)attr_handle; (void)arg;
-    if (ctxt->op != BLE_GATT_ACCESS_OP_READ_CHR) {
-        return BLE_ATT_ERR_UNLIKELY;
-    }
-    uint16_t uuid = ble_uuid_u16(ctxt->chr->uuid);
-    if (uuid == 0x2A00) {   // Device Name
-        return os_mbuf_append(ctxt->om, g_deviceName, strlen(g_deviceName)) == 0
-                   ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
-    }
-    if (uuid == 0x2A01) {   // Appearance (0 = unknown)
-        uint16_t appearance = 0;
-        return os_mbuf_append(ctxt->om, &appearance, sizeof(appearance)) == 0
-                   ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+        return 0;
     }
     return BLE_ATT_ERR_UNLIKELY;
 }
 
-const struct ble_gatt_chr_def GAP_CHRS[] = {
-    { &GAP_DEVNAME_UUID.u, gapAccessCb, nullptr, nullptr, BLE_GATT_CHR_F_READ, 0, nullptr },
-    { &GAP_APPEAR_UUID.u,  gapAccessCb, nullptr, nullptr, BLE_GATT_CHR_F_READ, 0, nullptr },
+const struct ble_gatt_chr_def NUS_CHRS[] = {
+    { &NUS_TX_UUID.u, nusAccessCb, nullptr, nullptr,
+      BLE_GATT_CHR_F_NOTIFY, 0, &g_txValHandle },
+    { &NUS_RX_UUID.u, nusAccessCb, nullptr, nullptr,
+      BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP, 0, nullptr },
     { 0 },
 };
-const struct ble_gatt_chr_def GATT_CHRS[] = {
-    { &GATT_SVC_CHG_UUID.u, gapAccessCb, nullptr, nullptr, BLE_GATT_CHR_F_INDICATE, 0, nullptr },
-    { 0 },
-};
-const struct ble_gatt_svc_def ALL_SVCS[] = {
-    { BLE_GATT_SVC_TYPE_PRIMARY, &GAP_SVC_UUID.u,  nullptr, GAP_CHRS },
-    { BLE_GATT_SVC_TYPE_PRIMARY, &GATT_SVC_UUID.u, nullptr, GATT_CHRS },
+const struct ble_gatt_svc_def NUS_SVCS[] = {
     { BLE_GATT_SVC_TYPE_PRIMARY, &NUS_SVC_UUID.u,  nullptr, NUS_CHRS },
     { 0 },
 };
 
 int registerGattServices() {
-    int rc = ble_gatts_count_cfg(ALL_SVCS);
+    int rc = ble_svc_gap_device_name_set(g_deviceName);
     if (rc != 0) return rc;
-    return ble_gatts_add_svcs(ALL_SVCS);
+
+    rc = ble_svc_gap_device_appearance_set(BLE_SVC_GAP_APPEARANCE_GEN_UNKNOWN);
+    if (rc != 0) return rc;
+
+    ble_svc_gap_init();
+    ble_svc_gatt_init();
+
+    rc = ble_gatts_count_cfg(NUS_SVCS);
+    if (rc != 0) return rc;
+
+    return ble_gatts_add_svcs(NUS_SVCS);
 }
 
 constexpr uint32_t FICR_BASE = 0x10000000UL;
+constexpr uint32_t FICR_DEVICEADDRTYPE = 0x0A0UL;
 constexpr uint32_t FICR_DEVICEADDR0 = 0x0A4UL;
 constexpr uint32_t FICR_DEVICEADDR1 = 0x0A8UL;
 
@@ -176,15 +161,73 @@ void loadPublicAddress(uint8_t addr[6]) {
     addr[5] = static_cast<uint8_t>((high >> 8) & 0xFFU);
 }
 
+bool ficrAddressIsRandomStatic() {
+    return (reg32(FICR_BASE, FICR_DEVICEADDRTYPE) & 1U) != 0;
+}
+
 void pumpEvents() {
-    if (g_portReady) {
-        nimble_port_run();
+    if (!g_portReady || g_pumpingEvents) {
+        return;
     }
+
+    g_pumpingEvents = true;
+    nimble_port_run();
+    g_pumpingEvents = false;
 }
 
 NimBLE::Status startAdvertisingInternal();
 
 __attribute__((used)) volatile uint32_t g_gap_dbg[4] = {0};  /* [0]=#events [1]=last type [2]=connect status [3]=conn_handle */
+__attribute__((used)) volatile uint32_t g_poll_recover_dbg[4] = {0}; /* [0]=recoveries [1]=conn_find rc [2]=stale handle [3]=adv status */
+__attribute__((used)) volatile uint32_t g_conn_params_dbg[12] = {0}; /* [0]=request count [1]=last conn_find rc [2]=last update rc [3]=update event count [4]=last update status [5]=current interval [6]=current latency [7]=current timeout [8]=requested min [9]=requested max [10]=pending flag [11]=attempt count */
+
+void captureConnParams(uint16_t connHandle, uint32_t connFindRc) {
+    g_conn_params_dbg[1] = connFindRc;
+    if (connFindRc != 0) {
+        return;
+    }
+
+    ble_gap_conn_desc desc;
+    const int rc = ble_gap_conn_find(connHandle, &desc);
+    g_conn_params_dbg[1] = (uint32_t)rc;
+    if (rc != 0) {
+        return;
+    }
+
+    g_conn_params_dbg[5] = desc.conn_itvl;
+    g_conn_params_dbg[6] = desc.conn_latency;
+    g_conn_params_dbg[7] = desc.supervision_timeout;
+}
+
+int requestFastConnectionParams(uint16_t connHandle) {
+    ble_gap_upd_params params;
+    memset(&params, 0, sizeof(params));
+
+    params.itvl_min = kPreferredConnItvlMin;
+    params.itvl_max = kPreferredConnItvlMax;
+    params.latency = kPreferredConnLatency;
+    params.supervision_timeout = kPreferredConnTimeout;
+
+    ble_gap_conn_desc desc;
+    const int findRc = ble_gap_conn_find(connHandle, &desc);
+    g_conn_params_dbg[1] = (uint32_t)findRc;
+    if (findRc == 0) {
+        g_conn_params_dbg[5] = desc.conn_itvl;
+        g_conn_params_dbg[6] = desc.conn_latency;
+        g_conn_params_dbg[7] = desc.supervision_timeout;
+        params.latency = desc.conn_latency;
+        params.supervision_timeout = desc.supervision_timeout != 0
+            ? desc.supervision_timeout
+            : kPreferredConnTimeout;
+    }
+
+    g_conn_params_dbg[0]++;
+    g_conn_params_dbg[8] = params.itvl_min;
+    g_conn_params_dbg[9] = params.itvl_max;
+    const int rc = ble_gap_update_params(connHandle, &params);
+    g_conn_params_dbg[2] = (uint32_t)rc;
+    return rc;
+}
 
 int handleGapEvent(struct ble_gap_event *event, void *arg) {
     (void)arg;
@@ -200,16 +243,46 @@ int handleGapEvent(struct ble_gap_event *event, void *arg) {
         if (g_connected) {
             g_connHandle = event->connect.conn_handle;
             g_lastConnHandle = event->connect.conn_handle;
+            ble_gap_conn_desc desc;
+            const int descRc = ble_gap_conn_find(g_connHandle, &desc);
+            g_connParamUpdatePending = (descRc == 0 && desc.role == BLE_GAP_ROLE_SLAVE);
+            g_connParamUpdateReady = false;
+            g_connParamUpdateAttempts = 0;
+            g_conn_params_dbg[10] = g_connParamUpdatePending ? 1U : 0U;
+            g_conn_params_dbg[11] = 0;
+            captureConnParams(g_connHandle, 0);
         }
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
+        /* BRING-UP: capture HCI disconnect reason (0x100|reason marks it a
+         * disconnect). 0x213=remote-user-term, 0x208=supervision-timeout,
+         * 0x216=conn-term-by-local-host, 0x23D=MIC-failure, 0x222=LMP-timeout. */
+        g_gap_dbg[2] = 0x100u | (uint32_t)(uint16_t)event->disconnect.reason;
         g_connected = false;
         g_advertising = false;
         g_connHandle = BLE_HS_CONN_HANDLE_NONE;
+        g_connParamUpdatePending = false;
+        g_connParamUpdateReady = false;
+        g_connParamUpdateAttempts = 0;
+        g_conn_params_dbg[10] = 0;
         // Resume advertising so the link can be re-established (robustness).
         if (g_shouldAdvertise) {
             startAdvertisingInternal();
+        }
+        break;
+
+    case BLE_GAP_EVENT_CONN_UPDATE:
+        g_conn_params_dbg[3]++;
+        g_conn_params_dbg[4] = (uint32_t)event->conn_update.status;
+        if (event->conn_update.status == 0) {
+            captureConnParams(event->conn_update.conn_handle, 0);
+        }
+        break;
+
+    case BLE_GAP_EVENT_MTU:
+        if (g_connParamUpdatePending) {
+            g_connParamUpdateReady = true;
         }
         break;
 
@@ -234,20 +307,22 @@ void handleHostReset(int reason) {
 void handleHostSync() {
     g_synced = true;
 
-    // The nRF52840 has no IEEE public address, so advertising with
-    // own_addr_type=PUBLIC fails with BLE_HS_ENOADDR (21). Program a random
-    // STATIC address from the factory FICR DEVICEADDR (top 2 bits = 0b11) and
-    // advertise as RANDOM.
-    uint8_t rnd[6];
-    loadPublicAddress(rnd);
-    rnd[5] |= 0xC0;
-    ble_hs_id_set_rnd(rnd);
+    uint8_t identityAddr[6];
+    const bool randomStaticAddr = ficrAddressIsRandomStatic();
+    loadPublicAddress(identityAddr);
 
-    if (ble_hs_id_infer_auto(0, &g_ownAddrType) != 0) {
-        g_ownAddrType = BLE_OWN_ADDR_RANDOM;
+    if (randomStaticAddr) {
+        identityAddr[5] |= 0xC0U;
+        ble_hs_id_set_rnd(identityAddr);
     }
 
-    ble_hs_id_copy_addr(BLE_ADDR_RANDOM, g_publicAddress, nullptr);
+    if (ble_hs_id_infer_auto(0, &g_ownAddrType) != 0) {
+        g_ownAddrType = randomStaticAddr ? BLE_OWN_ADDR_RANDOM
+                                         : BLE_OWN_ADDR_PUBLIC;
+    }
+
+    ble_hs_id_copy_addr(randomStaticAddr ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC,
+                        g_publicAddress, nullptr);
 
     if (g_shouldAdvertise) {
         startAdvertisingInternal();
@@ -274,6 +349,9 @@ NimBLE::Status startAdvertisingInternal() {
     advParams.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
     advFields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    advFields.uuids128 = &NUS_SVC_UUID;
+    advFields.num_uuids128 = 1;
+    advFields.uuids128_is_complete = 1;
 
     rspFields.name = reinterpret_cast<const uint8_t *>(g_deviceName);
     rspFields.name_len = strlen(g_deviceName);
@@ -297,6 +375,10 @@ NimBLE::Status startAdvertisingInternal() {
     g_advertising = true;
     return NimBLE::NIMBLE_OK;
 }
+}
+
+extern "C" void nrfNimbleYieldPoll(void) {
+    NimBLE::poll();
 }
 
 NimBLE::Status NimBLE::begin(const char *deviceName) {
@@ -325,16 +407,17 @@ NimBLE::Status NimBLE::begin(const char *deviceName) {
     // Set host callbacks AFTER init (ble_hs_init may reset ble_hs_cfg).
     ble_hs_cfg.reset_cb = handleHostReset;
     ble_hs_cfg.sync_cb = handleHostSync;
-    // Register the NUS echo GATT service. Must happen after ble_hs_init (done in
-    // nimble_port_init) and before ble_hs_start (which calls ble_gatts_start).
+    if (deviceName != nullptr) {
+        strncpy(g_deviceName, deviceName, sizeof(g_deviceName) - 1);
+        g_deviceName[sizeof(g_deviceName) - 1] = '\0';
+    }
+    // Register standard GAP / GATT services plus the custom NUS echo service.
+    // This must happen after ble_hs_init (done in nimble_port_init) and before
+    // ble_hs_start (which calls ble_gatts_start).
     registerGattServices();
     g_portReady = nimble_port_get_dflt_eventq() != nullptr;
     if (!g_portReady) {
         return NIMBLE_INTERNAL;
-    }
-    if (deviceName != nullptr) {
-        strncpy(g_deviceName, deviceName, sizeof(g_deviceName) - 1);
-        g_deviceName[sizeof(g_deviceName) - 1] = '\0';
     }
     g_connected = false;
     g_synced = false;
@@ -379,6 +462,44 @@ bool NimBLE::isAvailable() {
 
 void NimBLE::poll() {
     pumpEvents();
+
+    if (!g_started || !g_synced) {
+        return;
+    }
+
+    if (g_connected && g_connHandle != BLE_HS_CONN_HANDLE_NONE) {
+        const int rc = ble_gap_conn_find(g_connHandle, nullptr);
+        if (rc != 0) {
+            g_poll_recover_dbg[0]++;
+            g_poll_recover_dbg[1] = (uint32_t)rc;
+            g_poll_recover_dbg[2] = g_connHandle;
+            g_connected = false;
+            g_advertising = false;
+            g_connHandle = BLE_HS_CONN_HANDLE_NONE;
+            g_connParamUpdatePending = false;
+            g_connParamUpdateReady = false;
+            g_connParamUpdateAttempts = 0;
+            g_conn_params_dbg[10] = 0;
+        } else if (g_connParamUpdatePending && g_connParamUpdateReady &&
+                   g_connParamUpdateAttempts < kMaxConnParamUpdateAttempts) {
+            g_connParamUpdateAttempts++;
+            g_conn_params_dbg[11] = g_connParamUpdateAttempts;
+            const int updateRc = requestFastConnectionParams(g_connHandle);
+            if (updateRc == 0 || updateRc == BLE_HS_EALREADY) {
+                g_connParamUpdatePending = false;
+                g_connParamUpdateReady = false;
+                g_conn_params_dbg[10] = 0;
+            } else if (updateRc != BLE_HS_EBUSY) {
+                g_connParamUpdatePending = false;
+                g_connParamUpdateReady = false;
+                g_conn_params_dbg[10] = 0;
+            }
+        }
+    }
+
+    if (g_shouldAdvertise && !g_connected && !g_advertising) {
+        g_poll_recover_dbg[3] = (uint32_t)startAdvertisingInternal();
+    }
 }
 
 NimBLE::Status NimBLE::startAdvertising() {

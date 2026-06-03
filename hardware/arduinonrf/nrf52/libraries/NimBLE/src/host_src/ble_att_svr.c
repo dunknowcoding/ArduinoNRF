@@ -656,6 +656,24 @@ ble_att_svr_tx_rsp(uint16_t conn_handle, uint16_t cid, int hs_status, struct os_
             ble_att_truncate_to_mtu(chan, om);
             ble_hs_unlock();
 
+            {
+                /* BRING-UP: capture first 16 bytes of each TX response PDU. */
+                extern volatile uint32_t g_atttx[64];
+                extern volatile uint32_t g_atttx_i;
+                uint8_t b[16] = {0};
+                uint16_t l = OS_MBUF_PKTLEN(om);
+                uint32_t base;
+                int i;
+                if (l > 16) l = 16;
+                os_mbuf_copydata(om, 0, l, b);
+                base = (g_atttx_i & 15) * 4;
+                for (i = 0; i < 4; i++) {
+                    g_atttx[base + i] = b[i*4] | (b[i*4+1] << 8) |
+                                        (b[i*4+2] << 16) | ((uint32_t)b[i*4+3] << 24);
+                }
+                g_atttx_i++;
+            }
+
             hs_status = ble_att_tx(conn_handle, cid, om);
             om = NULL;
             if (hs_status) {
@@ -1248,6 +1266,9 @@ done:
     return rc;
 }
 
+/* BRING-UP debug: Find-By-Type-Value request/response trace. */
+__attribute__((used)) volatile uint32_t g_ftv_dbg[6] = {0};
+
 int
 ble_att_svr_rx_find_type_value(uint16_t conn_handle, uint16_t cid, struct os_mbuf **rxom)
 {
@@ -1278,6 +1299,18 @@ ble_att_svr_rx_find_type_value(uint16_t conn_handle, uint16_t cid, struct os_mbu
     end_handle = le16toh(req->bavq_end_handle);
     attr_type = (ble_uuid16_t) BLE_UUID16_INIT(le16toh(req->bavq_attr_type));
 
+    {
+        /* BRING-UP: [0]=start [1]=end [2]=attr_type(0x2800) [3]=searched UUID
+         * [4]=build rc [5]=rsp txom len (0xFFFFFFFF=no rsp). */
+        extern volatile uint32_t g_ftv_dbg[6];
+        uint16_t srch_val = 0;
+        os_mbuf_copydata(*rxom, sizeof(*req), 2, &srch_val);
+        g_ftv_dbg[0] = start_handle;
+        g_ftv_dbg[1] = end_handle;
+        g_ftv_dbg[2] = le16toh(req->bavq_attr_type);
+        g_ftv_dbg[3] = srch_val;
+    }
+
     /* Tx error response if start handle is greater than end handle or is equal
      * to 0 (Vol. 3, Part F, 3.4.3.3).
      */
@@ -1290,6 +1323,19 @@ ble_att_svr_rx_find_type_value(uint16_t conn_handle, uint16_t cid, struct os_mbu
     rc = ble_att_svr_build_find_type_value_rsp(conn_handle, cid, start_handle,
                                                end_handle, attr_type, rxom,
                                                &txom, &att_err);
+    {
+        extern volatile uint32_t g_ftv_dbg[6];
+        g_ftv_dbg[4] = (uint32_t)rc;   /* build rc */
+        if (txom != NULL) {
+            /* rsp = opcode(1) + [found_handle(2) end_handle(2)]; capture them */
+            uint16_t fh = 0, eh = 0;
+            os_mbuf_copydata(txom, 1, 2, &fh);
+            os_mbuf_copydata(txom, 3, 2, &eh);
+            g_ftv_dbg[5] = ((uint32_t)eh << 16) | fh;   /* [5] = end<<16 | found */
+        } else {
+            g_ftv_dbg[5] = 0xFFFFFFFFUL;   /* no response built (att_err sent) */
+        }
+    }
     if (rc != 0) {
         err_handle = start_handle;
         goto done;

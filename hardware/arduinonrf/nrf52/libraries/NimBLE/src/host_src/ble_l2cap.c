@@ -53,6 +53,14 @@ STATS_NAME_START(ble_l2cap_stats)
     STATS_NAME(ble_l2cap_stats, sm_rx)
 STATS_NAME_END(ble_l2cap_stats)
 
+/* BRING-UP debug: completed host-side L2CAP SDUs. [0]=count [1]=last cid
+ * [2]=last len [3]=first 4 payload bytes of the last SDU. Ring stores
+ * len|cid<<16 and first 8 payload bytes for the last 8 SDUs. */
+__attribute__((used)) volatile uint32_t g_l2rx_dbg[4] = {0};
+__attribute__((used)) volatile uint32_t g_l2rx_ring[32] = {0};
+__attribute__((used)) volatile uint32_t g_l2rx_i = 0;
+__attribute__((used)) volatile uint32_t g_l2rx_state_dbg[8] = {0};
+
 struct ble_l2cap_chan *
 ble_l2cap_chan_alloc(uint16_t conn_handle)
 {
@@ -334,12 +342,16 @@ ble_l2cap_rx(uint16_t conn_handle, uint8_t pb, struct os_mbuf *om)
     int rc;
 
     ble_hs_lock();
+    g_l2rx_state_dbg[0]++;
+    g_l2rx_state_dbg[1] = pb;
+    g_l2rx_state_dbg[2] = OS_MBUF_PKTLEN(om);
 
     conn = ble_hs_conn_find(conn_handle);
     if (!conn) {
         /* Invalid connection handle, discard packet */
         os_mbuf_free_chain(om);
         rc = BLE_HS_ENOTCONN;
+        g_l2rx_state_dbg[7] = (uint32_t)rc;
         goto done;
     }
 
@@ -381,9 +393,11 @@ ble_l2cap_rx(uint16_t conn_handle, uint8_t pb, struct os_mbuf *om)
     /* Parse L2CAP header if not yet done */
     if (!conn->rx_len) {
         rc = ble_l2cap_parse_hdr(conn->rx_frags, &hdr);
+        g_l2rx_state_dbg[3] = (uint32_t)rc;
         if (rc) {
             /* Incomplete header, wait for continuation */
             rc = BLE_HS_EAGAIN;
+            g_l2rx_state_dbg[7] = (uint32_t)rc;
             goto done;
         }
 
@@ -391,17 +405,52 @@ ble_l2cap_rx(uint16_t conn_handle, uint8_t pb, struct os_mbuf *om)
 
         conn->rx_len = hdr.len;
         conn->rx_cid = hdr.cid;
+        g_l2rx_state_dbg[4] = hdr.len;
+        g_l2rx_state_dbg[5] = hdr.cid;
+        g_l2rx_state_dbg[6] = OS_MBUF_PKTLEN(conn->rx_frags);
     }
 
     /* Process fragments */
     rc = ble_l2cap_rx_frags_process(conn);
     if (rc) {
+        g_l2rx_state_dbg[7] = (uint32_t)rc;
         goto done;
     }
 
     rx_frags = conn->rx_frags;
     rx_len = conn->rx_len;
     rx_cid = conn->rx_cid;
+
+    {
+        extern volatile uint32_t g_l2rx_dbg[4];
+        extern volatile uint32_t g_l2rx_ring[32];
+        extern volatile uint32_t g_l2rx_i;
+        uint8_t sample[8] = {0};
+        uint16_t copy_len;
+        uint32_t base;
+
+        copy_len = rx_len;
+        if (copy_len > sizeof(sample)) {
+            copy_len = sizeof(sample);
+        }
+        if (copy_len > 0) {
+            os_mbuf_copydata(rx_frags, 0, copy_len, sample);
+        }
+
+        g_l2rx_dbg[0]++;
+        g_l2rx_dbg[1] = rx_cid;
+        g_l2rx_dbg[2] = rx_len;
+        g_l2rx_dbg[3] = sample[0] | (sample[1] << 8) |
+                        (sample[2] << 16) | ((uint32_t)sample[3] << 24);
+
+        base = (g_l2rx_i & 7) * 4;
+        g_l2rx_ring[base + 0] = rx_len | ((uint32_t)rx_cid << 16);
+        g_l2rx_ring[base + 1] = g_l2rx_dbg[3];
+        g_l2rx_ring[base + 2] = sample[4] | (sample[5] << 8) |
+                                (sample[6] << 16) | ((uint32_t)sample[7] << 24);
+        g_l2rx_ring[base + 3] = pb;
+        g_l2rx_i++;
+    }
 
     conn->rx_frags = NULL;
     ble_l2cap_rx_free(conn);
@@ -436,6 +485,7 @@ ble_l2cap_rx(uint16_t conn_handle, uint8_t pb, struct os_mbuf *om)
     }
 
     rc = chan->rx_fn(chan, &rx_frags);
+    g_l2rx_state_dbg[7] = (uint32_t)rc;
     os_mbuf_free_chain(rx_frags);
 
     return rc;
