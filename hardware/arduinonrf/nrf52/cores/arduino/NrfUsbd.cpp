@@ -231,6 +231,59 @@ inline void disableNvicIrq(uint32_t irqNumber) {
     reg32(NVIC_ICER_BASE, (irqNumber / 32UL) * 4UL) = 1UL << (irqNumber % 32UL);
 }
 
+inline bool nvicIrqEnabled(uint32_t irqNumber) {
+    return (reg32(NVIC_ISER_BASE, (irqNumber / 32UL) * 4UL) & (1UL << (irqNumber % 32UL))) != 0UL;
+}
+
+// NVIC priority registers are byte-addressable, one byte per IRQ. The nRF52840
+// (Cortex-M4) implements the top 3 bits of the 8-bit field, so a logical
+// priority 0..7 lives in bits [7:5].
+constexpr uint32_t NVIC_IPR_BASE = 0xE000E400UL;
+inline void setNvicPriority(uint32_t irqNumber, uint8_t priority) {
+    *reinterpret_cast<volatile uint8_t *>(NVIC_IPR_BASE + irqNumber) =
+        static_cast<uint8_t>((priority << 5) & 0xE0U);
+}
+
+// RAII mutual-exclusion between foreground USB servicing and the USBD ISR.
+//
+// Once the USBD interrupt is enabled (the default for every board option except
+// the historical promicroserialnosd poll-only override), processBusState() /
+// serviceDataIn() / serviceSetup() run from irqHandler() AND can still be
+// reached from foreground (Serial.write -> serviceDataIn, flush(), poll() via
+// yield()). They share USBD EasyDMA registers, the in-flight flags, and the
+// TX-ring consumer cursor, so the two contexts must never overlap.
+//
+// Masking the USBD IRQ at the NVIC for the duration of a foreground critical
+// section gives clean exclusion: the ISR runs at higher priority than any
+// foreground code, so it can only start *between* foreground instructions --
+// blocking it here means it cannot preempt us, and any event that arrives while
+// masked simply stays pending and is taken the instant we unmask. The guard
+// saves and restores the prior enable state, so it is a zero-cost no-op when the
+// IRQ is disabled (poll-only builds, or while the GDB stub holds it masked) and
+// nests correctly.
+class UsbdIrqLock {
+public:
+    UsbdIrqLock() : reenable_(nvicIrqEnabled(USBD_IRQ_NUMBER)) {
+        if (reenable_) {
+            disableNvicIrq(USBD_IRQ_NUMBER);
+            // Ensure the NVIC disable has taken architectural effect before the
+            // critical section runs, so no USBD IRQ can still be in flight.
+            asm volatile("dsb 0xf" ::: "memory");
+            asm volatile("isb 0xf" ::: "memory");
+        }
+    }
+    ~UsbdIrqLock() {
+        if (reenable_) {
+            enableNvicIrq(USBD_IRQ_NUMBER);
+        }
+    }
+    UsbdIrqLock(const UsbdIrqLock &) = delete;
+    UsbdIrqLock &operator=(const UsbdIrqLock &) = delete;
+
+private:
+    const bool reenable_;
+};
+
 inline uint32_t taskStartEpinOffset(uint8_t endpoint) {
     return TASKS_STARTEPIN_BASE + (static_cast<uint32_t>(endpoint) * 4UL);
 }
@@ -635,7 +688,6 @@ void NrfUsbdDriver::begin() {
     // activity from racing the analog block.
     spinUntil([]() { return usbPwrRdy(); });
 
-    enableInterrupts();
     enabled_ = true;
     started_ = true;
     attached_ = true;
@@ -645,6 +697,11 @@ void NrfUsbdDriver::begin() {
     // only clear it in end()), because the one-shot EVENTCAUSE.READY event was
     // already consumed during the ENABLE handshake and won't fire again.
     ready_ = true;
+    // Enable the USBD interrupt only now that all device state is initialized,
+    // and immediately before engaging the pullup that makes the host begin
+    // enumeration. From here on, enumeration is serviced in the ISR and is
+    // therefore immune to whatever the user sketch's loop() does.
+    enableInterrupts();
     enablePullup(attached_ && effectiveVbusDetected());
     configStartMillis_ = millis();
     diagResetAtUsbdBeginStage(6UL);
@@ -713,6 +770,13 @@ void NrfUsbdDriver::poll() {
     if (pollTraceEnabled()) {
         ++g_usbdPollTrace.pollCalls;
     }
+
+    // Serialize against the USBD ISR: poll() and irqHandler() run the same
+    // servicing routines and touch the same registers/state. With the IRQ live
+    // (interrupt-driven builds) this mask makes the whole foreground pass atomic
+    // w.r.t. the ISR; on poll-only builds the IRQ is disabled and this is a
+    // no-op.
+    UsbdIrqLock lock;
 
     const bool hasVbus = effectiveVbusDetected();
     enablePullup(attached_ && hasVbus);
@@ -1146,6 +1210,7 @@ size_t NrfUsbdDriver::write(uint8_t value) {
         return 0U;
     }
     if (configured_ && !suspended_) {
+        UsbdIrqLock lock;
         serviceDataIn(false);
     }
     return 1U;
@@ -1155,6 +1220,7 @@ void NrfUsbdDriver::kickServiceDataIn() {
     if (!enabled_ || !configured_ || suspended_) {
         return;
     }
+    UsbdIrqLock lock;
     serviceDataIn(false);
     serviceNotificationIn(false);
 }
@@ -1163,7 +1229,14 @@ bool NrfUsbdDriver::sendInPacket(uint8_t endpoint, const void *data, size_t leng
     if (!enabled_ || !attached_ || !configured_ || suspended_ || data == nullptr) {
         return false;
     }
-    if (endpoint < firstDynamicEndpoint() || endpoint >= USB_MAX_ENDPOINTS || dynamicInBusy_[endpoint]) {
+    if (endpoint < firstDynamicEndpoint() || endpoint >= USB_MAX_ENDPOINTS) {
+        return false;
+    }
+
+    // Hold the busy test-and-set plus the EasyDMA kick atomic against the ISR,
+    // which clears dynamicInBusy_[endpoint] on ENDEPIN completion.
+    UsbdIrqLock lock;
+    if (dynamicInBusy_[endpoint]) {
         return false;
     }
 
@@ -1188,6 +1261,11 @@ void NrfUsbdDriver::flush() {
     if (!enabled_ || !configured_ || suspended_) {
         return;
     }
+
+    // The drain loop calls processBusState()/serviceDataIn() itself, so keep the
+    // whole pass mutually exclusive with the ISR; events that arrive meanwhile
+    // latch and are taken the moment we return and unmask.
+    UsbdIrqLock lock;
 
     if (stubHalted_) {
         // While the GDB stub is halted SysTick is stopped, so millis() is
@@ -1227,6 +1305,9 @@ void NrfUsbdDriver::injectRx(const uint8_t *data, size_t length) {
         return;
     }
 
+    // serviceDataOut() (ISR) is the other producer into the service RX ring;
+    // serialize so the two producers never interleave a head update.
+    UsbdIrqLock lock;
     for (size_t index = 0; index < length; ++index) {
         ringPushRx(data[index]);
     }
@@ -1258,6 +1339,7 @@ size_t NrfUsbdDriver::userWrite(uint8_t value) {
         return 0U;
     }
     if (configured_ && !suspended_) {
+        UsbdIrqLock lock;
         serviceDataIn(true);
     }
     return 1U;
@@ -1268,6 +1350,7 @@ void NrfUsbdDriver::userFlush() {
         return;
     }
 
+    UsbdIrqLock lock;
     const uint32_t start = millis();
     while ((userTxPending() != 0U || userDataInFlight_) && enabled_) {
         processBusState(effectiveVbusDetected());
@@ -1461,6 +1544,11 @@ void NrfUsbdDriver::enableInterrupts() {
         USBD_INT_EP0SETUP_MASK |
         USBD_INT_EPDATA_MASK;
     reg32(USBD_BASE, INTENSET) = interruptMask;
+    // Run USB at a low preemption priority (6 of 0..7) so genuinely
+    // time-critical ISRs -- the BLE radio/timer chain in particular -- always
+    // win the arbitration. USB enumeration tolerates the small added latency,
+    // and the foreground critical sections (UsbdIrqLock) keep it race-free.
+    setNvicPriority(USBD_IRQ_NUMBER, 6U);
     enableNvicIrq(USBD_IRQ_NUMBER);
 }
 
