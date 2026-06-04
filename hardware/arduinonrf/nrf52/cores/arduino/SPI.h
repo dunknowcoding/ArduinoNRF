@@ -51,9 +51,14 @@ public:
     SPIClass(uint32_t peripheralBase, uint8_t misoPin, uint8_t mosiPin, uint8_t sckPin);
 
     void begin();
-    // Begin on explicit pins (Arduino "Dn" numbers), in (SCK, MISO, MOSI) order,
-    // e.g. SPI.begin(SCK, MISO, MOSI) or SPI.begin(2, 3, 4). Overrides defaults.
-    void begin(uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin);
+    // Begin on explicit pins (Arduino "Dn" numbers), in (SCK, MISO, MOSI[, SS])
+    // order, e.g. SPI.begin(SCK, MISO, MOSI) or SPI.begin(2, 3, 4, 5).
+    // NOTE on chip-select: SPI (like every Arduino SPI core) does NOT drive CS
+    // automatically - you toggle it yourself around a transfer:
+    //     digitalWrite(cs, LOW); SPI.transfer(...); digitalWrite(cs, HIGH);
+    // Passing the optional ssPin here is just a convenience: it is configured as
+    // an OUTPUT driven HIGH (idle). Leave it off if you manage CS yourself.
+    void begin(uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin, uint8_t ssPin = 0xFFU);
     void end();
     void beginTransaction(const SPISettings &settings);
     void endTransaction();

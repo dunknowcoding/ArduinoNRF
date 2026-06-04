@@ -26,11 +26,9 @@ public:
     bool rts() const;
 
 private:
-    void configureUart();
-    void pollReceive();
+    void configureUart();   // brings up UARTE0 (DMA) for the hardware Serial1
     unsigned long baudRate_;
     bool usbBacked_;
-    int peekedValue_;
     bool enabled_;
 };
 

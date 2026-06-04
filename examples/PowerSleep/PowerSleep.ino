@@ -20,7 +20,7 @@ constexpr uint8_t WAKE_PIN = 11;     // Arduino-numbered
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000UL) {}
+  while (!Serial) {}
 
   Serial.println(F("NrfPower demo"));
   const uint32_t rr = NrfPower::getResetReason();

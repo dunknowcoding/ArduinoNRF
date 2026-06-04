@@ -18,7 +18,7 @@ void onEguTrigger() { ++g_eguTicks; }
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000UL) {}
+  while (!Serial) {}
   Serial.println(F("EguCompGpiotePpi"));
 
   pinMode(LED_BUILTIN, OUTPUT);

@@ -12,9 +12,7 @@ void setup() {
     // SerialService is backed by the fixed IF0/1 CDC pair and is active even
     // when the user CDC port is disabled in the boards.txt menu.
     SerialService.begin(115200);
-    while (!SerialService && millis() < 5000) {
-        delay(10);
-    }
+    while (!SerialService) {}
     SerialService.println("=== USB serial example (service port) ===");
 
     // Print startup diagnostics on the service port so they are visible
@@ -33,10 +31,7 @@ void setup() {
 #if defined(NRF_SYSTEM_HAS_USB_CDC) && (NRF_SYSTEM_HAS_USB_CDC == 1)
     // --- User CDC (optional, enabled when usbcdc=enabled in boards.txt) ---
     Serial.begin(115200);
-    uint32_t waitStart = millis();
-    while (!Serial && (millis() - waitStart) < 3000) {
-        delay(10);
-    }
+    while (!Serial) {}
     Serial.println("=== USB serial example (user port) ===");
     Serial.print("user_dtr=");
     Serial.println(Serial.dtr() ? "yes" : "no");

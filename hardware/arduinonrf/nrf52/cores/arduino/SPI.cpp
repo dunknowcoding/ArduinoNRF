@@ -95,7 +95,7 @@ void SPIClass::begin() {
     }
 }
 
-void SPIClass::begin(uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin) {
+void SPIClass::begin(uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin, uint8_t ssPin) {
     if (enabled_ && (sckPin_ != sckPin || misoPin_ != misoPin || mosiPin_ != mosiPin)) {
         end();
     }
@@ -103,6 +103,12 @@ void SPIClass::begin(uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin) {
     misoPin_ = misoPin;
     mosiPin_ = mosiPin;
     begin();
+    // Convenience only: park the chip-select idle-high. SPI never drives it
+    // during transfers - the sketch toggles it around each transaction.
+    if (ssPin != 0xFFU) {
+        pinMode(ssPin, OUTPUT);
+        digitalWrite(ssPin, HIGH);
+    }
 }
 
 bool SPIClass::ensureEnabled() {

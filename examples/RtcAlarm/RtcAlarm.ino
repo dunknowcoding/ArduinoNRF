@@ -34,7 +34,7 @@ void onOverflow() {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000UL) {}
+  while (!Serial) {}
   Serial.println(F("NrfRtc demo (RTC2 @ 1 kHz, alarm every 500 ms)"));
 
   pinMode(LED_BUILTIN, OUTPUT);

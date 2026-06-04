@@ -10,9 +10,7 @@ void printYesNo(bool value) {
 
 void setup() {
     Serial.begin(115200);
-    while (!Serial && millis() < 500) {
-        delay(10);
-    }
+    while (!Serial) {}
 
     Serial.print("qspi-present=");
     printYesNo(NordicHardware.qspiPresent());

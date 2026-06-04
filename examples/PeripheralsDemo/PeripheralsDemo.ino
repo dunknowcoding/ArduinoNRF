@@ -11,7 +11,7 @@
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000UL) {}
+  while (!Serial) {}
 
   Serial.println(F("PeripheralsDemo"));
 

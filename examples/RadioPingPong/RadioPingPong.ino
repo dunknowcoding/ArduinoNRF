@@ -23,7 +23,7 @@ static const uint8_t kChannel    = 76;   // 2476 MHz - clear of common Wi-Fi
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000UL) {}
+  while (!Serial) {}
 
   Serial.println(F("RadioPingPong"));
 

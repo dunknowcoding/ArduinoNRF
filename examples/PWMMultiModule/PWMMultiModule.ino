@@ -12,7 +12,7 @@
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000UL) {}
+  while (!Serial) {}
 
   Serial.println(F("PWM multi-module demo"));
   Serial.print(F("channels total: "));

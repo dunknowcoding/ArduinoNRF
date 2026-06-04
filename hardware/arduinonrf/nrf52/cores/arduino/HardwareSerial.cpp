@@ -12,26 +12,58 @@ namespace {
 inline bool nrfSerialUsbUsesServicePortOnly() {
     return nrfUsbRuntimeEnabled() && !nrfUsbUserPortEnabled();
 }
-constexpr uint32_t UART0_BASE = 0x40002000UL;
+// Serial1 is driven by UARTE0 (EasyDMA), NOT the legacy UART. UARTE and the
+// legacy UART are two register views of the SAME peripheral instance (0x40002000)
+// and must never be enabled at the same time; this core uses UARTE exclusively,
+// so there is no UART/UARTE conflict. RX is interrupt-driven into a ring buffer,
+// so bytes are no longer dropped between read() calls the way the old polled
+// legacy-UART path could.
+constexpr uint32_t UARTE0_BASE = 0x40002000UL;
 constexpr uint32_t NRF_PSEL_DISCONNECTED = 0xFFFFFFFFUL;
-constexpr uint32_t UART_TASKS_STARTRX = 0x000UL;
-constexpr uint32_t UART_TASKS_STOPRX = 0x004UL;
-constexpr uint32_t UART_TASKS_STARTTX = 0x008UL;
-constexpr uint32_t UART_TASKS_STOPTX = 0x00CUL;
-constexpr uint32_t UART_EVENTS_RXDRDY = 0x108UL;
-constexpr uint32_t UART_EVENTS_TXDRDY = 0x11CUL;
-constexpr uint32_t UART_ENABLE = 0x500UL;
-constexpr uint32_t UART_PSELRTS = 0x508UL;
-constexpr uint32_t UART_PSELTXD = 0x50CUL;
-constexpr uint32_t UART_PSELCTS = 0x510UL;
-constexpr uint32_t UART_PSELRXD = 0x514UL;
-constexpr uint32_t UART_RXD = 0x518UL;
-constexpr uint32_t UART_TXD = 0x51CUL;
-constexpr uint32_t UART_BAUDRATE = 0x524UL;
-constexpr uint32_t UART_CONFIG = 0x56CUL;
-constexpr uint32_t UART_ENABLE_DISABLED = 0UL;
-constexpr uint32_t UART_ENABLE_ENABLED = 4UL;
+constexpr uint32_t UARTE_TASKS_STARTRX = 0x000UL;
+constexpr uint32_t UARTE_TASKS_STOPRX  = 0x004UL;
+constexpr uint32_t UARTE_TASKS_STARTTX = 0x008UL;
+constexpr uint32_t UARTE_TASKS_STOPTX  = 0x00CUL;
+constexpr uint32_t UARTE_EVENTS_ENDRX  = 0x110UL;
+constexpr uint32_t UARTE_EVENTS_ENDTX  = 0x120UL;
+constexpr uint32_t UARTE_SHORTS    = 0x200UL;
+constexpr uint32_t UARTE_INTENSET  = 0x304UL;
+constexpr uint32_t UARTE_INTENCLR  = 0x308UL;
+constexpr uint32_t UARTE_ENABLE    = 0x500UL;
+constexpr uint32_t UARTE_PSELRTS   = 0x508UL;
+constexpr uint32_t UARTE_PSELTXD   = 0x50CUL;
+constexpr uint32_t UARTE_PSELCTS   = 0x510UL;
+constexpr uint32_t UARTE_PSELRXD   = 0x514UL;
+constexpr uint32_t UARTE_RXD_PTR    = 0x534UL;
+constexpr uint32_t UARTE_RXD_MAXCNT = 0x538UL;
+constexpr uint32_t UARTE_TXD_PTR    = 0x544UL;
+constexpr uint32_t UARTE_TXD_MAXCNT = 0x548UL;
+constexpr uint32_t UARTE_BAUDRATE  = 0x524UL;
+constexpr uint32_t UARTE_CONFIG    = 0x56CUL;
+constexpr uint32_t UARTE_ENABLE_DISABLED = 0UL;
+constexpr uint32_t UARTE_ENABLE_ENABLED  = 8UL;   // 8 = UARTE (4 would be legacy UART)
+constexpr uint32_t UARTE_SHORTS_ENDRX_STARTRX = (1UL << 5);
+constexpr uint32_t UARTE_INT_ENDRX = (1UL << 4);
+constexpr uint32_t UARTE0_IRQ_NUMBER = 2UL;       // UARTE0_UART0
 constexpr uint32_t UART_TIMEOUT_SPINS = 200000UL;
+
+inline void nvicEnableIrq(uint32_t irq) {
+    *reinterpret_cast<volatile uint32_t *>(0xE000E100UL + (irq / 32UL) * 4UL) = 1UL << (irq % 32UL);
+}
+inline void nvicDisableIrq(uint32_t irq) {
+    *reinterpret_cast<volatile uint32_t *>(0xE000E180UL + (irq / 32UL) * 4UL) = 1UL << (irq % 32UL);
+}
+
+// UARTE0 RX state: a 1-byte EasyDMA target plus a software ring the ISR fills.
+// The ENDRX_STARTRX short auto-restarts RX, so by the time the ENDRX interrupt
+// copies the byte the hardware is already receiving the next one. (Power-of-two
+// ring size lets us mask instead of modulo.)
+constexpr uint16_t UARTE_RX_RING_SIZE = 256;
+volatile uint8_t  g_uarteRxRing[UARTE_RX_RING_SIZE];
+volatile uint16_t g_uarteRxHead = 0;   // advanced by the ISR (producer)
+volatile uint16_t g_uarteRxTail = 0;   // advanced by read() (consumer)
+uint8_t  g_uarteRxByte = 0;            // EasyDMA RX target (must live in RAM)
+uint8_t  g_uarteTxByte = 0;            // EasyDMA TX source (must live in RAM)
 
 inline volatile uint32_t &reg32(uint32_t base, uint32_t offset) {
     return *reinterpret_cast<volatile uint32_t *>(base + offset);
@@ -74,7 +106,7 @@ HardwareSerial Serial(true);
 HardwareSerial Serial1(false);
 
 HardwareSerial::HardwareSerial(bool usbBacked)
-    : baudRate_(0), usbBacked_(usbBacked), peekedValue_(-1), enabled_(false) {
+    : baudRate_(0), usbBacked_(usbBacked), enabled_(false) {
 }
 
 void HardwareSerial::begin(unsigned long baudRate) {
@@ -103,18 +135,20 @@ void HardwareSerial::begin(unsigned long baudRate, uint16_t config) {
 
 void HardwareSerial::end(void) {
     if (!usbBacked_) {
-        reg32(UART0_BASE, UART_TASKS_STOPRX) = 1UL;
-        reg32(UART0_BASE, UART_TASKS_STOPTX) = 1UL;
-        reg32(UART0_BASE, UART_ENABLE) = UART_ENABLE_DISABLED;
-        reg32(UART0_BASE, UART_PSELTXD) = NRF_PSEL_DISCONNECTED;
-        reg32(UART0_BASE, UART_PSELRXD) = NRF_PSEL_DISCONNECTED;
-        reg32(UART0_BASE, UART_PSELRTS) = NRF_PSEL_DISCONNECTED;
-        reg32(UART0_BASE, UART_PSELCTS) = NRF_PSEL_DISCONNECTED;
+        nvicDisableIrq(UARTE0_IRQ_NUMBER);
+        reg32(UARTE0_BASE, UARTE_INTENCLR) = 0xFFFFFFFFUL;
+        reg32(UARTE0_BASE, UARTE_SHORTS) = 0UL;
+        reg32(UARTE0_BASE, UARTE_TASKS_STOPRX) = 1UL;
+        reg32(UARTE0_BASE, UARTE_TASKS_STOPTX) = 1UL;
+        reg32(UARTE0_BASE, UARTE_ENABLE) = UARTE_ENABLE_DISABLED;
+        reg32(UARTE0_BASE, UARTE_PSELTXD) = NRF_PSEL_DISCONNECTED;
+        reg32(UARTE0_BASE, UARTE_PSELRXD) = NRF_PSEL_DISCONNECTED;
+        reg32(UARTE0_BASE, UARTE_PSELRTS) = NRF_PSEL_DISCONNECTED;
+        reg32(UARTE0_BASE, UARTE_PSELCTS) = NRF_PSEL_DISCONNECTED;
     } else {
         nrfUsbSerialBackend().end();
     }
     baudRate_ = 0;
-    peekedValue_ = -1;
     enabled_ = false;
 }
 
@@ -125,11 +159,7 @@ int HardwareSerial::available(void) {
         }
         return nrfUsbSerialBackend().available();
     }
-    pollReceive();
-    if (peekedValue_ >= 0) {
-        return 1;
-    }
-    return 0;
+    return static_cast<int>((g_uarteRxHead - g_uarteRxTail) & (UARTE_RX_RING_SIZE - 1));
 }
 
 int HardwareSerial::read(void) {
@@ -139,10 +169,12 @@ int HardwareSerial::read(void) {
         }
         return nrfUsbSerialBackend().read();
     }
-    pollReceive();
-    int current = peekedValue_;
-    peekedValue_ = -1;
-    return current;
+    if (g_uarteRxHead == g_uarteRxTail) {
+        return -1;
+    }
+    uint8_t value = g_uarteRxRing[g_uarteRxTail];
+    g_uarteRxTail = (g_uarteRxTail + 1) & (UARTE_RX_RING_SIZE - 1);
+    return value;
 }
 
 int HardwareSerial::peek(void) {
@@ -152,8 +184,10 @@ int HardwareSerial::peek(void) {
         }
         return nrfUsbSerialBackend().peek();
     }
-    pollReceive();
-    return peekedValue_;
+    if (g_uarteRxHead == g_uarteRxTail) {
+        return -1;
+    }
+    return g_uarteRxRing[g_uarteRxTail];
 }
 
 void HardwareSerial::flush(void) {
@@ -170,8 +204,9 @@ void HardwareSerial::flush(void) {
         return;
     }
 
+    // write() blocks until each byte's ENDTX, so nothing is in flight here.
     for (uint32_t spin = 0; spin < UART_TIMEOUT_SPINS; ++spin) {
-        if (reg32(UART0_BASE, UART_EVENTS_TXDRDY) != 0UL) {
+        if (reg32(UARTE0_BASE, UARTE_EVENTS_ENDTX) != 0UL) {
             break;
         }
     }
@@ -194,13 +229,20 @@ size_t HardwareSerial::write(uint8_t value) {
         begin(actualBaudRate);
     }
 
-    reg32(UART0_BASE, UART_EVENTS_TXDRDY) = 0UL;
-    reg32(UART0_BASE, UART_TXD) = value;
+    // Send one byte via EasyDMA: stage it in RAM, point TXD at it, MAXCNT=1,
+    // STARTTX, then wait for ENDTX. (TX and RX use separate DMA, so this does
+    // not disturb the continuous RX.)
+    g_uarteTxByte = value;
+    reg32(UARTE0_BASE, UARTE_TXD_PTR) = reinterpret_cast<uint32_t>(&g_uarteTxByte);
+    reg32(UARTE0_BASE, UARTE_TXD_MAXCNT) = 1UL;
+    reg32(UARTE0_BASE, UARTE_EVENTS_ENDTX) = 0UL;
+    reg32(UARTE0_BASE, UARTE_TASKS_STARTTX) = 1UL;
     for (uint32_t spin = 0; spin < UART_TIMEOUT_SPINS; ++spin) {
-        if (reg32(UART0_BASE, UART_EVENTS_TXDRDY) != 0UL) {
-            return 1;
+        if (reg32(UARTE0_BASE, UARTE_EVENTS_ENDTX) != 0UL) {
+            break;
         }
     }
+    reg32(UARTE0_BASE, UARTE_TASKS_STOPTX) = 1UL;
     return 1;
 }
 
@@ -288,31 +330,49 @@ void HardwareSerial::configureUart() {
     }
 
     pinMode(PIN_SERIAL_TX, OUTPUT);
+    digitalWrite(PIN_SERIAL_TX, HIGH);     // UART line idles high
     pinMode(PIN_SERIAL_RX, INPUT_PULLUP);
-    reg32(UART0_BASE, UART_ENABLE) = UART_ENABLE_DISABLED;
-    reg32(UART0_BASE, UART_PSELTXD) = rawTx;
-    reg32(UART0_BASE, UART_PSELRXD) = rawRx;
-    reg32(UART0_BASE, UART_PSELRTS) = NRF_PSEL_DISCONNECTED;
-    reg32(UART0_BASE, UART_PSELCTS) = NRF_PSEL_DISCONNECTED;
-    reg32(UART0_BASE, UART_CONFIG) = 0UL;
+
+    reg32(UARTE0_BASE, UARTE_ENABLE) = UARTE_ENABLE_DISABLED;
+    reg32(UARTE0_BASE, UARTE_PSELTXD) = rawTx;
+    reg32(UARTE0_BASE, UARTE_PSELRXD) = rawRx;
+    reg32(UARTE0_BASE, UARTE_PSELRTS) = NRF_PSEL_DISCONNECTED;
+    reg32(UARTE0_BASE, UARTE_PSELCTS) = NRF_PSEL_DISCONNECTED;
+    reg32(UARTE0_BASE, UARTE_CONFIG) = 0UL;     // 8 data bits, no parity, 1 stop, no HW flow
     unsigned long actualBaudRate = baudRate_;
     if (actualBaudRate == 0UL) {
         actualBaudRate = 115200UL;
     }
-    reg32(UART0_BASE, UART_BAUDRATE) = baudRegisterValue(actualBaudRate);
-    reg32(UART0_BASE, UART_ENABLE) = UART_ENABLE_ENABLED;
-    reg32(UART0_BASE, UART_TASKS_STARTTX) = 1UL;
-    reg32(UART0_BASE, UART_TASKS_STARTRX) = 1UL;
+    reg32(UARTE0_BASE, UARTE_BAUDRATE) = baudRegisterValue(actualBaudRate);
+
+    // Continuous 1-byte DMA RX: point RXD at our byte, MAXCNT=1, and let the
+    // ENDRX_STARTRX short re-arm RX automatically. The ENDRX interrupt copies
+    // the byte into the ring.
+    g_uarteRxHead = 0;
+    g_uarteRxTail = 0;
+    reg32(UARTE0_BASE, UARTE_RXD_PTR) = reinterpret_cast<uint32_t>(&g_uarteRxByte);
+    reg32(UARTE0_BASE, UARTE_RXD_MAXCNT) = 1UL;
+    reg32(UARTE0_BASE, UARTE_SHORTS) = UARTE_SHORTS_ENDRX_STARTRX;
+    reg32(UARTE0_BASE, UARTE_EVENTS_ENDRX) = 0UL;
+    reg32(UARTE0_BASE, UARTE_INTENCLR) = 0xFFFFFFFFUL;
+    reg32(UARTE0_BASE, UARTE_INTENSET) = UARTE_INT_ENDRX;
+    nvicEnableIrq(UARTE0_IRQ_NUMBER);
+
+    reg32(UARTE0_BASE, UARTE_ENABLE) = UARTE_ENABLE_ENABLED;
+    reg32(UARTE0_BASE, UARTE_TASKS_STARTRX) = 1UL;
     enabled_ = true;
 }
 
-void HardwareSerial::pollReceive() {
-    if (peekedValue_ >= 0 || usbBacked_ || !enabled_) {
-        return;
-    }
-
-    if (reg32(UART0_BASE, UART_EVENTS_RXDRDY) != 0UL) {
-        reg32(UART0_BASE, UART_EVENTS_RXDRDY) = 0UL;
-        peekedValue_ = static_cast<int>(reg32(UART0_BASE, UART_RXD) & 0xFFUL);
+// UARTE0 RX interrupt: one byte has landed in g_uarteRxByte via EasyDMA and the
+// ENDRX_STARTRX short has already re-armed RX for the next one. Copy the byte
+// into the software ring (dropping it only if the ring is full).
+extern "C" void UARTE0_UART0_IRQHandler(void) {
+    if (reg32(UARTE0_BASE, UARTE_EVENTS_ENDRX) != 0UL) {
+        reg32(UARTE0_BASE, UARTE_EVENTS_ENDRX) = 0UL;
+        uint16_t next = (g_uarteRxHead + 1) & (UARTE_RX_RING_SIZE - 1);
+        if (next != g_uarteRxTail) {
+            g_uarteRxRing[g_uarteRxHead] = g_uarteRxByte;
+            g_uarteRxHead = next;
+        }
     }
 }

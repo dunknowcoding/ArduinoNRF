@@ -25,7 +25,7 @@ void onFieldLost() {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000UL) {}
+  while (!Serial) {}
   pinMode(LED_BUILTIN, OUTPUT);
 
   NrfNfcTag &tag = nrfNfcTag();

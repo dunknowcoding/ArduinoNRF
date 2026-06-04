@@ -6,9 +6,7 @@
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 1000UL) {
-    delay(10);
-  }
+  while (!Serial) {}
   pinMode(A0, INPUT);
 }
 

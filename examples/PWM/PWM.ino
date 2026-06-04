@@ -8,9 +8,7 @@ static const uint8_t kFadePin = LED_BUILTIN;   // P0.15, the one on-board LED
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 1000UL) {
-    delay(10);
-  }
+  while (!Serial) {}
 
   // 10-bit duty (0..1023). analogWriteFrequency() returns false if the carrier
   // cannot be produced at the current resolution.
