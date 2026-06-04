@@ -9,8 +9,14 @@ constexpr uint32_t NRF_PSEL_DISCONNECTED = 0xFFFFFFFFUL;
 constexpr uint32_t TWI_TASKS_STARTRX = 0x000UL;
 constexpr uint32_t TWI_TASKS_STARTTX = 0x008UL;
 constexpr uint32_t TWI_TASKS_STOP = 0x014UL;
+constexpr uint32_t TWI_TASKS_SUSPEND = 0x01CUL;
+constexpr uint32_t TWI_TASKS_RESUME = 0x020UL;
+constexpr uint32_t TWI_SHORTS = 0x200UL;
+constexpr uint32_t TWI_SHORTS_BB_SUSPEND = (1UL << 0);
+constexpr uint32_t TWI_SHORTS_BB_STOP = (1UL << 1);
 constexpr uint32_t TWI_EVENTS_STOPPED = 0x104UL;
 constexpr uint32_t TWI_EVENTS_RXDREADY = 0x108UL;
+constexpr uint32_t TWI_EVENTS_BB = 0x138UL;
 constexpr uint32_t TWI_EVENTS_TXDSENT = 0x11CUL;
 constexpr uint32_t TWI_EVENTS_ERROR = 0x124UL;
 constexpr uint32_t TWI_ERRORSRC = 0x4C4UL;
@@ -257,9 +263,9 @@ uint8_t TwoWire::requestFrom(uint8_t address, uint8_t quantity, bool sendStop) {
         }
     }
 
-    length_ = quantity;
-    if (length_ > sizeof(buffer_)) {
-        length_ = sizeof(buffer_);
+    size_t request = quantity;
+    if (request > sizeof(buffer_)) {
+        request = sizeof(buffer_);
     }
     readIndex_ = 0;
 
@@ -267,25 +273,55 @@ uint8_t TwoWire::requestFrom(uint8_t address, uint8_t quantity, bool sendStop) {
     reg32(peripheralBase_, TWI_ERRORSRC) = 0xFFFFFFFFUL;
     clearEvent(peripheralBase_, TWI_EVENTS_ERROR);
     clearEvent(peripheralBase_, TWI_EVENTS_RXDREADY);
+    clearEvent(peripheralBase_, TWI_EVENTS_BB);
     clearEvent(peripheralBase_, TWI_EVENTS_STOPPED);
+
+    // Drive the read with the byte-boundary (BB) shorts. Without them the legacy
+    // TWI keeps clocking past the byte we wanted, and the trailing STOP races the
+    // next byte's clock - which corrupts the FOLLOWING read transaction. Observed
+    // on hardware as every other single-byte read failing (RXDREADY never fired).
+    // BB_SUSPEND halts the clock at each byte boundary so we can read RXD and
+    // RESUME for the next byte; BB_STOP turns the final boundary into a STOP.
+    uint32_t shorts = (sendStop && request == 1) ? TWI_SHORTS_BB_STOP
+                                                 : TWI_SHORTS_BB_SUSPEND;
+    reg32(peripheralBase_, TWI_SHORTS) = shorts;
     reg32(peripheralBase_, TWI_TASKS_STARTRX) = 1UL;
 
-    for (size_t index = 0; index < length_; ++index) {
-        clearEvent(peripheralBase_, TWI_EVENTS_RXDREADY);
+    size_t received = 0;
+    for (size_t index = 0; index < request; ++index) {
         if (!waitForEventOffset(TWI_EVENTS_RXDREADY)) {
-            length_ = index;
-            break;
+            break;  // timeout or NACK; cleaned up by the STOP below
         }
+        clearEvent(peripheralBase_, TWI_EVENTS_RXDREADY);
         buffer_[index] = static_cast<uint8_t>(reg32(peripheralBase_, TWI_RXD) & 0xFFUL);
+        ++received;
+
+        const size_t remaining = request - received;
+        if (sendStop && remaining == 1) {
+            // The next byte is the last: make its boundary issue a STOP.
+            reg32(peripheralBase_, TWI_SHORTS) = TWI_SHORTS_BB_STOP;
+        }
+        if (remaining >= 1) {
+            // We were suspended at the boundary; clock the next byte.
+            reg32(peripheralBase_, TWI_TASKS_RESUME) = 1UL;
+        }
     }
+    length_ = received;
 
     if (sendStop) {
-        if (!stopTransaction()) {
-            resetBus();
-            return static_cast<uint8_t>(length_);
+        if (received < request) {
+            // Error/short read: the BB_STOP short never reached the last byte,
+            // so issue the STOP ourselves.
+            reg32(peripheralBase_, TWI_SHORTS) = 0UL;
+            reg32(peripheralBase_, TWI_TASKS_STOP) = 1UL;
         }
+        (void)waitForEventOffset(TWI_EVENTS_STOPPED);
+        reg32(peripheralBase_, TWI_SHORTS) = 0UL;
         transactionOpen_ = false;
+        transactionAddress_ = 0;
     } else {
+        // Leave the bus suspended at the last byte boundary for a repeated start.
+        reg32(peripheralBase_, TWI_SHORTS) = 0UL;
         transactionOpen_ = true;
         transactionAddress_ = address;
     }
