@@ -49,12 +49,21 @@ static constexpr uint8_t SS   = 5;   // D5 -> P0.24
 static constexpr uint8_t SDA = 6;   // D6 -> P1.00
 static constexpr uint8_t SCL = 7;   // D7 -> P0.11
 
-// Secondary buses (silk "SDA1"/"SCL1" and "SCK1"/"MISO1"/"MOSI1").
-static constexpr uint8_t SDA1  = 13;  // D13 -> P1.13
-static constexpr uint8_t SCL1  = 14;  // D14 -> P1.15
-static constexpr uint8_t SCK1  = 18;  // D18 -> P1.01
-static constexpr uint8_t MISO1 = 19;  // D19 -> P1.02
-static constexpr uint8_t MOSI1 = 20;  // D20 -> P1.07
+// Secondary buses (silk "SDA1"/"SCL1" and "SCK1"/"MISO1"/"MOSI1"). Wire1 and
+// SPI1 share nRF peripheral instance 1, so only one of them can be active at a
+// time (the core arbitrates this). The default Wire (instance 0) and SPI
+// (instance 2) are independent and CAN run together.
+static constexpr uint8_t SDA1  = 13;  // D13 -> P1.13  (Wire1 SDA)
+static constexpr uint8_t SCL1  = 14;  // D14 -> P1.15  (Wire1 SCL)
+static constexpr uint8_t SCK1  = 18;  // D18 -> P1.01  (SPI1 SCK)
+static constexpr uint8_t MISO1 = 19;  // D19 -> P1.02  (SPI1 MISO)
+static constexpr uint8_t MOSI1 = 20;  // D20 -> P1.07  (SPI1 MOSI)
+
+// NFC antenna pins (silk "NFC1"/"NFC2"). Usable as plain GPIO D10/D11; the
+// UICR.NFCPINS=GPIO bit is set automatically the first time you drive them
+// (takes effect after the next reset).
+static constexpr uint8_t NFC1 = 10;   // D10 -> P0.09
+static constexpr uint8_t NFC2 = 11;   // D11 -> P0.10
 
 // Analog (silk "A0"/"A1"/"A2"). Only three analog pads are broken out; A3..A7
 // are not available on this board.

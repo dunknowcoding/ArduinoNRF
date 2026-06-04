@@ -1,20 +1,10 @@
+// PWM.ino - fade an LED with analogWrite(), and print the resulting PWM config.
+//
+// analogWrite(pin, duty) works on ANY digital pin of the nRF52840 (the core
+// exposes all 4 PWM modules / 16 channels). Here we fade the built-in LED;
+// point `kFadePin` at any pad (e.g. D2) to drive an external LED instead.
 
-static const uint8_t PWM_PINS[] = {LED_BUILTIN, PIN_LED2, PIN_LED3};
-static const uint8_t PWM_BITS = 10;
-static const int PWM_MAX = 1023;
-static const int PWM_STEP = 16;
-static const unsigned long PWM_DELAY_MS = 4;
-
-void printPwmConfig() {
-  Serial.print("actual frequency: ");
-  Serial.println(analogWriteFrequencyHz());
-  Serial.print("counter clock: ");
-  Serial.println(nrfPwmCounterClockHz());
-  Serial.print("counter top: ");
-  Serial.println(nrfPwmCounterTop());
-  Serial.print("effective bits: ");
-  Serial.println(nrfPwmEffectiveResolutionBits());
-}
+static const uint8_t kFadePin = LED_BUILTIN;   // P0.15, the one on-board LED
 
 void setup() {
   Serial.begin(115200);
@@ -22,31 +12,26 @@ void setup() {
     delay(10);
   }
 
-  analogWriteResolution(PWM_BITS);
-  if (!analogWriteFrequency(1000UL)) {
-    Serial.println("failed to set PWM frequency");
-  } else {
-    Serial.println("PWM fade example");
-    printPwmConfig();
+  // 10-bit duty (0..1023). analogWriteFrequency() returns false if the carrier
+  // cannot be produced at the current resolution.
+  analogWriteResolution(10);
+  if (!analogWriteFrequency(1000UL)) {       // ~1 kHz
+    Serial.println("could not set 1 kHz PWM");
   }
+  Serial.print("PWM frequency (Hz): ");
+  Serial.println(analogWriteFrequencyHz());
 
-  for (uint8_t index = 0; index < sizeof(PWM_PINS); ++index) {
-    pinMode(PWM_PINS[index], OUTPUT);
-  }
+  pinMode(kFadePin, OUTPUT);
 }
 
 void loop() {
-  for (int value = 0; value <= PWM_MAX; value += PWM_STEP) {
-    analogWrite(PWM_PINS[0], value);
-    analogWrite(PWM_PINS[1], PWM_MAX - value);
-    analogWrite(PWM_PINS[2], value / 2);
-    delay(PWM_DELAY_MS);
+  // Fade up then down. duty 0 = off, 1023 = full brightness (LED is active-high).
+  for (int duty = 0; duty <= 1023; duty += 16) {
+    analogWrite(kFadePin, duty);
+    delay(4);
   }
-
-  for (int value = PWM_MAX; value >= 0; value -= PWM_STEP) {
-    analogWrite(PWM_PINS[0], value);
-    analogWrite(PWM_PINS[1], PWM_MAX - value);
-    analogWrite(PWM_PINS[2], value / 2);
-    delay(PWM_DELAY_MS);
+  for (int duty = 1023; duty >= 0; duty -= 16) {
+    analogWrite(kFadePin, duty);
+    delay(4);
   }
 }
