@@ -1,5 +1,4 @@
 // ZigbeeSmoke.ino - sanity-check Zigbee library wiring.
-#include <Arduino.h>
 #include <Zigbee.h>
 
 void setup() {

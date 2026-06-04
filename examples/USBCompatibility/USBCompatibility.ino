@@ -1,4 +1,3 @@
-#include <Arduino.h>
 
 namespace {
 constexpr uint8_t kShortNameCapacity = 8;

@@ -6,7 +6,6 @@
 // drop libcc_310.a into vendor/lib/ and rebuild with -DNRF_CC310_VENDORED=1
 // the same sketch starts returning real random bytes.
 
-#include <Arduino.h>
 #include <NrfCC310.h>
 
 const char *statusName(NrfCC310::Status s) {

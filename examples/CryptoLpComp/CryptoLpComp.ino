@@ -11,7 +11,6 @@
 //
 // Wire AIN0 (P0.02) to a divider / sensor to watch the LPCOMP result change.
 
-#include <Arduino.h>
 #include <NrfCrypto.h>
 #include <NrfPeripherals.h>
 

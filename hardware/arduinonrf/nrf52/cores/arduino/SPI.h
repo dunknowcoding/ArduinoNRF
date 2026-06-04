@@ -51,6 +51,9 @@ public:
     SPIClass(uint32_t peripheralBase, uint8_t misoPin, uint8_t mosiPin, uint8_t sckPin);
 
     void begin();
+    // Begin on explicit pins (Arduino "Dn" numbers), in (SCK, MISO, MOSI) order,
+    // e.g. SPI.begin(SCK, MISO, MOSI) or SPI.begin(2, 3, 4). Overrides defaults.
+    void begin(uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin);
     void end();
     void beginTransaction(const SPISettings &settings);
     void endTransaction();

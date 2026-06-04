@@ -39,6 +39,28 @@ inline uint32_t rawPinFromBoardPin(uint8_t boardPin) {
     return NRF_PSEL_DISCONNECTED;
 }
 
+// nRF52 GPIO port registers. PIN_CNF lives at +0x700 (per-pin, ×4), and the two
+// ports are 0x300 apart (P0 @ 0x50000000, P1 @ 0x50000300).
+constexpr uint32_t GPIO_PORT0_BASE = 0x50000000UL;
+constexpr uint32_t GPIO_PORT_STRIDE = 0x300UL;
+constexpr uint32_t GPIO_PIN_CNF0 = 0x700UL;
+
+// Configure an I2C line as open-drain (DRIVE=S0D1) with an internal pull-up.
+// This is REQUIRED for TWI on nRF52: with the default push-pull drive (S0S1) the
+// peripheral actively drives the bus high, so a slave's ACK — which works by
+// pulling the line low — is overpowered and never seen, and every transfer
+// NACKs (endTransmission == 4). The raw pin encodes the port in bit 5
+// (e.g. P1.00 == 32), so it doubles as the GPIO port/bit selector.
+inline void configureI2cLineOpenDrain(uint32_t rawPin) {
+    if (rawPin == NRF_PSEL_DISCONNECTED || rawPin >= 48UL) {
+        return;
+    }
+    const uint32_t base = GPIO_PORT0_BASE + (rawPin >> 5) * GPIO_PORT_STRIDE;
+    const uint32_t pin = rawPin & 0x1FUL;
+    // DIR=Input, INPUT=Connect, PULL=Pullup(3), DRIVE=S0D1(6), SENSE=Off.
+    reg32(base, GPIO_PIN_CNF0 + pin * 4UL) = (3UL << 2) | (6UL << 8);
+}
+
 inline uint32_t frequencyRegisterValue(uint32_t clockHz) {
     if (clockHz >= 400000UL) {
         return TWI_FREQUENCY_400K;
@@ -123,6 +145,17 @@ void TwoWire::begin() {
     readIndex_ = 0;
     timeoutFlag_ = false;
     ensureEnabled();
+}
+
+void TwoWire::begin(uint8_t sdaPin, uint8_t sclPin) {
+    // Re-point this bus at explicit pins. If it was already running on different
+    // pins, release them first so the new ones are configured cleanly.
+    if (enabled_ && (sdaPin_ != sdaPin || sclPin_ != sclPin)) {
+        end();
+    }
+    sdaPin_ = sdaPin;
+    sclPin_ = sclPin;
+    begin();
 }
 
 void TwoWire::begin(uint8_t address) {
@@ -342,6 +375,11 @@ bool TwoWire::ensureEnabled() {
     reg32(peripheralBase_, TWI_PSELSCL) = rawScl;
     reg32(peripheralBase_, TWI_FREQUENCY) = frequencyRegisterValue(clockHz_);
     reg32(peripheralBase_, TWI_ENABLE) = TWI_ENABLE_ENABLED;
+    // Force the lines open-drain (S0D1). pinMode(INPUT_PULLUP) above leaves them
+    // push-pull (S0S1); the TWI would then drive the bus high and clobber slave
+    // ACKs. Apply AFTER enable so it is the final pin configuration.
+    configureI2cLineOpenDrain(rawSda);
+    configureI2cLineOpenDrain(rawScl);
     enabled_ = true;
     return true;
 }

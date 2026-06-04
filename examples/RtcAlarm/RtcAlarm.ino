@@ -16,7 +16,6 @@
 //     RTC1 or RTC2 on those. The verified promicroserialnosd path leaves all
 //     three free.
 
-#include <Arduino.h>
 #include <NrfRtc.h>
 
 volatile uint32_t g_tickCount = 0;

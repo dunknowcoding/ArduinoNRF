@@ -1,4 +1,3 @@
-#include <Arduino.h>
 
 namespace {
 constexpr uintptr_t DIAG_CAUSE_ADDR = 0x20004004UL;

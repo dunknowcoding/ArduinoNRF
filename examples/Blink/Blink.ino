@@ -5,7 +5,6 @@
 // blue LED on these boards is the LiPo charger's status LED and is NOT
 // controllable from firmware.
 
-#include <Arduino.h>
 
 void setup() {
   pinMode(LED_BUILTIN, OUTPUT);

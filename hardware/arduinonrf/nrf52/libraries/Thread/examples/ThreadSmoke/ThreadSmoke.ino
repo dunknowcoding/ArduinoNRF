@@ -1,5 +1,4 @@
 // ThreadSmoke.ino - sanity-check Thread library wiring.
-#include <Arduino.h>
 #include <Thread.h>
 
 void setup() {

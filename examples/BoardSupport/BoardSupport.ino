@@ -1,7 +1,6 @@
 // Applicable boards: representative board-family targets, especially `promicro-compatible` variants.
 // Limitations: asserts modeled board metadata and power-pin truth; it does not prove physical schematics beyond current declarations.
 
-#include <Arduino.h>
 #include <NordicHardware.h>
 #include <string.h>
 

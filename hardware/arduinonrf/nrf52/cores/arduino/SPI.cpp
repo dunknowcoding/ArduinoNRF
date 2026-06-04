@@ -95,6 +95,16 @@ void SPIClass::begin() {
     }
 }
 
+void SPIClass::begin(uint8_t sckPin, uint8_t misoPin, uint8_t mosiPin) {
+    if (enabled_ && (sckPin_ != sckPin || misoPin_ != misoPin || mosiPin_ != mosiPin)) {
+        end();
+    }
+    sckPin_ = sckPin;
+    misoPin_ = misoPin;
+    mosiPin_ = mosiPin;
+    begin();
+}
+
 bool SPIClass::ensureEnabled() {
     if (enabled_ && nrfPeripheralOwnerIs(peripheralBase_, this)) {
         return true;

@@ -50,6 +50,7 @@ const uint8_t PIN_WIRE1_SCL = D23;
 const uint8_t PIN_SPI_MISO = MISO;
 const uint8_t PIN_SPI_MOSI = MOSI;
 const uint8_t PIN_SPI_SCK = SCK;
+const uint8_t PIN_SPI_SS = SS;
 const uint8_t PIN_SPI1_MISO = D19;
 const uint8_t PIN_SPI1_MOSI = D20;
 const uint8_t PIN_SPI1_SCK = D18;

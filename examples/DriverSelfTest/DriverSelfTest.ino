@@ -3,7 +3,6 @@
 // plus a numeric detail. Validates driver fixes on the real ProMicro nRF52840
 // without external hardware.
 
-#include <Arduino.h>
 #include <NrfCrypto.h>
 #include <NrfPeripherals.h>
 #include <NrfPower.h>

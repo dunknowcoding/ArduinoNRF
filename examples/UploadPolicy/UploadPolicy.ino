@@ -1,7 +1,6 @@
 // Applicable boards: all packaged boards.
 // Limitations: validates declared upload/runtime policy only; it does not exercise a real bootloader transition.
 
-#include <Arduino.h>
 
 void printYesNo(bool value) {
   if (value) {

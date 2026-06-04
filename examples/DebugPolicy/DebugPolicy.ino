@@ -1,7 +1,6 @@
 // Applicable boards: all packaged boards.
 // Limitations: validates declared debug and upload policy only; it does not start a live debug session.
 
-#include <Arduino.h>
 
 void printYesNo(bool value) {
   if (value) {

@@ -7,7 +7,6 @@
 //   * Reads internal die temperature every 2 seconds.
 //   * Optional rotary encoder on pins 2 / 3 - uncomment QDEC lines below.
 
-#include <Arduino.h>
 #include <NrfPeripherals.h>
 
 void setup() {

@@ -1,4 +1,3 @@
-#include <Arduino.h>
 #include <NordicHardware.h>
 
 void printYesNo(bool value) {

@@ -1,4 +1,3 @@
-#include <Arduino.h>
 #include <WiFi.h>
 
 static const char kFlashText[] = "flash-text";

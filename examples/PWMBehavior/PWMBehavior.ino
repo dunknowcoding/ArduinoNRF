@@ -1,7 +1,6 @@
 // Applicable boards: all packaged boards.
 // Limitations: validates the shared-timer PWM implementation and its user-facing frequency controls; no tone, servo, polarity, or center-aligned mode is expected.
 
-#include <Arduino.h>
 
 static const unsigned long SERIAL_WAIT_MS = 3000;
 static const unsigned long REPORT_INTERVAL_MS = 1000;

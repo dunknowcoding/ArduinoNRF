@@ -1,7 +1,6 @@
 // Applicable boards: all packaged nRF52 variants.
 // Limitations: validates declared core capabilities only; it does not prove simultaneous peripheral activity on real hardware.
 
-#include <Arduino.h>
 #include <NordicHardware.h>
 #include <string.h>
 

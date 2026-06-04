@@ -11,7 +11,6 @@
 //   * The board is still re-uploadable over USB (the 1200-bps DFU touch is also
 //     serviced in the ISR), so a non-yielding sketch never bricks the port.
 //   * The LED blinks purely from a busy-wait, proving loop() never yields.
-#include <Arduino.h>
 
 void setup() {
   Serial.begin(115200);

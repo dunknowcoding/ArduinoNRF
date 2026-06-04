@@ -1,7 +1,6 @@
 // Applicable boards: all packaged boards.
 // Limitations: boards without declared battery sensing must report zero; boards with sensing validate the modeled conversion path only.
 
-#include <Arduino.h>
 #include <NordicHardware.h>
 
 void printYesNo(bool value) {

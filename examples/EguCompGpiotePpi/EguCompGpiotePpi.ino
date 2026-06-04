@@ -11,7 +11,6 @@
 //                  "g" + Enter in the Serial monitor fires EGU0 channel 0,
 //                  whose ISR prints a heartbeat counter.
 
-#include <Arduino.h>
 #include <NrfPeripherals.h>
 
 volatile uint32_t g_eguTicks = 0;

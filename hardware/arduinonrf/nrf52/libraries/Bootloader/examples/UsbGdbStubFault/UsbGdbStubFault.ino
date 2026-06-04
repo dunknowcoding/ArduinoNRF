@@ -1,7 +1,6 @@
 // Applicable boards: native-USB nRF52840 boards built with buildprofile=usbgdbstub.
 // Limitations: this example only becomes useful after the firmware-side GDB stub trap handling is implemented.
 
-#include <Arduino.h>
 #include <NrfDebug.h>
 #include <NrfUsbd.h>
 #include <Watchdog.h>

@@ -1,7 +1,6 @@
 // NimBLESmoke.ino - sanity-check NimBLE library wiring.
 // Without vendored sources, prints NIMBLE_NOT_VENDORED. After M1 lands it
 // prints NIMBLE_OK and the device's public BLE address.
-#include <Arduino.h>
 #include <NimBLE.h>
 
 namespace {

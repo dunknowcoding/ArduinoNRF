@@ -29,6 +29,7 @@ const uint8_t PIN_WIRE1_SCL = 0xFFU;
 const uint8_t PIN_SPI_MISO = MISO;
 const uint8_t PIN_SPI_MOSI = MOSI;
 const uint8_t PIN_SPI_SCK = SCK;
+const uint8_t PIN_SPI_SS = SS;
 const uint8_t PIN_SPI1_MISO = 0xFFU;
 const uint8_t PIN_SPI1_MOSI = 0xFFU;
 const uint8_t PIN_SPI1_SCK = 0xFFU;

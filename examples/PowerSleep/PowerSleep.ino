@@ -11,7 +11,6 @@
 //
 // Run with `examples/RtcAlarm` for the RTC-driven interrupt-wake pattern.
 
-#include <Arduino.h>
 #include <NrfPower.h>
 
 // Pick a GPIO that's safe to short to GND on your board. On the AliExpress

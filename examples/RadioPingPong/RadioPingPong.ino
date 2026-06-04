@@ -13,7 +13,6 @@
 // Also prints the UICR GPIO output-voltage setting at boot - handy to confirm
 // whether a board has been bumped to 3.3V (see NrfUicr::setRegout0Voltage).
 
-#include <Arduino.h>
 #include <NrfRadio.h>
 #include <NrfPeripherals.h>   // NrfUicr
 

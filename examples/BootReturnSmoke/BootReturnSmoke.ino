@@ -1,4 +1,3 @@
-#include <Arduino.h>
 
 namespace {
 constexpr uint32_t POWER_GPREGRET = 0x4000051CUL;

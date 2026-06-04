@@ -1,4 +1,3 @@
-#include <Arduino.h>
 
 static const uint8_t PWM_PINS[] = {LED_BUILTIN, PIN_LED2, PIN_LED3};
 static const uint8_t PWM_BITS = 10;

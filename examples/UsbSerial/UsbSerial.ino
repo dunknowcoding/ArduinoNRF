@@ -1,4 +1,3 @@
-#include <Arduino.h>
 
 // nRF52840 POWER peripheral – read reset reason and diagnostic SRAM marker
 #define NRF_POWER_BASE      0x40000000UL

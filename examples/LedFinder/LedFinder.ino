@@ -12,7 +12,6 @@
 // Skips P0.00/P0.01 (LFXO 32 kHz crystal) and P0.18 (nRESET) to avoid
 // disrupting the clock / resetting the chip.
 
-#include <Arduino.h>
 
 // SWD-writable: set this to the absolute pin to test. SWD-readable mirror in
 // g_current so the host can confirm what's being driven.

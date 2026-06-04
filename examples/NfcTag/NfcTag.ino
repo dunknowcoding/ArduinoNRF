@@ -13,7 +13,6 @@
 // read, check NRF_UICR->NFCPINS or solder a small loop between P0.09 and
 // P0.10 (with a tuning cap) to act as an antenna.
 
-#include <Arduino.h>
 #include <NrfNfcTag.h>
 
 void onFieldDetect() {

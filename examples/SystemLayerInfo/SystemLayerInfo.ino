@@ -1,4 +1,3 @@
-#include <Arduino.h>
 
 static void printFlag(bool condition, const __FlashStringHelper *enabledText, const __FlashStringHelper *disabledText) {
     if (condition) {

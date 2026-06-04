@@ -9,7 +9,6 @@
 // onboard RGB LED occupies LED_BUILTIN / LED_RED / LED_GREEN / LED_BLUE; swap
 // them for whatever PWM-capable pins your board exposes.
 
-#include <Arduino.h>
 
 void setup() {
   Serial.begin(115200);

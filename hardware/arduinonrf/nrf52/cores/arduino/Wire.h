@@ -22,6 +22,9 @@ public:
 
     void begin();
     void begin(uint8_t address);
+    // Master mode on explicit pins (Arduino "Dn" numbers), e.g.
+    // Wire.begin(SDA, SCL) or Wire.begin(6, 7). Overrides the variant defaults.
+    void begin(uint8_t sdaPin, uint8_t sclPin);
     void end();
     void beginTransmission(uint8_t address);
     size_t write(uint8_t data) override;

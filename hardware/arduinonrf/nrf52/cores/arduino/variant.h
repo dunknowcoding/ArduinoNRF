@@ -55,6 +55,7 @@ extern const uint8_t PIN_WIRE1_SCL;
 extern const uint8_t PIN_SPI_MISO;
 extern const uint8_t PIN_SPI_MOSI;
 extern const uint8_t PIN_SPI_SCK;
+extern const uint8_t PIN_SPI_SS;
 extern const uint8_t PIN_SPI1_MISO;
 extern const uint8_t PIN_SPI1_MOSI;
 extern const uint8_t PIN_SPI1_SCK;
@@ -100,6 +101,7 @@ constexpr bool nrfVariantPinDeclared(uint32_t pin, uint32_t pinCount) {
     NRF_VARIANT_STATIC_ASSERT_PIN(PIN_SPI_MISO); \
     NRF_VARIANT_STATIC_ASSERT_PIN(PIN_SPI_MOSI); \
     NRF_VARIANT_STATIC_ASSERT_PIN(PIN_SPI_SCK); \
+    NRF_VARIANT_STATIC_ASSERT_PIN(PIN_SPI_SS); \
     NRF_VARIANT_STATIC_ASSERT_PIN(PIN_SPI1_MISO); \
     NRF_VARIANT_STATIC_ASSERT_PIN(PIN_SPI1_MOSI); \
     NRF_VARIANT_STATIC_ASSERT_PIN(PIN_SPI1_SCK); \

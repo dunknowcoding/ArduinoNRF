@@ -307,7 +307,7 @@ void loop(void);
 #define MISO PIN_SPI_MISO
 #define MOSI PIN_SPI_MOSI
 #define SCK PIN_SPI_SCK
-#define SS NOT_A_PIN
+#define SS PIN_SPI_SS
 #endif
 
 #endif

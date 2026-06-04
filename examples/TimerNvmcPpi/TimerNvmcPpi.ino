@@ -12,7 +12,6 @@
 // Skip TIMER0 - it's reserved for NimBLE / Zigbee controllers. TIMER1
 // would be fine too; TIMER2 picked for a fresh demo.
 
-#include <Arduino.h>
 #include <NrfPeripherals.h>
 
 constexpr uint32_t BOOT_COUNT_FLASH_ADDR = 0x000FF000UL;   // last page of flash
