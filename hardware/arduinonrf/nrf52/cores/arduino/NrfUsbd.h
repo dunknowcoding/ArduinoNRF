@@ -194,6 +194,10 @@ private:
     volatile bool stubHalted_ = false;
     volatile uint32_t haltTouchTicks_ = 0;
     volatile uint32_t serviceTouchResetMillis_ = 0;
+    // millis() when the service CDC last saw a 1200-bps SET_LINE_CODING. Lets a
+    // following DTR-drop arm the touch even if the host's single-port sequence
+    // (usbcdc=disabled) made the 1200 baud and the DTR-drop non-coincident.
+    volatile uint32_t serviceSaw1200Millis_ = 0;
     volatile uint8_t ignoredResetTouchCount_ = 0;
     volatile uint8_t address_ = 0;
     volatile uint8_t configuration_ = 0;

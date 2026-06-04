@@ -110,8 +110,21 @@ void setup() { NimBLE::begin("MyBoard"); NimBLE::startAdvertising(); }
 void loop()  { NimBLE::poll(); }   // pump the host + controller
 ```
 
-Start from **`examples/NimBLESmoke`**. The other wireless stacks (CC310 crypto,
-Zigbee, Thread) are still skeletons — see the capability table below.
+The board advertises a **Nordic UART Service**, so exchanging data is as simple
+as a wireless `Serial`:
+
+```cpp
+NimBLE::write("hello\n");                       // board -> central (TX notify)
+NimBLE::onReceive([](const uint8_t *d, size_t n) {  // central -> board (RX write)
+  Serial.write(d, n);
+});
+```
+
+Start from **`examples/NimBLESmoke`** to confirm the stack is up, then
+**`examples/BLESend`** (push data to a phone/PC) and **`examples/BLEReceive`**
+(receive data from one) — both drive the Nordic UART service and work with the
+free **nRF Connect** app. The other wireless stacks (CC310 crypto, Zigbee,
+Thread) are still skeletons — see the capability table below.
 
 ---
 
@@ -166,7 +179,7 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **Upload** | ✅ Hands-free serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |
 
-**Gaps vs. mature Adafruit/Nordic cores:** no SoftDevice menu or Bluefruit/TinyUSB BLE stack; not every clone USB profile is claimed interchangeable (the validated path is `promicroserialnosd`). With `usbcdc=disabled` the board stays uploadable *from the bootloader* but its in-app touch is unreliable — **keep `usbcdc=enabled`** for the hands-free workflow.
+**Gaps vs. mature Adafruit/Nordic cores:** no SoftDevice menu or Bluefruit/TinyUSB BLE stack; not every clone USB profile is claimed interchangeable (the validated path is `promicroserialnosd`). Hands-free in-app upload is verified for **both** `usbcdc=enabled` and `usbcdc=disabled`; `usbcdc=enabled` is the default because it also gives you a separate user `Serial` port alongside the upload/maintenance CDC.
 
 ---
 
@@ -185,7 +198,7 @@ Everything beyond this README lives under **[docs/](docs/)** — start at **[doc
 
 ```raw
 hardware/arduinonrf/nrf52/    # the Arduino platform: cores, variants, boards.txt, tools
-examples/                     # ~50 examples incl. UsbGdbStub* and capability self-tests
+examples/                     # peripheral, UART/UARTE, BLE send/receive, and USB examples
 docs/                         # all documentation (the only place docs live)
 scripts/ , tools/             # build, release, and hardware-validation helpers
 package_arduinonrf_index.json # Board Manager index

@@ -14,10 +14,10 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | Upload during a debug session | **PASS** | The debug bridge yields the service COM on an upload request (both before a client connects and mid-session); the halted-stub 1200-touch then reboots to the bootloader and the flash completes. |
 | Repeated Upload clicks | **PASS** | A per-port lock makes a duplicate upload fail fast before any touch; firmware is never corrupted. |
 | Wrong-port (user CDC) upload | **PASS** | Selecting the user CDC (`MI_02`) is rejected with a clear message; the firmware is untouched. The firmware also ignores a 1200-touch on the user CDC by design. |
+| `usbcdc=disabled` in-app upload | **PASS** | Hands-free in-app 1200-touch reboots and flashes on the single service CDC. Verified 3× back-to-back, plus `usbcdc=disabled⇄enabled` transitions in both directions. |
 
 ## ⚠️ Known limitations
 
-- **`usbcdc=disabled`**: the board still enumerates the service CDC and is uploadable *from the bootloader*, but its **in-app 1200-touch does not reliably reboot** to the bootloader. Keep `usbcdc=enabled` for the hands-free workflow. Recovery from a stuck `usbcdc=disabled` image is via SWD (write `GPREGRET=0x57`, clean USB disconnect, `SYSRESETREQ` → bootloader, then upload).
 - **Raw `adafruit-nrfutil dfu serial`** is unreliable on this clone; the robust path is `arduino-cli upload` (which `upload.ps1` drives with retries and timing).
 
 ## ⏱️ Upload timing (measured)

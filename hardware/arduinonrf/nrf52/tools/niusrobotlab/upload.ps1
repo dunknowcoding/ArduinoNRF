@@ -650,9 +650,20 @@ function Get-AdafruitRuntimeSnapshot {
     # MI_02 is MSC in the bootloader but user CDC in our dual-CDC runtime.
     # Exclude Ports/Modem class devices so that user CDC on MI_02 is not
     # incorrectly counted as a storage (MSC/UF2) interface.
+    #
+    # usbcdc=disabled has NO user CDC, so the runtime DFU "Bootloader Control"
+    # vendor interface lands on MI_02 (where usbcdc=enabled puts the user CDC).
+    # It is a WinUSB/vendor class (not Ports), so without the FriendlyName guard
+    # below it was miscounted as MSC -> strongBootloaderEvidence -> upload.ps1
+    # decided the board was ALREADY in the bootloader, SKIPPED the 1200 touch,
+    # and ran adafruit-nrfutil against the still-running app (it stalled). The
+    # real bootloader is recognized by its UF2 mass-storage VOLUME
+    # (Get-Uf2ProbeSummary), never by this control interface, so excluding it by
+    # name is safe.
     $storageInterfaces = @($matches | Where-Object {
         ([string]$_.InstanceId).ToUpperInvariant() -like '*&MI_02*' -and
-        ([string]$_.Class).ToUpperInvariant() -notin @('PORTS', 'MODEM')
+        ([string]$_.Class).ToUpperInvariant() -notin @('PORTS', 'MODEM') -and
+        ([string]$_.FriendlyName).ToUpperInvariant() -notlike '*BOOTLOADER CONTROL*'
     })
     $cdcInterfaces = @($matches | Where-Object { ([string]$_.InstanceId).ToUpperInvariant() -like '*&MI_00*' })
     $composites = @($matches | Where-Object { ([string]$_.InstanceId).ToUpperInvariant() -notlike '*&MI_*' })

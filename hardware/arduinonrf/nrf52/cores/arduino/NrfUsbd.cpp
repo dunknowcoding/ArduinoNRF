@@ -805,30 +805,35 @@ void NrfUsbdDriver::poll() {
     if (serviceTouchPending_) {
         const bool resetArmed = configuredMillis_ != 0UL &&
             (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-        // Once the confirm window has started, tolerate DTR going back high — the host
-        // routinely re-asserts DTR on port close and on the next open within tens of
-        // milliseconds, which is exactly the situation the 1200 touch needs to ignore.
-        const bool inConfirmWindow = serviceTouchResetMillis_ != 0UL &&
-            (millis() - serviceTouchResetMillis_) < USBD_TOUCH_RESET_CONFIRM_MS;
-        if (!nrfSystemProfile().prefersUsbUpload || !configured_ ||
-            (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
+        const bool windowStarted = serviceTouchResetMillis_ != 0UL;
+        const bool windowElapsed = windowStarted &&
+            (millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS;
+        const bool inConfirmWindow = windowStarted && !windowElapsed;
+        if (windowElapsed) {
+            // The confirm window opened and fully elapsed: commit the touch and
+            // reboot. We deliberately do NOT re-check DTR here. Windows
+            // re-asserts DTR on the port close that immediately follows the
+            // touch, so if poll()/the ISR first runs AFTER the window elapsed
+            // with DTR back high, re-checking it would cancel an already-armed
+            // touch. This hazard is largest with usbcdc=disabled, where the
+            // single service CDC sees little traffic and the ISR can land
+            // outside the short confirm window.
+            serviceTouchPending_ = false;
+            serviceTouchResetMillis_ = 0UL;
+            if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
+                ++ignoredResetTouchCount_;
+            } else {
+                detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
+                detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
+            }
+        } else if (!nrfSystemProfile().prefersUsbUpload || !configured_ ||
+                   (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
             serviceTouchPending_ = false;
             serviceTouchResetMillis_ = 0UL;
         } else if (!resetArmed) {
             serviceTouchResetMillis_ = 0UL;
-        } else {
-            if (serviceTouchResetMillis_ == 0UL) {
-                serviceTouchResetMillis_ = millis();
-            } else if ((millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS) {
-                serviceTouchPending_ = false;
-                serviceTouchResetMillis_ = 0UL;
-                if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
-                    ++ignoredResetTouchCount_;
-                } else {
-                    detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
-                    detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
-                }
-            }
+        } else if (serviceTouchResetMillis_ == 0UL) {
+            serviceTouchResetMillis_ = millis();
         }
     }
 
@@ -867,30 +872,35 @@ void NrfUsbdDriver::irqHandler() {
     if (serviceTouchPending_) {
         const bool resetArmed = configuredMillis_ != 0UL &&
             (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-        // Once the confirm window has started, tolerate DTR going back high — the host
-        // routinely re-asserts DTR on port close and on the next open within tens of
-        // milliseconds, which is exactly the situation the 1200 touch needs to ignore.
-        const bool inConfirmWindow = serviceTouchResetMillis_ != 0UL &&
-            (millis() - serviceTouchResetMillis_) < USBD_TOUCH_RESET_CONFIRM_MS;
-        if (!nrfSystemProfile().prefersUsbUpload || !configured_ ||
-            (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
+        const bool windowStarted = serviceTouchResetMillis_ != 0UL;
+        const bool windowElapsed = windowStarted &&
+            (millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS;
+        const bool inConfirmWindow = windowStarted && !windowElapsed;
+        if (windowElapsed) {
+            // The confirm window opened and fully elapsed: commit the touch and
+            // reboot. We deliberately do NOT re-check DTR here. Windows
+            // re-asserts DTR on the port close that immediately follows the
+            // touch, so if poll()/the ISR first runs AFTER the window elapsed
+            // with DTR back high, re-checking it would cancel an already-armed
+            // touch. This hazard is largest with usbcdc=disabled, where the
+            // single service CDC sees little traffic and the ISR can land
+            // outside the short confirm window.
+            serviceTouchPending_ = false;
+            serviceTouchResetMillis_ = 0UL;
+            if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
+                ++ignoredResetTouchCount_;
+            } else {
+                detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
+                detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
+            }
+        } else if (!nrfSystemProfile().prefersUsbUpload || !configured_ ||
+                   (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
             serviceTouchPending_ = false;
             serviceTouchResetMillis_ = 0UL;
         } else if (!resetArmed) {
             serviceTouchResetMillis_ = 0UL;
-        } else {
-            if (serviceTouchResetMillis_ == 0UL) {
-                serviceTouchResetMillis_ = millis();
-            } else if ((millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS) {
-                serviceTouchPending_ = false;
-                serviceTouchResetMillis_ = 0UL;
-                if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
-                    ++ignoredResetTouchCount_;
-                } else {
-                    detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
-                    detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
-                }
-            }
+        } else if (serviceTouchResetMillis_ == 0UL) {
+            serviceTouchResetMillis_ = millis();
         }
     }
     if (detachRequestMagic_ == USBD_DETACH_REQUEST_MAGIC) {
@@ -1819,10 +1829,17 @@ void NrfUsbdDriver::completeControlOutTransfer() {
                 lineCoding_.dataBits = controlOutBuffer_[6];
                 if (lineCoding_.baudRate != 1200UL) {
                     serviceSawNonResetBaud_ = true;
-                    serviceTouchPending_ = false;
-                    serviceTouchResetMillis_ = 0UL;
+                    // Don't let the host's post-touch 115200 re-open cancel a
+                    // touch that is already counting down its confirm window.
+                    const bool inConfirmWindow = serviceTouchResetMillis_ != 0UL &&
+                        (millis() - serviceTouchResetMillis_) < USBD_TOUCH_RESET_CONFIRM_MS;
+                    if (!inConfirmWindow) {
+                        serviceTouchPending_ = false;
+                        serviceTouchResetMillis_ = 0UL;
+                    }
                 } else {
                     markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_LINE_CODING);
+                    serviceSaw1200Millis_ = millis();
                     const bool resetArmed = configuredMillis_ != 0UL &&
                         (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
                     if (!dtr_ && nrfSystemProfile().prefersUsbUpload) {
@@ -2091,7 +2108,15 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                     updateSerialState(userCdc);
                     const bool resetArmed = configuredMillis_ != 0UL &&
                         (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-                    if (!userCdc && lineCoding_.baudRate == 1200UL && nrfSystemProfile().prefersUsbUpload) {
+                    // Accept the touch if the line is at 1200 now OR was at 1200
+                    // very recently: a host's single-port (usbcdc=disabled)
+                    // sequence can drop DTR a few ms after the baud has already
+                    // reverted, so requiring exact coincidence could miss the
+                    // DTR-drop that arms the touch.
+                    const bool recent1200 = lineCoding_.baudRate == 1200UL ||
+                        (serviceSaw1200Millis_ != 0UL &&
+                         (millis() - serviceSaw1200Millis_) < 400UL);
+                    if (!userCdc && recent1200 && nrfSystemProfile().prefersUsbUpload) {
                         if (!dtr) {
                             // Host dropped DTR at 1200 baud: arm the touch and start the 40 ms
                             // confirm timer (see USBD_TOUCH_RESET_CONFIRM_MS). The poll/IRQ gate

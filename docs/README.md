@@ -43,8 +43,10 @@ All project documentation lives here. Start with the [project README](../README.
   host+controller runs on a bare-metal cooperative port. Advertising,
   connections, MTU exchange, and full GATT service/characteristic/descriptor
   discovery are verified on hardware against Windows (bleak/WinRT), Android
-  (nRF Connect), and board-to-board. See the BLE section of the
-  [project README](../README.md) and `libraries/NimBLE/examples/NimBLESmoke`.
+  (nRF Connect), and board-to-board. Exchange data over the built-in Nordic
+  UART service with `NimBLE::write()` / `NimBLE::onReceive()`. See the BLE
+  section of the [project README](../README.md) and the `NimBLESmoke`,
+  `BLESend`, and `BLEReceive` examples.
 
 ## Multi-session roadmaps (large vendoring efforts still pending)
 

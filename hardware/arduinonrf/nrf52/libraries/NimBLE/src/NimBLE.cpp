@@ -81,6 +81,28 @@ __attribute__((used)) volatile uint32_t g_lastRxLen = 0;     // bytes in last wr
 __attribute__((used)) volatile uint32_t g_notifyCount = 0;   // notifications sent
 __attribute__((used)) volatile uint32_t g_lastConnHandle = 0xFFFF;
 uint8_t g_rxBuf[244];
+NimBLE::ReceiveCallback g_rxCallback = nullptr;   // user RX handler (null = echo)
+
+// Send a TX notification to the connected central. Shared by the RX echo path
+// and the public NimBLE::write(). Returns the number of bytes queued (0 on any
+// failure: no connection, notifications not enabled, or out of mbufs).
+size_t nusNotify(const uint8_t *data, size_t length) {
+    if (length == 0 || g_connHandle == BLE_HS_CONN_HANDLE_NONE || g_txValHandle == 0) {
+        return 0;
+    }
+    if (length > sizeof(g_rxBuf)) {
+        length = sizeof(g_rxBuf);
+    }
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(data, length);
+    if (om == nullptr) {
+        return 0;
+    }
+    if (ble_gatts_notify_custom(g_connHandle, g_txValHandle, om) != 0) {
+        return 0;   // stack frees the mbuf on failure
+    }
+    g_notifyCount++;
+    return length;
+}
 
 // 6E40000x-B5A3-F393-E0A9-E50E24DCCA9E, bytes LSB-first.
 const ble_uuid128_t NUS_SVC_UUID = BLE_UUID128_INIT(
@@ -99,13 +121,12 @@ int nusAccessCb(uint16_t conn_handle, uint16_t attr_handle,
         ble_hs_mbuf_to_flat(ctxt->om, g_rxBuf, sizeof(g_rxBuf), &len);
         g_lastRxLen = len;
         g_rxCount++;
-        // Echo the bytes back to the central as a TX notification.
-        if (g_connHandle != BLE_HS_CONN_HANDLE_NONE && g_txValHandle != 0) {
-            struct os_mbuf *om = ble_hs_mbuf_from_flat(g_rxBuf, len);
-            if (om != nullptr &&
-                ble_gatts_notify_custom(g_connHandle, g_txValHandle, om) == 0) {
-                g_notifyCount++;
-            }
+        if (g_rxCallback != nullptr) {
+            // Hand the bytes to the sketch's onReceive() handler.
+            g_rxCallback(g_rxBuf, len);
+        } else {
+            // No handler registered: echo the bytes back to the central.
+            nusNotify(g_rxBuf, len);
         }
         return 0;
     }
@@ -528,6 +549,30 @@ NimBLE::Status NimBLE::stopAdvertising()  {
 }
 bool           NimBLE::isConnected()      { poll(); return g_connected; }
 int            NimBLE::connectionCount()  { poll(); return g_connected ? 1 : 0; }
+
+size_t NimBLE::write(const uint8_t *data, size_t length) {
+#if NRF_NIMBLE_PORTING_VENDORED
+    poll();
+    if (data == nullptr) {
+        return 0;
+    }
+    return nusNotify(data, length);
+#else
+    (void)data; (void)length;
+    return 0;
+#endif
+}
+
+size_t NimBLE::write(const char *text) {
+    if (text == nullptr) {
+        return 0;
+    }
+    return write(reinterpret_cast<const uint8_t *>(text), strlen(text));
+}
+
+void NimBLE::onReceive(ReceiveCallback callback) {
+    g_rxCallback = callback;
+}
 void           NimBLE::getPublicAddress(uint8_t addr[6]) {
     poll();
     if (!g_started) {

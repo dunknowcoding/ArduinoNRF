@@ -51,6 +51,20 @@ and a subsequent DTR=true cancelling `serviceTouchPending_` inside the 40 ms
 confirm window. See [`USB_1200_TOUCH_V1_FIX.md`](USB_1200_TOUCH_V1_FIX.md)
 for the full root-cause writeup and the three patches.
 
+### `usbcdc=disabled` in-app upload (host-side fix)
+
+For a while, an in-app upload to a `usbcdc=disabled` board stalled at
+`adafruit-dfu` even though the firmware touch path was correct. Root cause was
+host-side: with no user CDC, the runtime DFU **"Bootloader Control"** vendor
+interface lands on `MI_02` (where `usbcdc=enabled` puts the user CDC). `upload.ps1`
+counted any non-Ports `MI_02` interface as MSC/bootloader evidence, decided the
+board was *already* in the bootloader, **skipped the 1200-touch entirely**, and
+ran `adafruit-nrfutil` against the still-running app. The fix excludes the
+`Bootloader Control` interface from that evidence (the real bootloader is
+identified by its UF2 mass-storage volume, never by this control interface), so
+the touch runs and the board reboots normally. Verified 3× back-to-back plus
+`usbcdc` transitions in both directions.
+
 ### What still needs validation
 
 - V2 (dual-CDC reflash) and V3 (locked OLD-COM cycle) on the user's board

@@ -29,7 +29,7 @@
 - after the first flash, the board returns to user mode
 - with `usbcdc=enabled`, the board exposes separate user and service CDC paths
 - selecting the user CDC for upload is rejected; the service CDC hands-free reupload path works repeatedly without manual reset
-- with `usbcdc=disabled`, the board remains bootloader-uploadable but in-app 1200-touch is not the recommended workflow
+- with `usbcdc=disabled`, hands-free in-app upload also works on the single service CDC (verified 3× back-to-back and across `usbcdc` transitions both ways)
 - USB-only GDB-stub debug over the service CDC works with breakpoints, step, registers, memory, watchpoints, and pause
 
 ### Pinout — Arduino number == silk-screen "Dn"
