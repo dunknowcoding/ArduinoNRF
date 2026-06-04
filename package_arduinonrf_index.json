@@ -9,12 +9,12 @@
         {
           "name": "ArduinoNRF",
           "architecture": "nrf52",
-          "version": "0.2.0",
+          "version": "0.2.1",
           "category": "Contributed",
-          "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.2.0/arduinonrf-0.2.0.zip",
-          "archiveFileName": "arduinonrf-0.2.0.zip",
-          "checksum": "SHA-256:3b87078f6eee0c0fecf98bf6b2aeceba4a86dbd3496d8fe66ce72aa846c9ed65",
-          "size": "6715358",
+          "url": "https://github.com/dunknowcoding/ArduinoNRF/releases/download/v0.2.1/arduinonrf-0.2.1.zip",
+          "archiveFileName": "arduinonrf-0.2.1.zip",
+          "checksum": "SHA-256:9dea5d8f813a1862f83c5b3a0c34c93df5dcb4e28d73bc1278991128fdd69a7c",
+          "size": "6717429",
           "boards": [
             {
               "name": "AliExpress ProMicro nRF52840"
