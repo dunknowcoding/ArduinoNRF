@@ -1,0 +1,59 @@
+ArduinoNRF
+Copyright 2026 dunknowcoding (NiusRobotLab)
+
+Author / maintainer:  dunknowcoding
+YouTube channel:      NiusRobotLab
+
+This product includes software originally developed by dunknowcoding
+(NiusRobotLab) and licensed under the Apache License, Version 2.0 (see the
+LICENSE file).
+
+------------------------------------------------------------------------
+What you may and must do (summary of the Apache 2.0 terms)
+------------------------------------------------------------------------
+You MAY use this software for any purpose, including commercial products,
+modify it, and redistribute it.
+
+If you redistribute it or ship it inside a product, the License requires
+that you:
+
+  * Keep this attribution to the original author, dunknowcoding
+    (NiusRobotLab) — see Section 4(d). Retaining this NOTICE file (or
+    reproducing its attribution in your own documentation / credits)
+    satisfies this.
+
+  * State the changes you made. Any file you modified must carry a
+    prominent notice that you changed it — see Section 4(b).
+
+  * Include a copy of the Apache License 2.0 with the distribution — see
+    Section 4(a).
+
+Patents: under Section 3, every contributor grants you a patent license to
+their contributions, and that grant terminates automatically for anyone who
+starts patent litigation alleging that this software infringes a patent. In
+other words, this work is contributed with a patent grant and cannot be
+weaponized through patent claims against its users.
+
+This is a plain-language summary only; the LICENSE file is the binding text.
+
+------------------------------------------------------------------------
+Third-party components (each retains its own license)
+------------------------------------------------------------------------
+The Apache License 2.0 above covers ArduinoNRF's own code. Vendored
+third-party sources keep their original licenses, which are stated in the
+files themselves:
+
+  * Apache Mynewt NimBLE  (hardware/arduinonrf/nrf52/libraries/NimBLE/src,
+    excluding the mdk/ device headers) — Apache License 2.0,
+    Copyright The Apache Software Foundation and contributors.
+
+  * Nordic Semiconductor MDK device headers and CMSIS
+    (.../libraries/NimBLE/src/mdk and the cores' MDK/CMSIS headers) —
+    Nordic's 5-clause BSD-style license and ARM CMSIS license; see the
+    headers of those files.
+
+  * adafruit-nrfutil, dfu-util, and the GNU Arm toolchain are referenced as
+    upload/build tools via the Board Manager index and are distributed under
+    their own respective licenses by their authors.
+
+When in doubt, the per-file license header governs that file.

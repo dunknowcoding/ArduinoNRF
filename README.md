@@ -195,4 +195,15 @@ package_arduinonrf_index.json # Board Manager index
 
 Issues and PRs welcome at **[github.com/dunknowcoding/ArduinoNRF](https://github.com/dunknowcoding/ArduinoNRF)**. The guiding principle: **document what the hardware verifiably does** — if a capability isn't proven on a board, it isn't claimed.
 
-> ℹ️ A formal open-source license has not yet been added to this repository. Until one is present, treat the code as "all rights reserved" and ask before redistributing.
+### License
+
+ArduinoNRF is licensed under the **[Apache License 2.0](LICENSE)** — © 2026 **dunknowcoding (NiusRobotLab)**.
+
+You may use it freely, **including in commercial products**. In return, the license asks you to:
+
+- 🙏 **Credit the original author** — keep the attribution to dunknowcoding (NiusRobotLab); retaining the [`NOTICE`](NOTICE) file (or reproducing its attribution in your product's credits) satisfies this *(Apache §4(d))*.
+- 📝 **Document your changes** — any file you modify must carry a prominent notice that you changed it *(Apache §4(b))*.
+- 📄 **Ship a copy of the license** with redistributions *(Apache §4(a))*.
+- ⚖️ **No patent weaponization** — the work comes with a patent grant that terminates for anyone who starts patent litigation against it *(Apache §3)*.
+
+Vendored third-party code (Apache Mynewt NimBLE, Nordic MDK / CMSIS headers, upload tools) keeps its own license — see [`NOTICE`](NOTICE) and the per-file headers.
