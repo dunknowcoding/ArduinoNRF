@@ -1141,7 +1141,7 @@ devboard_nrf52833.menu.storage.legacy=Legacy single-page
 devboard_nrf52833.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=8192
 devboard_nrf52833.menu.storage.legacy.build.storage_reserved_bytes=8192
 
-pitaya_go_nrf52840.name=Pitaya Go nRF52840
+pitaya_go_nrf52840.name=Pitaya Go nRF52840 (experimental - pinout unverified)
 pitaya_go_nrf52840.upload.tool=niusdfu
 pitaya_go_nrf52840.upload.tool.default=niusdfu
 pitaya_go_nrf52840.upload.use_1200bps_touch=true

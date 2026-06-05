@@ -45,8 +45,11 @@ const uint8_t PIN_A7 = A7;
 NRF_VARIANT_STATIC_ASSERT_COMMON_PINS();
 
 const uint32_t g_ADigitalPinMap[] = {
+    // D0..D10 (Seeed silk): P0.02,03,28,29,04,05 then P1.11..P1.15
     2, 3, 28, 29, 4, 5, 43, 44,
-    45, 46, 47, 6, 7, 8, 9, 10,
+    // idx 8..10 = P1.13/14/15; idx 11=LED_RED(P0.26) 12=LED_BLUE(P0.06)
+    // 13=LED_GREEN(P0.30); idx14=NeoPixel(P0.09) 15=button(P0.10)
+    45, 46, 47, 26, 6, 30, 9, 10,
     11, 12, 13, 14, 15, 16, 17, 18,
     19, 20, 21, 22, 23, 24, 25, 26,
     32

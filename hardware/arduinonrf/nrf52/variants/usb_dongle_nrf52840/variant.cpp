@@ -4,12 +4,12 @@ const NrfBoardCapabilities g_boardCapabilities = {
     "nRF52840 USB Dongle", "usb-dongle", "not-applicable", "package-modeled", "undeclared", "undeclared", true, false, false, true, false, false, true, true, true, false, false, false, false, 1, 1
 };
 
-const uint8_t PINS_COUNT = 19;
+const uint8_t PINS_COUNT = 21;
 const uint8_t PIN_LED1 = LED_BUILTIN;
 const uint8_t PIN_LED2 = LED_GREEN;
 const uint8_t PIN_LED3 = LED_BLUE;
 const uint8_t PIN_NEOPIXEL = 255;
-const uint8_t PIN_BUTTON1 = 5;
+const uint8_t PIN_BUTTON1 = 20;   // SW1 -> P1.06 (active low)
 const uint8_t PIN_BUTTON2 = 255;
 const uint8_t PIN_BATTERY = 255;
 const uint8_t PIN_EXT_VCC = 255;
@@ -45,8 +45,10 @@ const uint8_t PIN_A7 = A7;
 NRF_VARIANT_STATIC_ASSERT_COMMON_PINS();
 
 const uint32_t g_ADigitalPinMap[] = {
-    0, 1, 2, 3, 4, 5, 6, 7, 8,
-    9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+    0, 1, 2, 3, 4, 5, 6, 7, 8,   // 0..18 = P0.00..P0.18 (identity)
+    9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+    41,  // 19 = P1.09 (LD2 green)
+    38   // 20 = P1.06 (SW1 button)
 };
 
 NRF_VARIANT_STATIC_ASSERT_PINMAP_SIZE();
