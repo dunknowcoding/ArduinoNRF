@@ -31,7 +31,7 @@ Typical wall-clock for `arduino-cli upload` of a precompiled sketch, ProMicro cl
 | DFU transfer (~82 KB) | ~6.4 s | DFU-protocol/flash bound (floor) |
 | `arduino-cli` port enumeration wrapper | ~9 s | arduino-cli's own scan; the IDE does less with a pre-selected port |
 
-The package-controllable pipeline (`upload.ps1`) runs in ~14–15 s; the rest is firmware/bootloader and arduino-cli floors. See [platform/USB_1200_TOUCH_V1_FIX.md](platform/USB_1200_TOUCH_V1_FIX.md) for the firmware fixes that make the touch work.
+The package-controllable pipeline (`upload.ps1`) runs in ~14–15 s; the rest is firmware/bootloader and arduino-cli floors.
 
 ## How to reproduce
 

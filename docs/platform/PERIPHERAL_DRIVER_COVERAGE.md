@@ -77,8 +77,7 @@ These are **not** missing drivers — they're intentional design choices:
   callbacks), not a separate raw peripheral; tracked as an API extension,
   not a driver gap.
 - **CRYPTOCELL (CC310)** — a binary-blob accelerator, intentionally a
-  separate library with its own vendoring roadmap
-  (`CC310_INTEGRATION_PLAN.md`). The on-chip ECB/CCM/AAR above cover
+  separate library with its own vendoring roadmap. The on-chip ECB/CCM/AAR above cover
   hardware AES *without* the blob.
 - **DAC** — does not exist on the nRF52840.
 

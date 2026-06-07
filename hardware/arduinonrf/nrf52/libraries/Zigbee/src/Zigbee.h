@@ -1,5 +1,5 @@
 // Zigbee.h - Arduino API surface for the planned Zboss + nrf-802154
-// integration. See docs/platform/ZIGBEE_INTEGRATION_PLAN.md.
+// integration. See vendor/README.md.
 //
 // SKELETON - returns ZIGBEE_NOT_VENDORED until vendoring is done.
 #pragma once

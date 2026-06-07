@@ -48,8 +48,7 @@ the four host-side trigger mechanisms upload.ps1 used to try.
 Root cause: three cooperating firmware bugs in `NrfUsbd.cpp` — EP0 OUT
 EasyDMA never triggered, EP0 OUT direction routed by stale `BMREQUESTTYPE`,
 and a subsequent DTR=true cancelling `serviceTouchPending_` inside the 40 ms
-confirm window. See [`USB_1200_TOUCH_V1_FIX.md`](USB_1200_TOUCH_V1_FIX.md)
-for the full root-cause writeup and the three patches.
+confirm window.
 
 ### `usbcdc=disabled` in-app upload (host-side fix)
 

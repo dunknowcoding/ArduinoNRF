@@ -1,6 +1,6 @@
 # Vendoring OpenThread + nrf-802154 for nRF52840
 
-Per the M1 milestone in `docs/platform/THREAD_INTEGRATION_PLAN.md`.
+Part of the in-progress OpenThread vendoring effort (not yet complete).
 
 ## Where to get it
 

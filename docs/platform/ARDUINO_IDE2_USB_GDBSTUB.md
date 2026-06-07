@@ -33,7 +33,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\hardware\arduinonrf\nrf52\
 
 ## 4. 与 arduino-cli / 本地脚本并行
 
-若你用 **`arduino-cli`** 编译上传同一套菜单选项，见 **`docs/platform/DEVBOARD_INCREMENTAL_GATES.md`** 中的「arduino-cli 与本地工具」：`hardware_upload_minimal_usb.ps1 -UseArduinoCiConfig …` 与 CI 使用相同的 **`--config-file .arduino-ci.yaml`** + sketchbook junction。IDE 里选的串口应与 **`arduino-cli … board list`** 以及 **`usb_gdbstub_bridge.ps1`** 使用的维护口一致。
+若你用 **`arduino-cli`** 编译上传同一套菜单选项，`hardware_upload_minimal_usb.ps1 -UseArduinoCiConfig …` 与 CI 使用相同的 **`--config-file .arduino-ci.yaml`** + sketchbook junction。IDE 里选的串口应与 **`arduino-cli … board list`** 以及 **`usb_gdbstub_bridge.ps1`** 使用的维护口一致。
 
 ## 5. 参考
 

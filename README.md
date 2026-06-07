@@ -123,8 +123,9 @@ NimBLE::onReceive([](const uint8_t *d, size_t n) {  // central -> board (RX writ
 Start from **`examples/NimBLESmoke`** to confirm the stack is up, then
 **`examples/BLESend`** (push data to a phone/PC) and **`examples/BLEReceive`**
 (receive data from one) — both drive the Nordic UART service and work with the
-free **nRF Connect** app. The other wireless stacks (CC310 crypto, Zigbee,
-Thread) are still skeletons — see the capability table below.
+free **nRF Connect** app. CC310 crypto and the nRF52840's *own*-radio
+Zigbee/Thread stacks are still skeletons; **working Zigbee is available today via
+an external CC2530 module** (see the capability table below).
 
 ---
 
@@ -172,10 +173,9 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **All small peripherals** | ✅ **TRNG** (`NrfRng`), die **temp sensor** (`NrfTemp`), **watchdog** (`NrfWdt`), **rotary decoder** (`NrfQdec`), **TIMER0–4** w/ 6 CC each (`NrfTimer`), **flash erase/write** (`NrfNvmc`), **PPI** (peripheral-to-peripheral routing) (`NrfPpi`), **EGU/SWI** (software events + IRQ on 6×16 channels) (`NrfEgu`), **analog comparator** (`NrfComp`), **memory watch unit** (`NrfMwu`), **GPIOTE output channels** for PPI use (`NrfGpioteOut`). All in [`NrfPeripherals.h`](hardware/arduinonrf/nrf52/cores/arduino/NrfPeripherals.h) + examples `PeripheralsDemo`, `TimerNvmcPpi`, `EguCompGpiotePpi`. |
 | **Media peripherals** | ⚠️ **QSPI** (external NOR flash), **PDM** (MEMS mic), **I2S** (digital audio) drivers exist in [`NrfMediaPeripherals.h`](hardware/arduinonrf/nrf52/cores/arduino/NrfMediaPeripherals.h). API + register sequences complete per nRF52840 PS, but unverified — the reference ProMicro has none of those external chips wired. XIAO Sense (PDM) / Pitaya Go (QSPI) / custom audio boards should work, please test. |
 | **BLE (NimBLE)** | ✅ **Working over-the-air BLE.** [`libraries/NimBLE/`](hardware/arduinonrf/nrf52/libraries/NimBLE/) vendors the Apache Mynewt NimBLE host **and** controller on a bare-metal cooperative port. Advertising, connection, MTU exchange, and full GATT service / characteristic / descriptor discovery are **verified on hardware** against Windows (bleak/WinRT), Android (nRF Connect), and board-to-board. See **[§ Bluetooth Low Energy (NimBLE)](#-bluetooth-low-energy-nimble)** and `examples/NimBLESmoke`. |
-| **CC310 (crypto)** | ⚠️ [`libraries/CC310/`](hardware/arduinonrf/nrf52/libraries/CC310/) is still a true skeleton: the public API is defined, but without Nordic's `libcc_310.a` every operation returns `CC_NOT_VENDORED` and `isAvailable()` stays `false`. Roadmap: [docs/platform/CC310_INTEGRATION_PLAN.md](docs/platform/CC310_INTEGRATION_PLAN.md). |
-| **Zigbee / 802.15.4** | ⚠️ [`libraries/Zigbee/`](hardware/arduinonrf/nrf52/libraries/Zigbee/) is still a true skeleton: the API surface is present, but `begin()` / `sendOnOff()` return `ZIGBEE_NOT_VENDORED`, `isAvailable()` is `false`, and the Zboss + nrf-802154 stack is not in-tree yet. Roadmap: [docs/platform/ZIGBEE_INTEGRATION_PLAN.md](docs/platform/ZIGBEE_INTEGRATION_PLAN.md). |
-| **CC2530 Zigbee module (external)** | ✅ **Working external 802.15.4 radio + built-in flasher.** [`libraries/CCDebugger/`](hardware/arduinonrf/nrf52/libraries/CCDebugger/) turns the nRF52840 into a **TI CC2530 programmer — no external CC-Debugger needed** (hardware-verified chip-ID, mass-erase, DMA flash + read-back verify). Flash the SDCC 802.15.4 transceiver firmware, then drive the module over UART (send / receive / promiscuous sniff) with the separate **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)** library. Wiring + API: [`libraries/CCDebugger/README.md`](hardware/arduinonrf/nrf52/libraries/CCDebugger/README.md). |
-| **Thread (OpenThread)** | ⚠️ [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is **not done yet**: OpenThread headers, some platform glue, and smoke wiring are present, but the real OpenThread core + nrf-802154 radio path are not vendored, `begin()` returns `THREAD_NOT_VENDORED`, and `isAvailable()` / `isAttached()` stay `false`. Roadmap: [docs/platform/THREAD_INTEGRATION_PLAN.md](docs/platform/THREAD_INTEGRATION_PLAN.md). |
+| **CC310 (crypto)** | ⚠️ [`libraries/CC310/`](hardware/arduinonrf/nrf52/libraries/CC310/) is still a true skeleton: the public API is defined, but without Nordic's `libcc_310.a` every operation returns `CC_NOT_VENDORED` and `isAvailable()` stays `false`. |
+| **Zigbee / 802.15.4** | ✅ **Working via an external CC2530 module.** Flash it with the built-in **[`libraries/CCDebugger/`](hardware/arduinonrf/nrf52/libraries/CCDebugger/)** — the nRF52840 *is* the CC-Debugger, no external programmer (HW-verified erase / flash / read-back verify) — then drive it over UART (raw 802.15.4 send / receive / promiscuous sniff) with the separate **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)** library. The nRF52840's *own*-radio Zigbee ([`libraries/Zigbee/`](hardware/arduinonrf/nrf52/libraries/Zigbee/)) is still a skeleton (Zboss not vendored, `begin()` → `ZIGBEE_NOT_VENDORED`). Guide: **[docs/platform/ZIGBEE.md](docs/platform/ZIGBEE.md)**. |
+| **Thread (OpenThread)** | ⚠️ [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is **not done yet**: OpenThread headers, some platform glue, and smoke wiring are present, but the real OpenThread core + nrf-802154 radio path are not vendored, `begin()` returns `THREAD_NOT_VENDORED`, and `isAvailable()` / `isAttached()` stay `false`. |
 | **EEPROM** | ✅ Emulated (see EEPROM examples) |
 | **Upload** | ✅ Hands-free serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |
@@ -191,9 +191,8 @@ Everything beyond this README lives under **[docs/](docs/)** — start at **[doc
 - 🧪 **[docs/VALIDATION.md](docs/VALIDATION.md)** — what's been tested on real hardware, and how to reproduce it
 - 🔼 **[docs/uploads/hands_free_upload.md](docs/uploads/hands_free_upload.md)** — hands-free upload, plus the double-reset and SWD-probe fallbacks
 - 🐞 **[docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md](docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md)** — single-cable debug setup
-- 🧷 **[docs/platform/USB_1200_TOUCH_V1_FIX.md](docs/platform/USB_1200_TOUCH_V1_FIX.md)** — the firmware fixes behind hands-free upload
 - 🧩 **[docs/boards/](docs/boards/)** — per-board reference
-- 📦 **[docs/release/](docs/release/)** — release flow and notes
+- 📦 **[GitHub Releases](https://github.com/dunknowcoding/ArduinoNRF/releases)** — release notes
 
 ## 🛠️ Repository layout
 

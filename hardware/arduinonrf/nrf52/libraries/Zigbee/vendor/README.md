@@ -1,6 +1,6 @@
 # Vendoring Zigbee (Zboss + nrf-802154) for nRF52840
 
-Per the M1 milestone in `docs/platform/ZIGBEE_INTEGRATION_PLAN.md`.
+Part of the in-progress Zboss vendoring effort (not yet complete).
 
 ## Where to get it
 

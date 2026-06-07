@@ -19,7 +19,7 @@
 | Upload transport | Adafruit serial DFU through `upload.ps1` |
 | Runtime service COM in `promicroserialnosd` | may still appear under the same `0x239A:0x00B3` family |
 | Software reset target in code | full bootloader (`GPREGRET = 0x57`) |
-| Current status | V1 hands-free reflash and USB-CDC GDB-stub debug are both PASSING; see [`../VALIDATION.md`](../VALIDATION.md) and [`../platform/USB_1200_TOUCH_V1_FIX.md`](../platform/USB_1200_TOUCH_V1_FIX.md) |
+| Current status | V1 hands-free reflash and USB-CDC GDB-stub debug are both PASSING; see [`../VALIDATION.md`](../VALIDATION.md) |
 
 ## Current live-board status
 
@@ -82,4 +82,3 @@ silk-screen.
 - The current source-of-truth docs are:
   - `docs/VALIDATION.md`
   - `docs/platform/UPLOAD_BEHAVIOR.md`
-  - `docs/platform/USB_1200_TOUCH_V1_FIX.md`

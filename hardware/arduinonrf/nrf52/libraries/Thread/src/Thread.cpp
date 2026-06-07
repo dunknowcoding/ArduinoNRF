@@ -1,5 +1,5 @@
 // Thread.cpp - implementation. At M1 status (see
-// docs/platform/THREAD_INTEGRATION_PLAN.md):
+// vendor/README.md):
 //   * The OpenThread public API headers (openthread/error.h,
 //     openthread/instance.h) and the full platform abstraction surface
 //     (openthread/platform/*.h) are VENDORED into src/.

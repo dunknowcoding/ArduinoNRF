@@ -6,15 +6,12 @@ All project documentation lives here. Start with the [project README](../README.
 
 - [COMPATIBILITY.md](COMPATIBILITY.md) — **OS support matrix (Windows / Linux / macOS) and real-board identity audit**
 - [VALIDATION.md](VALIDATION.md) — what's verified on real hardware, timing, and how to reproduce it
-- [release/RELEASE_NOTES_v0.2.0.md](release/RELEASE_NOTES_v0.2.0.md) — current release notes (interrupt-driven USB + working BLE GATT)
-- [release/RELEASE_NOTES_v0.1.0.md](release/RELEASE_NOTES_v0.1.0.md) · [release/RELEASE_NOTES_v0.0.1.md](release/RELEASE_NOTES_v0.0.1.md) — earlier releases
-- [release/README.md](release/README.md) · [release/PRE_RELEASE_CHECKLIST.md](release/PRE_RELEASE_CHECKLIST.md) — release flow
+- Release notes: the [GitHub Releases page](https://github.com/dunknowcoding/ArduinoNRF/releases)
 
 ## Uploading
 
 - [uploads/hands_free_upload.md](uploads/hands_free_upload.md) — button-less serial-DFU on the maintenance CDC (the default verified path is the ProMicro clone's `promicroserialnosd` workflow); also covers the double-reset and SWD-probe fallbacks
 - [platform/UPLOAD_BEHAVIOR.md](platform/UPLOAD_BEHAVIOR.md) — upload policy and behavior
-- [platform/USB_1200_TOUCH_V1_FIX.md](platform/USB_1200_TOUCH_V1_FIX.md) — the firmware fixes that make hands-free upload work
 - [bootloaders/README.md](bootloaders/README.md) — bootloader families
 
 ## Debugging
@@ -47,12 +44,15 @@ All project documentation lives here. Start with the [project README](../README.
   UART service with `NimBLE::write()` / `NimBLE::onReceive()`. See the BLE
   section of the [project README](../README.md) and the `NimBLESmoke`,
   `BLESend`, and `BLEReceive` examples.
-
-## Multi-session roadmaps (large vendoring efforts still pending)
-
-- [platform/CC310_INTEGRATION_PLAN.md](platform/CC310_INTEGRATION_PLAN.md) — `libraries/CC310/` is still a true skeleton until Nordic's `libcc_310.a` is provided; the public API exists, but operations return `CC_NOT_VENDORED`.
-- [platform/ZIGBEE_INTEGRATION_PLAN.md](platform/ZIGBEE_INTEGRATION_PLAN.md) — `libraries/Zigbee/` is still a true skeleton; the Zboss + nrf-802154 runtime is not vendored and `begin()` returns `ZIGBEE_NOT_VENDORED`.
-- [platform/THREAD_INTEGRATION_PLAN.md](platform/THREAD_INTEGRATION_PLAN.md) — `libraries/Thread/` is not done yet: OpenThread headers and some glue are present, but the actual OpenThread core + radio path are not vendored and `begin()` returns `THREAD_NOT_VENDORED`.
+- **Zigbee / 802.15.4 — working via an external CC2530 module.** Flash the module
+  with the built-in CC-Debugger ([`libraries/CCDebugger/`](../hardware/arduinonrf/nrf52/libraries/CCDebugger/),
+  no external programmer) and drive it with the separate
+  **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)**
+  library. Full guide: **[platform/ZIGBEE.md](platform/ZIGBEE.md)**.
+- **Not yet vendored:** CC310 crypto (`libraries/CC310/` — needs Nordic's
+  `libcc_310.a`), the nRF *own-radio* Zigbee stack (`libraries/Zigbee/` — Zboss
+  not in-tree), and Thread (`libraries/Thread/` — OpenThread core not vendored).
+  Each exposes its API but returns `*_NOT_VENDORED` until the runtime is added.
 
 ## Platform reference (capabilities & truth)
 
@@ -61,4 +61,3 @@ All project documentation lives here. Start with the [project README](../README.
 - [platform/POWER_ADC_NOTES.md](platform/POWER_ADC_NOTES.md) — ADC / battery-sense behavior
 - [platform/BLE_WIFI_BOUNDARIES.md](platform/BLE_WIFI_BOUNDARIES.md) — BLE/WiFi facade boundaries (BLE is now a full NimBLE stack; WiFi remains out of scope on nRF52)
 - [platform/REFERENCE_COMPARISON.md](platform/REFERENCE_COMPARISON.md) — comparison vs `pdcook/nRFMicro-Arduino-Core`
-- [platform/BOARD_IMAGE_EVIDENCE.md](platform/BOARD_IMAGE_EVIDENCE.md) · [platform/DEVBOARD_INCREMENTAL_GATES.md](platform/DEVBOARD_INCREMENTAL_GATES.md) — evidence & gating

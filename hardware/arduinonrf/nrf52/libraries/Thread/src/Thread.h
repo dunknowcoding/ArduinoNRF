@@ -1,5 +1,5 @@
 // Thread.h - Arduino API surface for the planned OpenThread integration.
-// See docs/platform/THREAD_INTEGRATION_PLAN.md.
+// See vendor/README.md.
 //
 // SKELETON - returns THREAD_NOT_VENDORED until vendoring is done.
 #pragma once
