@@ -1,0 +1,13 @@
+#######################################
+# Syntax Coloring Map for CCDebugger
+#######################################
+
+CCDebugger	KEYWORD1
+
+begin	KEYWORD2
+enterDebug	KEYWORD2
+chipID	KEYWORD2
+status	KEYWORD2
+chipErase	KEYWORD2
+flashFirmware	KEYWORD2
+run	KEYWORD2
