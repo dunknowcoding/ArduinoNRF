@@ -94,3 +94,13 @@ hardware/arduinonrf/nrf52/libraries/NimBLE/examples/NimBLEPeripheralTest/
 Thumbs.db
 *.swp
 *~
+
+# ============================================================
+# Developer-only tooling (release building, hardware validation,
+# board diagnostics). End users install via Board Manager and never
+# run these - kept local, not tracked / not shipped.
+# ============================================================
+tools/
+scripts/
+__pycache__/
+*.pyc

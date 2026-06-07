@@ -200,7 +200,6 @@ Everything beyond this README lives under **[docs/](docs/)** — start at **[doc
 hardware/arduinonrf/nrf52/    # the Arduino platform: cores, variants, boards.txt, tools
 examples/                     # peripheral, UART/UARTE, BLE send/receive, and USB examples
 docs/                         # all documentation (the only place docs live)
-scripts/ , tools/             # build, release, and hardware-validation helpers
 package_arduinonrf_index.json # Board Manager index
 ```
 

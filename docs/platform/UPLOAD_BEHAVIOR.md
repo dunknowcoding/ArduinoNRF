@@ -34,7 +34,7 @@ These boards currently declare USB-backed upload support in package metadata:
 - **a second upload from that user-mode `COM3` works** — the 1200 bps touch
   triggers `NVIC_SystemReset()` into the bootloader, adafruit-nrfutil streams
   the image, and the board re-boots into user mode. The full V1 harness
-  (`scripts/verify_promicro_usbcdc_upload_behavior.ps1 -Phase V1`) passes
+  passes
   Pass A + Pass B end to end.
 
 ### What previously failed (historical)
