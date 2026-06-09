@@ -1,6 +1,6 @@
 # Upload Behavior
 
-Date: 2026-05-18
+Date: 2026-06-09
 
 This document records the current upload truth exposed by the package. It does not claim that every clone board is fully verified.
 
@@ -21,6 +21,10 @@ These boards currently declare USB-backed upload support in package metadata:
 ## Current Windows wrapper behavior
 
 - `tools/niusrobotlab/upload.ps1` owns the touch/reset sequence on Windows instead of relying on the Arduino CLI default touch path.
+- `Bootloader / DFU → Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use `adafruit-nrfutil`.
+- UF2 drives are matched to the selected serial port by stable USB identity. If two boards expose the same volume label, the wrapper refuses ambiguous matches instead of choosing the first drive.
+- `Upload Method → Enter UF2 drive only (no upload)` performs the touch/bootloader wait, reports the matched drive, and exits before copying firmware.
+- If the selected upload COM is stale after a mode change, the wrapper fails with a clear "re-select the current SERVICE/DFU port" message instead of falling through to another board.
 - The wrapper treats same-PID runtime/bootloader cases as a separate class, rather than assuming a visible `0x239A:0x00B3` COM is already a bootloader port. On these boards it does NOT block the DFU on a PnP-level "transition observed" signal (because runtime and bootloader share `0x00B3`) — it surfaces a `[warn] ... Port never detached after touch` informational line and proceeds with a direct DFU attempt, which now succeeds because the firmware-side touch fix lands the chip in the bootloader before the warn fires.
 - The previous service-port "boot token" fallback (`~NIUSBL!42\r` after arming with line coding `134/8/2/2 + DTR+RTS`) has been removed — the standard 1200 bps touch path is now the single primary trigger.
 
@@ -31,11 +35,11 @@ These boards currently declare USB-backed upload support in package metadata:
 - first upload from manual bootloader mode works on the user's board
 - the board returns to user mode afterward
 - with `usbcdc=disabled`, the board keeps a single visible SERVICE CDC path
-- **a second upload from that user-mode `COM3` works** — the 1200 bps touch
-  triggers `NVIC_SystemReset()` into the bootloader, adafruit-nrfutil streams
-  the image, and the board re-boots into user mode. The full V1 harness
-  passes
-  Pass A + Pass B end to end.
+- UF2 upload from the current DFU port works in both `bootloader=auto` and explicit UF2 menu modes
+- explicit Adafruit serial DFU from the current DFU port works and is not confused by a mounted UF2 volume
+- with two boards simultaneously mounted as `NICENANO`, the selected board maps to its own drive (`J:` vs `K:` in the hardware run)
+- selecting a stale COM after the board re-enumerates is rejected before any upload can target another board
+- **a second upload from user mode works** — the 1200 bps touch triggers `NVIC_SystemReset()` into the bootloader, the selected transport streams the image, and the board re-boots into user mode.
 
 ### What previously failed (historical)
 
@@ -66,5 +70,5 @@ the touch runs and the board reboots normally. Verified 3× back-to-back plus
 
 ### What still needs validation
 
-- V2 (dual-CDC reflash) and V3 (locked OLD-COM cycle) on the user's board
 - Boards beyond the user's ProMicro clone that share the firmware path
+- Linux/macOS UF2 parity; those platforms still use the Python/Adafruit serial-DFU recipe

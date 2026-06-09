@@ -1,18 +1,19 @@
-menu.storage=Storage
+menu.storage=Persistent Storage
 menu.usbcdc=USB Serial (CDC)
-menu.usbdesc=USB DFU
-menu.uploadmode=Upload via
-menu.bootloader=Bootloader
-menu.flashprofile=Flash
-menu.ramprofile=SRAM
-menu.buildprofile=Build Options
-menu.pwmclock=PWM speed
+menu.usbdesc=Runtime DFU Interface
+menu.uploadmode=Upload Method
+menu.bootloader=Bootloader / DFU
+menu.flashprofile=Flash Memory
+menu.ramprofile=RAM
+menu.buildprofile=Build Profile
+menu.pwmclock=PWM Frequency
 
 promicro_nrf52840.name=AliExpress ProMicro nRF52840
 promicro_nrf52840.upload.tool=niusdfu
 promicro_nrf52840.upload.tool.default=niusdfu
 promicro_nrf52840.upload.use_1200bps_touch=false
 promicro_nrf52840.upload.wait_for_upload_port=true
+promicro_nrf52840.upload.enter_bootloader_only=false
 promicro_nrf52840.upload.protocol=dfu
 # AliExpress ProMicro nRF52840 V1940 boards observed so far enumerate their
 # bootloader as VID 0x239A, PID 0x00B3. That identity matches the nice!nano v2
@@ -47,9 +48,9 @@ promicro_nrf52840.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DE
 promicro_nrf52840.build.usb_vbus_flags=-DNRF_SYSTEM_USB_ASSUME_VBUS=1
 promicro_nrf52840.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
 promicro_nrf52840.build.bootloader_fallback_flags=-DNRF_SYSTEM_BOOTLOADER_DBL_RESET_FALLBACK=1
-# Upload transport stays on Adafruit serial DFU for this clone family, but
-# software-triggered bootloader entry / startup rescue should land in the full
-# UF2+CDC bootloader (0x57). That is the board's most reliable host-visible
+# Upload transport supports both UF2 mass storage and Adafruit serial DFU for
+# this clone family. Software-triggered bootloader entry / startup rescue lands
+# in the full UF2+CDC bootloader (0x57), the board's most reliable host-visible
 # recovery state when there is no physical reset button.
 promicro_nrf52840.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.build.bootloader_app_start=0x26000
@@ -63,26 +64,34 @@ promicro_nrf52840.build.storage_reserved_bytes=16384
 promicro_nrf52840.build.usbdesc_flags=
 promicro_nrf52840.build.pwm_clock_flags=
 promicro_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.usb_vbus_flags} {build.upload_mode_flags} {build.bootloader_fallback_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags} {build.usbdesc_flags} {build.pwm_clock_flags}
-promicro_nrf52840.menu.usbcdc.enabled=Enabled
+promicro_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 promicro_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-promicro_nrf52840.menu.usbcdc.disabled=Disabled
+promicro_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 promicro_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-promicro_nrf52840.menu.usbdesc.standard=Enabled
+promicro_nrf52840.menu.usbdesc.standard=Enabled (runtime DFU endpoint)
 promicro_nrf52840.menu.usbdesc.standard.build.usbdesc_flags=
-promicro_nrf52840.menu.usbdesc.no_app_dfu=Disabled
+promicro_nrf52840.menu.usbdesc.no_app_dfu=Disabled (hide runtime DFU)
 promicro_nrf52840.menu.usbdesc.no_app_dfu.build.usbdesc_flags=-DNRF_USB_RUNTIME_DISABLE_APP_DFU=1
-promicro_nrf52840.menu.flashprofile.internal1m=1 MB internal
+promicro_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB)
 promicro_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-promicro_nrf52840.menu.ramprofile.sram256=256 KB
+promicro_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 promicro_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-promicro_nrf52840.menu.uploadmode.usb=USB bootloader
+promicro_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2)
 promicro_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 promicro_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 promicro_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 promicro_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=false
 promicro_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 promicro_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-promicro_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+promicro_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+promicro_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+promicro_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+promicro_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+promicro_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+promicro_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+promicro_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+promicro_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+promicro_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 promicro_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 promicro_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 promicro_nrf52840.menu.uploadmode.swd.upload.protocol=swd
@@ -102,7 +111,7 @@ promicro_nrf52840.menu.bootloader.auto.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.auto.upload.maximum_size=798720
 promicro_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.promicro=UF2 drive, with BLE [promicro]
+promicro_nrf52840.menu.bootloader.promicro=UF2 mass storage, SoftDevice BLE (ProMicro clone)
 promicro_nrf52840.menu.bootloader.promicro.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.promicro.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicro.upload.usb_pid=0x00B3
@@ -115,7 +124,7 @@ promicro_nrf52840.menu.bootloader.promicro.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.promicro.upload.maximum_size=798720
 promicro_nrf52840.menu.bootloader.promicro.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.promicro.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.promicrolegacy=UF2 drive, with BLE, legacy [promicrolegacy]
+promicro_nrf52840.menu.bootloader.promicrolegacy=UF2 mass storage, legacy SoftDevice BLE
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.usb_pid=0x00B3
@@ -128,7 +137,7 @@ promicro_nrf52840.menu.bootloader.promicrolegacy.upload.uf2_board_id=nRF52840-ni
 promicro_nrf52840.menu.bootloader.promicrolegacy.upload.maximum_size=794624
 promicro_nrf52840.menu.bootloader.promicrolegacy.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.promicrolegacy.build.bootloader_app_start=0x27000
-promicro_nrf52840.menu.bootloader.promicroserial=Serial DFU, with BLE [promicroserial]
+promicro_nrf52840.menu.bootloader.promicroserial=Serial DFU, SoftDevice BLE
 promicro_nrf52840.menu.bootloader.promicroserial.upload.bootloader_mode=adafruit-dfu
 promicro_nrf52840.menu.bootloader.promicroserial.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicroserial.upload.usb_pid=0x00B3
@@ -143,7 +152,7 @@ promicro_nrf52840.menu.bootloader.promicroserial.upload.use_1200bps_touch=false
 promicro_nrf52840.menu.bootloader.promicroserial.upload.wait_for_upload_port=false
 promicro_nrf52840.menu.bootloader.promicroserial.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroserial.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.promicroserialnosd=Serial DFU, no BLE [promicroserialnosd]
+promicro_nrf52840.menu.bootloader.promicroserialnosd=Serial DFU, no SoftDevice BLE
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.bootloader_mode=adafruit-dfu
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.usb_pid=0x00B3
@@ -160,7 +169,7 @@ promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.wait_for_upload_port
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_app_start=0x1000
-promicro_nrf52840.menu.bootloader.promicroseriallegacy=Serial DFU, with BLE, legacy [promicroseriallegacy]
+promicro_nrf52840.menu.bootloader.promicroseriallegacy=Serial DFU, legacy SoftDevice BLE
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.bootloader_mode=adafruit-dfu
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.usb_pid=0x00B3
@@ -175,7 +184,7 @@ promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.use_1200bps_touch=
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.upload.wait_for_upload_port=false
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroseriallegacy.build.bootloader_app_start=0x27000
-promicro_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 [nicenano]
+promicro_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage
 promicro_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.nicenano.upload.usb_vid=0x239A
 promicro_nrf52840.menu.bootloader.nicenano.upload.usb_pid=0x0029
@@ -187,7 +196,7 @@ promicro_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.nicenano.upload.maximum_size=798720
 promicro_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-promicro_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU [nordicdfu]
+promicro_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util)
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -197,7 +206,7 @@ promicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 promicro_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 promicro_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 promicro_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-promicro_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 [xiaouf2]
+promicro_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -207,7 +216,7 @@ promicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 promicro_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 promicro_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-promicro_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 [makerdiaryuf2]
+promicro_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -217,15 +226,15 @@ promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-promicro_nrf52840.menu.buildprofile.release=Release [-Os]
+promicro_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 promicro_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 promicro_nrf52840.menu.buildprofile.release.build.debug_flags=
 promicro_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
-promicro_nrf52840.menu.buildprofile.debug=Debug symbols [-Og -g3]
+promicro_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 promicro_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 promicro_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3 -DDEBUG
 promicro_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-promicro_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub for IDE 2 Debug [-Og -g3]
+promicro_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 promicro_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 promicro_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 promicro_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
@@ -233,7 +242,7 @@ promicro_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_P
 # debugger to our PowerShell TCP-serial bridge instead of OpenOCD/SWD.
 #
 # arduino-cli's `Debug` command only accepts a built-in set of server-type
-# names (openocd, jlink, stutil, pyocd, bmp) — `usbgdbstub` here would be
+# names (openocd, jlink, stutil, pyocd, bmp); `usbgdbstub` here would be
 # rejected with "GDB server 'usbgdbstub' is not supported". So we pretend
 # to be openocd: keep `debug.server=openocd` (the same as other profiles)
 # and override `debug.server.openocd.path` to point at our launcher EXE.
@@ -243,7 +252,7 @@ promicro_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_P
 # / "Request cancelled"). usb_gdbstub_server.exe parses the gdb_port that
 # cortex-debug assigns (it owns the port; e.g. 50000) and spawns
 # usb_gdbstub_bridge.ps1 on it. The bridge prints
-# "Listening on port <N> for gdb connections" once its TCP socket is ready —
+# "Listening on port <N> for gdb connections" once its TCP socket is ready;
 # that matches cortex-debug's default openocd serverReady regex, so it then
 # connects GDB to localhost:<N>. One-click Debug in Arduino IDE 2 with no
 # separate "start bridge" terminal.
@@ -267,10 +276,10 @@ promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.postAtt
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.overrideRestartCommands.0=
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.overrideRestartCommands.1=
 promicro_nrf52840.menu.buildprofile.usbgdbstub.debug.cortex-debug.custom.overrideRestartCommands.2=
-promicro_nrf52840.menu.storage.log=Wear-leveling
+promicro_nrf52840.menu.storage.log=Wear leveling (recommended)
 promicro_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 promicro_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-promicro_nrf52840.menu.storage.legacy=Single-page
+promicro_nrf52840.menu.storage.legacy=Single page (legacy)
 promicro_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 promicro_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -279,11 +288,11 @@ promicro_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 # time; this menu just biases the BUILD-TIME default for analogWrite(pin, v)
 # without any explicit frequency call. The math is freq = 16 MHz / (1<<P) /
 # (top+1), so the carrier shown below is the analogWrite default.
-promicro_nrf52840.menu.pwmclock.auto=Auto (~1 kHz default carrier)
+promicro_nrf52840.menu.pwmclock.auto=Auto/default (~1 kHz)
 promicro_nrf52840.menu.pwmclock.auto.build.pwm_clock_flags=
-promicro_nrf52840.menu.pwmclock.high=High-speed (~16 kHz default carrier)
+promicro_nrf52840.menu.pwmclock.high=High frequency (~16 kHz)
 promicro_nrf52840.menu.pwmclock.high.build.pwm_clock_flags=-DNRF_PWM_DEFAULT_PRESCALER=0 -DNRF_PWM_DEFAULT_COUNTERTOP=999
-promicro_nrf52840.menu.pwmclock.low=Low-speed (~125 Hz default carrier)
+promicro_nrf52840.menu.pwmclock.low=Low frequency (~125 Hz)
 promicro_nrf52840.menu.pwmclock.low.build.pwm_clock_flags=-DNRF_PWM_DEFAULT_PRESCALER=7 -DNRF_PWM_DEFAULT_COUNTERTOP=999
 
 nicenano_v2.name=nice!nano v2 (experimental)
@@ -291,6 +300,7 @@ nicenano_v2.upload.tool=niusdfu
 nicenano_v2.upload.tool.default=niusdfu
 nicenano_v2.upload.use_1200bps_touch=true
 nicenano_v2.upload.wait_for_upload_port=true
+nicenano_v2.upload.enter_bootloader_only=false
 nicenano_v2.upload.protocol=dfu
 nicenano_v2.upload.usb_vid=0x239A
 nicenano_v2.upload.usb_pid=0x00B3
@@ -327,29 +337,37 @@ nicenano_v2.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 nicenano_v2.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 nicenano_v2.build.storage_reserved_bytes=16384
 nicenano_v2.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-nicenano_v2.menu.usbcdc.enabled=Enabled
+nicenano_v2.menu.usbcdc.enabled=Enabled (Serial Monitor)
 nicenano_v2.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-nicenano_v2.menu.usbcdc.disabled=Disabled
+nicenano_v2.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 nicenano_v2.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-nicenano_v2.menu.flashprofile.internal1m=Internal flash 1 MB only
+nicenano_v2.menu.flashprofile.internal1m=Internal flash only (1 MB)
 nicenano_v2.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-nicenano_v2.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+nicenano_v2.menu.ramprofile.sram256=Built-in RAM (256 KB)
 nicenano_v2.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-nicenano_v2.menu.uploadmode.usb=USB bootloader (recommended)
+nicenano_v2.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 nicenano_v2.menu.uploadmode.usb.upload.tool=niusdfu
 nicenano_v2.menu.uploadmode.usb.upload.tool.default=niusdfu
 nicenano_v2.menu.uploadmode.usb.upload.protocol=dfu
 nicenano_v2.menu.uploadmode.usb.upload.use_1200bps_touch=true
 nicenano_v2.menu.uploadmode.usb.upload.wait_for_upload_port=true
 nicenano_v2.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-nicenano_v2.menu.uploadmode.swd=CMSIS-DAP SWD
+nicenano_v2.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+nicenano_v2.menu.uploadmode.uf2boot.upload.tool=niusdfu
+nicenano_v2.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+nicenano_v2.menu.uploadmode.uf2boot.upload.protocol=dfu
+nicenano_v2.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+nicenano_v2.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+nicenano_v2.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+nicenano_v2.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+nicenano_v2.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 nicenano_v2.menu.uploadmode.swd.upload.tool=niusopenocd
 nicenano_v2.menu.uploadmode.swd.upload.tool.default=niusopenocd
 nicenano_v2.menu.uploadmode.swd.upload.protocol=swd
 nicenano_v2.menu.uploadmode.swd.upload.use_1200bps_touch=false
 nicenano_v2.menu.uploadmode.swd.upload.wait_for_upload_port=false
 nicenano_v2.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-nicenano_v2.menu.bootloader.auto=Auto-detect (default, recommended)
+nicenano_v2.menu.bootloader.auto=Auto-detect (recommended)
 nicenano_v2.menu.bootloader.auto.upload.bootloader_mode=auto
 nicenano_v2.menu.bootloader.auto.upload.usb_vid=auto
 nicenano_v2.menu.bootloader.auto.upload.usb_pid=auto
@@ -361,7 +379,7 @@ nicenano_v2.menu.bootloader.auto.upload.uf2_board_id=
 nicenano_v2.menu.bootloader.auto.upload.maximum_size=798720
 nicenano_v2.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 nicenano_v2.menu.bootloader.auto.build.bootloader_app_start=0x26000
-nicenano_v2.menu.bootloader.nicenano=nice!nano v2 UF2 (0x239A:0x0029)
+nicenano_v2.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage (0x239A:0x0029)
 nicenano_v2.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 nicenano_v2.menu.bootloader.nicenano.upload.usb_vid=0x239A
 nicenano_v2.menu.bootloader.nicenano.upload.usb_pid=0x0029
@@ -373,7 +391,7 @@ nicenano_v2.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenano
 nicenano_v2.menu.bootloader.nicenano.upload.maximum_size=798720
 nicenano_v2.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 nicenano_v2.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-nicenano_v2.menu.bootloader.nordicdfu=Nordic USB DFU
+nicenano_v2.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util)
 nicenano_v2.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 nicenano_v2.menu.bootloader.nordicdfu.upload.uf2_family_id=
 nicenano_v2.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -383,7 +401,7 @@ nicenano_v2.menu.bootloader.nordicdfu.upload.uf2_board_id=
 nicenano_v2.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 nicenano_v2.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 nicenano_v2.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-nicenano_v2.menu.bootloader.xiaouf2=Seeed XIAO UF2
+nicenano_v2.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 nicenano_v2.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 nicenano_v2.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 nicenano_v2.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -393,7 +411,7 @@ nicenano_v2.menu.bootloader.xiaouf2.upload.uf2_board_id=
 nicenano_v2.menu.bootloader.xiaouf2.upload.maximum_size=872448
 nicenano_v2.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 nicenano_v2.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-nicenano_v2.menu.bootloader.makerdiaryuf2=MakerDiary UF2
+nicenano_v2.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 nicenano_v2.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 nicenano_v2.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 nicenano_v2.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -403,7 +421,7 @@ nicenano_v2.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 nicenano_v2.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 nicenano_v2.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 nicenano_v2.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-nicenano_v2.menu.buildprofile.release=Release (-Os)
+nicenano_v2.menu.buildprofile.release=Release (smaller/faster, -Os)
 nicenano_v2.menu.buildprofile.release.compiler.optimization_flags=-Os
 nicenano_v2.menu.buildprofile.release.build.debug_flags=
 nicenano_v2.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -411,14 +429,14 @@ nicenano_v2.menu.buildprofile.debug=Debug symbols (-Og -g3)
 nicenano_v2.menu.buildprofile.debug.compiler.optimization_flags=-Og
 nicenano_v2.menu.buildprofile.debug.build.debug_flags=-g3
 nicenano_v2.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-nicenano_v2.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+nicenano_v2.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 nicenano_v2.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 nicenano_v2.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 nicenano_v2.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-nicenano_v2.menu.storage.log=Log-structured wear leveling
+nicenano_v2.menu.storage.log=Wear leveling (recommended)
 nicenano_v2.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 nicenano_v2.menu.storage.log.build.storage_reserved_bytes=16384
-nicenano_v2.menu.storage.legacy=Legacy single-page
+nicenano_v2.menu.storage.legacy=Single page (legacy)
 nicenano_v2.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 nicenano_v2.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -427,6 +445,7 @@ supermini_nrf52840.upload.tool=niusdfu
 supermini_nrf52840.upload.tool.default=niusdfu
 supermini_nrf52840.upload.use_1200bps_touch=true
 supermini_nrf52840.upload.wait_for_upload_port=true
+supermini_nrf52840.upload.enter_bootloader_only=false
 supermini_nrf52840.upload.protocol=dfu
 supermini_nrf52840.upload.usb_vid=0x239A
 supermini_nrf52840.upload.usb_pid=0x00B3
@@ -463,29 +482,37 @@ supermini_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 supermini_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 supermini_nrf52840.build.storage_reserved_bytes=16384
 supermini_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-supermini_nrf52840.menu.usbcdc.enabled=Enabled
+supermini_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 supermini_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-supermini_nrf52840.menu.usbcdc.disabled=Disabled
+supermini_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 supermini_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-supermini_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only
+supermini_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB)
 supermini_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-supermini_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+supermini_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 supermini_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-supermini_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+supermini_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 supermini_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 supermini_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 supermini_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 supermini_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=true
 supermini_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 supermini_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-supermini_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+supermini_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+supermini_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+supermini_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+supermini_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+supermini_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+supermini_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+supermini_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+supermini_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+supermini_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 supermini_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 supermini_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 supermini_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 supermini_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 supermini_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 supermini_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-supermini_nrf52840.menu.bootloader.auto=Auto-detect (default, recommended)
+supermini_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 supermini_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 supermini_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 supermini_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -497,7 +524,7 @@ supermini_nrf52840.menu.bootloader.auto.upload.uf2_board_id=
 supermini_nrf52840.menu.bootloader.auto.upload.maximum_size=798720
 supermini_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 supermini_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x26000
-supermini_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 (0x239A:0x0029)
+supermini_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage (0x239A:0x0029)
 supermini_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 supermini_nrf52840.menu.bootloader.nicenano.upload.usb_vid=0x239A
 supermini_nrf52840.menu.bootloader.nicenano.upload.usb_pid=0x0029
@@ -509,7 +536,7 @@ supermini_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenan
 supermini_nrf52840.menu.bootloader.nicenano.upload.maximum_size=798720
 supermini_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 supermini_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-supermini_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU
+supermini_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util)
 supermini_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 supermini_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 supermini_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -519,7 +546,7 @@ supermini_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 supermini_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 supermini_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 supermini_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-supermini_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2
+supermini_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 supermini_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 supermini_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 supermini_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -529,7 +556,7 @@ supermini_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 supermini_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 supermini_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 supermini_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-supermini_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2
+supermini_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 supermini_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 supermini_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 supermini_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -539,7 +566,7 @@ supermini_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 supermini_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 supermini_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 supermini_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-supermini_nrf52840.menu.buildprofile.release=Release (-Os)
+supermini_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 supermini_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 supermini_nrf52840.menu.buildprofile.release.build.debug_flags=
 supermini_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -547,14 +574,14 @@ supermini_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 supermini_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 supermini_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3
 supermini_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-supermini_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+supermini_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 supermini_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 supermini_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 supermini_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-supermini_nrf52840.menu.storage.log=Log-structured wear leveling
+supermini_nrf52840.menu.storage.log=Wear leveling (recommended)
 supermini_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 supermini_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-supermini_nrf52840.menu.storage.legacy=Legacy single-page
+supermini_nrf52840.menu.storage.legacy=Single page (legacy)
 supermini_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 supermini_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -563,6 +590,7 @@ nrfmicro_nrf52840.upload.tool=niusdfu
 nrfmicro_nrf52840.upload.tool.default=niusdfu
 nrfmicro_nrf52840.upload.use_1200bps_touch=true
 nrfmicro_nrf52840.upload.wait_for_upload_port=true
+nrfmicro_nrf52840.upload.enter_bootloader_only=false
 nrfmicro_nrf52840.upload.protocol=dfu
 nrfmicro_nrf52840.upload.usb_vid=0x1209
 nrfmicro_nrf52840.upload.usb_pid=0x5284
@@ -598,29 +626,37 @@ nrfmicro_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 nrfmicro_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 nrfmicro_nrf52840.build.storage_reserved_bytes=16384
 nrfmicro_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-nrfmicro_nrf52840.menu.usbcdc.enabled=Enabled
+nrfmicro_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 nrfmicro_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-nrfmicro_nrf52840.menu.usbcdc.disabled=Disabled
+nrfmicro_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 nrfmicro_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-nrfmicro_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only
+nrfmicro_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB)
 nrfmicro_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-nrfmicro_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+nrfmicro_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 nrfmicro_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-nrfmicro_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+nrfmicro_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 nrfmicro_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 nrfmicro_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 nrfmicro_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 nrfmicro_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=true
 nrfmicro_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 nrfmicro_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-nrfmicro_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+nrfmicro_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+nrfmicro_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+nrfmicro_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 nrfmicro_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-nrfmicro_nrf52840.menu.bootloader.auto=Auto-detect (default, recommended)
+nrfmicro_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 nrfmicro_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 nrfmicro_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 nrfmicro_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -632,7 +668,7 @@ nrfmicro_nrf52840.menu.bootloader.auto.upload.uf2_board_id=
 nrfmicro_nrf52840.menu.bootloader.auto.upload.maximum_size=1032192
 nrfmicro_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 nrfmicro_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x0
-nrfmicro_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (0x1915:0x5288)
+nrfmicro_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util) (0x1915:0x5288)
 nrfmicro_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 nrfmicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 nrfmicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -642,7 +678,7 @@ nrfmicro_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 nrfmicro_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 nrfmicro_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 nrfmicro_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-nrfmicro_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2
+nrfmicro_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage
 nrfmicro_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 nrfmicro_nrf52840.menu.bootloader.nicenano.upload.uf2_family_id=0xADA52840
 nrfmicro_nrf52840.menu.bootloader.nicenano.upload.uf2_app_start=0x26000
@@ -652,7 +688,7 @@ nrfmicro_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenano
 nrfmicro_nrf52840.menu.bootloader.nicenano.upload.maximum_size=876544
 nrfmicro_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 nrfmicro_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-nrfmicro_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2
+nrfmicro_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 nrfmicro_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 nrfmicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 nrfmicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -662,7 +698,7 @@ nrfmicro_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 nrfmicro_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 nrfmicro_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 nrfmicro_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2
+nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -672,7 +708,7 @@ nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 nrfmicro_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-nrfmicro_nrf52840.menu.buildprofile.release=Release (-Os)
+nrfmicro_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 nrfmicro_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 nrfmicro_nrf52840.menu.buildprofile.release.build.debug_flags=
 nrfmicro_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -680,14 +716,14 @@ nrfmicro_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 nrfmicro_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 nrfmicro_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3
 nrfmicro_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-nrfmicro_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+nrfmicro_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 nrfmicro_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 nrfmicro_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 nrfmicro_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-nrfmicro_nrf52840.menu.storage.log=Log-structured wear leveling
+nrfmicro_nrf52840.menu.storage.log=Wear leveling (recommended)
 nrfmicro_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 nrfmicro_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-nrfmicro_nrf52840.menu.storage.legacy=Legacy single-page
+nrfmicro_nrf52840.menu.storage.legacy=Single page (legacy)
 nrfmicro_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 nrfmicro_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -696,6 +732,7 @@ mini_nrf52840.upload.tool=niusdfu
 mini_nrf52840.upload.tool.default=niusdfu
 mini_nrf52840.upload.use_1200bps_touch=true
 mini_nrf52840.upload.wait_for_upload_port=true
+mini_nrf52840.upload.enter_bootloader_only=false
 mini_nrf52840.upload.protocol=dfu
 mini_nrf52840.upload.usb_vid=auto
 mini_nrf52840.upload.usb_pid=auto
@@ -730,31 +767,39 @@ mini_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 mini_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 mini_nrf52840.build.storage_reserved_bytes=16384
 mini_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-mini_nrf52840.menu.usbcdc.enabled=Enabled
+mini_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 mini_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-mini_nrf52840.menu.usbcdc.disabled=Disabled
+mini_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 mini_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
 mini_nrf52840.menu.flashprofile.qspi=Internal 1 MB + QSPI (capacity unverified)
 mini_nrf52840.menu.flashprofile.qspi.build.flash_flags=-DNRF_BOARD_HAS_QSPI=1 -DNRF_BOARD_FLASH_PROFILE=3 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-mini_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only (clone override)
+mini_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB, clone-safe)
 mini_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-mini_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+mini_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 mini_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-mini_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+mini_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 mini_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 mini_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 mini_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 mini_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=true
 mini_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 mini_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-mini_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+mini_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+mini_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+mini_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+mini_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+mini_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+mini_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+mini_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+mini_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+mini_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 mini_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 mini_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 mini_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 mini_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 mini_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 mini_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-mini_nrf52840.menu.bootloader.auto=Auto-detect (default, recommended)
+mini_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 mini_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 mini_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 mini_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -766,7 +811,7 @@ mini_nrf52840.menu.bootloader.auto.upload.uf2_board_id=
 mini_nrf52840.menu.bootloader.auto.upload.maximum_size=1032192
 mini_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 mini_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x0
-mini_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (0x1915:0x5282)
+mini_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util) (0x1915:0x5282)
 mini_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 mini_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 mini_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -776,7 +821,7 @@ mini_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 mini_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 mini_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 mini_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-mini_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2
+mini_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage
 mini_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 mini_nrf52840.menu.bootloader.nicenano.upload.uf2_family_id=0xADA52840
 mini_nrf52840.menu.bootloader.nicenano.upload.uf2_app_start=0x26000
@@ -786,7 +831,7 @@ mini_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenano
 mini_nrf52840.menu.bootloader.nicenano.upload.maximum_size=876544
 mini_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 mini_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-mini_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2
+mini_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 mini_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 mini_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 mini_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -796,7 +841,7 @@ mini_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 mini_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 mini_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 mini_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-mini_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2
+mini_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 mini_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 mini_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 mini_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -806,7 +851,7 @@ mini_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 mini_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 mini_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 mini_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-mini_nrf52840.menu.buildprofile.release=Release (-Os)
+mini_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 mini_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 mini_nrf52840.menu.buildprofile.release.build.debug_flags=
 mini_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -814,14 +859,14 @@ mini_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 mini_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 mini_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3
 mini_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-mini_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+mini_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 mini_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 mini_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 mini_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-mini_nrf52840.menu.storage.log=Log-structured wear leveling
+mini_nrf52840.menu.storage.log=Wear leveling (recommended)
 mini_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 mini_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-mini_nrf52840.menu.storage.legacy=Legacy single-page
+mini_nrf52840.menu.storage.legacy=Single page (legacy)
 mini_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 mini_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -830,6 +875,7 @@ xiao_nrf52840.upload.tool=niusdfu
 xiao_nrf52840.upload.tool.default=niusdfu
 xiao_nrf52840.upload.use_1200bps_touch=true
 xiao_nrf52840.upload.wait_for_upload_port=true
+xiao_nrf52840.upload.enter_bootloader_only=false
 xiao_nrf52840.upload.protocol=dfu
 xiao_nrf52840.upload.usb_vid=0x2886
 xiao_nrf52840.upload.usb_pid=0x0044
@@ -865,31 +911,39 @@ xiao_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 xiao_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 xiao_nrf52840.build.storage_reserved_bytes=16384
 xiao_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-xiao_nrf52840.menu.usbcdc.enabled=Enabled
+xiao_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 xiao_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-xiao_nrf52840.menu.usbcdc.disabled=Disabled
+xiao_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 xiao_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
 xiao_nrf52840.menu.flashprofile.qspi2m=Internal 1 MB + QSPI 2 MB
 xiao_nrf52840.menu.flashprofile.qspi2m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=1 -DNRF_BOARD_FLASH_PROFILE=4 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-xiao_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only (clone override)
+xiao_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB, clone-safe)
 xiao_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-xiao_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+xiao_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 xiao_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-xiao_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+xiao_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 xiao_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 xiao_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 xiao_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 xiao_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=true
 xiao_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 xiao_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-xiao_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+xiao_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+xiao_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+xiao_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+xiao_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+xiao_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+xiao_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+xiao_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+xiao_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+xiao_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 xiao_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 xiao_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 xiao_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 xiao_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 xiao_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 xiao_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-xiao_nrf52840.menu.bootloader.auto=Auto-detect (default, recommended)
+xiao_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 xiao_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 xiao_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 xiao_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -901,7 +955,7 @@ xiao_nrf52840.menu.bootloader.auto.upload.uf2_board_id=
 xiao_nrf52840.menu.bootloader.auto.upload.maximum_size=872448
 xiao_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 xiao_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x27000
-xiao_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 (0xADA52840)
+xiao_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage (0xADA52840)
 xiao_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 xiao_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 xiao_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -911,7 +965,7 @@ xiao_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 xiao_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 xiao_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 xiao_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-xiao_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU
+xiao_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util)
 xiao_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 xiao_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 xiao_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -921,7 +975,7 @@ xiao_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 xiao_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 xiao_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 xiao_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-xiao_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2
+xiao_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage
 xiao_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 xiao_nrf52840.menu.bootloader.nicenano.upload.uf2_family_id=0xADA52840
 xiao_nrf52840.menu.bootloader.nicenano.upload.uf2_app_start=0x26000
@@ -931,7 +985,7 @@ xiao_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenano
 xiao_nrf52840.menu.bootloader.nicenano.upload.maximum_size=876544
 xiao_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 xiao_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-xiao_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2
+xiao_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 xiao_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 xiao_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 xiao_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -941,7 +995,7 @@ xiao_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 xiao_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 xiao_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 xiao_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-xiao_nrf52840.menu.buildprofile.release=Release (-Os)
+xiao_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 xiao_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 xiao_nrf52840.menu.buildprofile.release.build.debug_flags=
 xiao_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -949,14 +1003,14 @@ xiao_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 xiao_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 xiao_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3
 xiao_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-xiao_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+xiao_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 xiao_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 xiao_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 xiao_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-xiao_nrf52840.menu.storage.log=Log-structured wear leveling
+xiao_nrf52840.menu.storage.log=Wear leveling (recommended)
 xiao_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 xiao_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-xiao_nrf52840.menu.storage.legacy=Legacy single-page
+xiao_nrf52840.menu.storage.legacy=Single page (legacy)
 xiao_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 xiao_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -965,6 +1019,7 @@ devboard_nrf52840.upload.tool=niusdfu
 devboard_nrf52840.upload.tool.default=niusdfu
 devboard_nrf52840.upload.use_1200bps_touch=true
 devboard_nrf52840.upload.wait_for_upload_port=true
+devboard_nrf52840.upload.enter_bootloader_only=false
 devboard_nrf52840.upload.protocol=dfu
 devboard_nrf52840.upload.usb_vid=auto
 devboard_nrf52840.upload.usb_pid=auto
@@ -999,31 +1054,39 @@ devboard_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 devboard_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 devboard_nrf52840.build.storage_reserved_bytes=16384
 devboard_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-devboard_nrf52840.menu.usbcdc.enabled=Enabled
+devboard_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 devboard_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-devboard_nrf52840.menu.usbcdc.disabled=Disabled
+devboard_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 devboard_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
 devboard_nrf52840.menu.flashprofile.qspi8m=Internal 1 MB + QSPI 8 MB (DK modeled)
 devboard_nrf52840.menu.flashprofile.qspi8m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=1 -DNRF_BOARD_FLASH_PROFILE=5 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-devboard_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only (no external flash)
+devboard_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB) (no external flash)
 devboard_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-devboard_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+devboard_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 devboard_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-devboard_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+devboard_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 devboard_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 devboard_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 devboard_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 devboard_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=true
 devboard_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 devboard_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-devboard_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+devboard_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+devboard_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+devboard_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+devboard_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+devboard_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+devboard_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+devboard_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+devboard_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+devboard_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 devboard_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 devboard_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 devboard_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 devboard_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 devboard_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 devboard_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-devboard_nrf52840.menu.bootloader.auto=Auto-detect (default, recommended)
+devboard_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 devboard_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 devboard_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 devboard_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -1035,7 +1098,7 @@ devboard_nrf52840.menu.bootloader.auto.upload.uf2_board_id=
 devboard_nrf52840.menu.bootloader.auto.upload.maximum_size=1032192
 devboard_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 devboard_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x0
-devboard_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (0x1915:0x5280)
+devboard_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util) (0x1915:0x5280)
 devboard_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 devboard_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 devboard_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -1045,7 +1108,7 @@ devboard_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 devboard_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 devboard_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 devboard_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-devboard_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2
+devboard_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage
 devboard_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 devboard_nrf52840.menu.bootloader.nicenano.upload.uf2_family_id=0xADA52840
 devboard_nrf52840.menu.bootloader.nicenano.upload.uf2_app_start=0x26000
@@ -1055,7 +1118,7 @@ devboard_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenano
 devboard_nrf52840.menu.bootloader.nicenano.upload.maximum_size=876544
 devboard_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 devboard_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-devboard_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2
+devboard_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 devboard_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 devboard_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 devboard_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -1065,7 +1128,7 @@ devboard_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 devboard_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 devboard_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 devboard_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-devboard_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2
+devboard_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 devboard_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 devboard_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 devboard_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -1075,7 +1138,7 @@ devboard_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 devboard_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 devboard_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 devboard_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-devboard_nrf52840.menu.buildprofile.release=Release (-Os)
+devboard_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 devboard_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 devboard_nrf52840.menu.buildprofile.release.build.debug_flags=
 devboard_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -1083,14 +1146,14 @@ devboard_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 devboard_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 devboard_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3
 devboard_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-devboard_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+devboard_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 devboard_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 devboard_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 devboard_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-devboard_nrf52840.menu.storage.log=Log-structured wear leveling
+devboard_nrf52840.menu.storage.log=Wear leveling (recommended)
 devboard_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 devboard_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-devboard_nrf52840.menu.storage.legacy=Legacy single-page
+devboard_nrf52840.menu.storage.legacy=Single page (legacy)
 devboard_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 devboard_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -1122,11 +1185,11 @@ devboard_nrf52833.build.storage_reserved_bytes=8192
 devboard_nrf52833.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
 devboard_nrf52833.menu.usbcdc.disabled=Unavailable (no native USB)
 devboard_nrf52833.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-devboard_nrf52833.menu.flashprofile.internal512k=Internal flash 512 KB only
+devboard_nrf52833.menu.flashprofile.internal512k=Internal flash only (512 KB)
 devboard_nrf52833.menu.flashprofile.internal512k.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=1 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-devboard_nrf52833.menu.ramprofile.sram128=Internal SRAM 128 KB (fixed)
+devboard_nrf52833.menu.ramprofile.sram128=Built-in RAM (128 KB)
 devboard_nrf52833.menu.ramprofile.sram128.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=1 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-devboard_nrf52833.menu.buildprofile.release=Release (-Os)
+devboard_nrf52833.menu.buildprofile.release=Release (smaller/faster, -Os)
 devboard_nrf52833.menu.buildprofile.release.compiler.optimization_flags=-Os
 devboard_nrf52833.menu.buildprofile.release.build.debug_flags=
 devboard_nrf52833.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -1134,10 +1197,10 @@ devboard_nrf52833.menu.buildprofile.debug=Debug symbols (-Og -g3)
 devboard_nrf52833.menu.buildprofile.debug.compiler.optimization_flags=-Og
 devboard_nrf52833.menu.buildprofile.debug.build.debug_flags=-g3
 devboard_nrf52833.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-devboard_nrf52833.menu.storage.log=Log-structured wear leveling
+devboard_nrf52833.menu.storage.log=Wear leveling (recommended)
 devboard_nrf52833.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=8192
 devboard_nrf52833.menu.storage.log.build.storage_reserved_bytes=8192
-devboard_nrf52833.menu.storage.legacy=Legacy single-page
+devboard_nrf52833.menu.storage.legacy=Single page (legacy)
 devboard_nrf52833.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=8192
 devboard_nrf52833.menu.storage.legacy.build.storage_reserved_bytes=8192
 
@@ -1146,6 +1209,7 @@ pitaya_go_nrf52840.upload.tool=niusdfu
 pitaya_go_nrf52840.upload.tool.default=niusdfu
 pitaya_go_nrf52840.upload.use_1200bps_touch=true
 pitaya_go_nrf52840.upload.wait_for_upload_port=true
+pitaya_go_nrf52840.upload.enter_bootloader_only=false
 pitaya_go_nrf52840.upload.protocol=dfu
 pitaya_go_nrf52840.upload.usb_vid=0x2886
 pitaya_go_nrf52840.upload.usb_pid=0xF00E
@@ -1181,31 +1245,39 @@ pitaya_go_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 pitaya_go_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 pitaya_go_nrf52840.build.storage_reserved_bytes=16384
 pitaya_go_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-pitaya_go_nrf52840.menu.usbcdc.enabled=Enabled
+pitaya_go_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 pitaya_go_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-pitaya_go_nrf52840.menu.usbcdc.disabled=Disabled
+pitaya_go_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 pitaya_go_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
 pitaya_go_nrf52840.menu.flashprofile.qspi=Internal 1 MB + QSPI (capacity unverified)
 pitaya_go_nrf52840.menu.flashprofile.qspi.build.flash_flags=-DNRF_BOARD_HAS_QSPI=1 -DNRF_BOARD_FLASH_PROFILE=3 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-pitaya_go_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only (clone override)
+pitaya_go_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB, clone-safe)
 pitaya_go_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-pitaya_go_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+pitaya_go_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 pitaya_go_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-pitaya_go_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+pitaya_go_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 pitaya_go_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 pitaya_go_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 pitaya_go_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 pitaya_go_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=true
 pitaya_go_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 pitaya_go_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-pitaya_go_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+pitaya_go_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+pitaya_go_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+pitaya_go_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 pitaya_go_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-pitaya_go_nrf52840.menu.bootloader.auto=Auto-detect (default, recommended)
+pitaya_go_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 pitaya_go_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 pitaya_go_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 pitaya_go_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -1217,7 +1289,7 @@ pitaya_go_nrf52840.menu.bootloader.auto.upload.uf2_board_id=
 pitaya_go_nrf52840.menu.bootloader.auto.upload.maximum_size=1032192
 pitaya_go_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 pitaya_go_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x0
-pitaya_go_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (0x1915:0x5284)
+pitaya_go_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util) (0x1915:0x5284)
 pitaya_go_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 pitaya_go_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 pitaya_go_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -1227,7 +1299,7 @@ pitaya_go_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 pitaya_go_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 pitaya_go_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 pitaya_go_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-pitaya_go_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2
+pitaya_go_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage
 pitaya_go_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 pitaya_go_nrf52840.menu.bootloader.nicenano.upload.uf2_family_id=0xADA52840
 pitaya_go_nrf52840.menu.bootloader.nicenano.upload.uf2_app_start=0x26000
@@ -1237,7 +1309,7 @@ pitaya_go_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicenan
 pitaya_go_nrf52840.menu.bootloader.nicenano.upload.maximum_size=876544
 pitaya_go_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 pitaya_go_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-pitaya_go_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2
+pitaya_go_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 pitaya_go_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 pitaya_go_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 pitaya_go_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -1247,7 +1319,7 @@ pitaya_go_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 pitaya_go_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 pitaya_go_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 pitaya_go_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2
+pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage
 pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -1257,7 +1329,7 @@ pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 pitaya_go_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-pitaya_go_nrf52840.menu.buildprofile.release=Release (-Os)
+pitaya_go_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 pitaya_go_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 pitaya_go_nrf52840.menu.buildprofile.release.build.debug_flags=
 pitaya_go_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -1265,14 +1337,14 @@ pitaya_go_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 pitaya_go_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 pitaya_go_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3
 pitaya_go_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-pitaya_go_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+pitaya_go_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 pitaya_go_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 pitaya_go_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 pitaya_go_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-pitaya_go_nrf52840.menu.storage.log=Log-structured wear leveling
+pitaya_go_nrf52840.menu.storage.log=Wear leveling (recommended)
 pitaya_go_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 pitaya_go_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-pitaya_go_nrf52840.menu.storage.legacy=Legacy single-page
+pitaya_go_nrf52840.menu.storage.legacy=Single page (legacy)
 pitaya_go_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 pitaya_go_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384
 
@@ -1281,6 +1353,7 @@ usb_dongle_nrf52840.upload.tool=niusdfu
 usb_dongle_nrf52840.upload.tool.default=niusdfu
 usb_dongle_nrf52840.upload.use_1200bps_touch=false
 usb_dongle_nrf52840.upload.wait_for_upload_port=true
+usb_dongle_nrf52840.upload.enter_bootloader_only=false
 usb_dongle_nrf52840.upload.protocol=nordic-dfu
 usb_dongle_nrf52840.upload.usb_vid=0x1915
 usb_dongle_nrf52840.upload.usb_pid=0x521F
@@ -1315,29 +1388,37 @@ usb_dongle_nrf52840.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1
 usb_dongle_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 usb_dongle_nrf52840.build.storage_reserved_bytes=16384
 usb_dongle_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
-usb_dongle_nrf52840.menu.usbcdc.enabled=Enabled
+usb_dongle_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 usb_dongle_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-usb_dongle_nrf52840.menu.usbcdc.disabled=Disabled
+usb_dongle_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 usb_dongle_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-usb_dongle_nrf52840.menu.flashprofile.internal1m=Internal flash 1 MB only
+usb_dongle_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB)
 usb_dongle_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
-usb_dongle_nrf52840.menu.ramprofile.sram256=Internal SRAM 256 KB (fixed)
+usb_dongle_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
 usb_dongle_nrf52840.menu.ramprofile.sram256.build.ram_flags=-DNRF_BOARD_RAM_PROFILE=2 -DNRF_BOARD_DATA_RAM_BYTES={upload.maximum_data_size}
-usb_dongle_nrf52840.menu.uploadmode.usb=USB bootloader (recommended)
+usb_dongle_nrf52840.menu.uploadmode.usb=USB bootloader (DFU/UF2, recommended)
 usb_dongle_nrf52840.menu.uploadmode.usb.upload.tool=niusdfu
 usb_dongle_nrf52840.menu.uploadmode.usb.upload.tool.default=niusdfu
 usb_dongle_nrf52840.menu.uploadmode.usb.upload.protocol=dfu
 usb_dongle_nrf52840.menu.uploadmode.usb.upload.use_1200bps_touch=true
 usb_dongle_nrf52840.menu.uploadmode.usb.upload.wait_for_upload_port=true
 usb_dongle_nrf52840.menu.uploadmode.usb.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-usb_dongle_nrf52840.menu.uploadmode.swd=CMSIS-DAP SWD
+usb_dongle_nrf52840.menu.uploadmode.uf2boot=Enter UF2 drive only (no upload)
+usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.tool=niusdfu
+usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.tool.default=niusdfu
+usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.protocol=dfu
+usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
+usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
+usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
+usb_dongle_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
+usb_dongle_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
 usb_dongle_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
-usb_dongle_nrf52840.menu.bootloader.auto=Auto-detect (default, recommended)
+usb_dongle_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 usb_dongle_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 usb_dongle_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
 usb_dongle_nrf52840.menu.bootloader.auto.upload.usb_pid=auto
@@ -1349,7 +1430,7 @@ usb_dongle_nrf52840.menu.bootloader.auto.upload.uf2_board_id=
 usb_dongle_nrf52840.menu.bootloader.auto.upload.maximum_size=1028096
 usb_dongle_nrf52840.menu.bootloader.auto.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 usb_dongle_nrf52840.menu.bootloader.auto.build.bootloader_app_start=0x1000
-usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 (0xADA52840)
+usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2=MakerDiary UF2 mass storage (0xADA52840)
 usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2.upload.bootloader_mode=uf2
 usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_family_id=0xADA52840
 usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_app_start=0x1000
@@ -1359,7 +1440,7 @@ usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2.upload.uf2_board_id=
 usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2.upload.maximum_size=1028096
 usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 usb_dongle_nrf52840.menu.bootloader.makerdiaryuf2.build.bootloader_app_start=0x1000
-usb_dongle_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU
+usb_dongle_nrf52840.menu.bootloader.nordicdfu=Nordic USB DFU (dfu-util)
 usb_dongle_nrf52840.menu.bootloader.nordicdfu.upload.bootloader_mode=nordic-dfu
 usb_dongle_nrf52840.menu.bootloader.nordicdfu.upload.uf2_family_id=
 usb_dongle_nrf52840.menu.bootloader.nordicdfu.upload.uf2_app_start=0x0
@@ -1369,7 +1450,7 @@ usb_dongle_nrf52840.menu.bootloader.nordicdfu.upload.uf2_board_id=
 usb_dongle_nrf52840.menu.bootloader.nordicdfu.upload.maximum_size=1032192
 usb_dongle_nrf52840.menu.bootloader.nordicdfu.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1
 usb_dongle_nrf52840.menu.bootloader.nordicdfu.build.bootloader_app_start=0x0
-usb_dongle_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2
+usb_dongle_nrf52840.menu.bootloader.nicenano=nice!nano v2 UF2 mass storage
 usb_dongle_nrf52840.menu.bootloader.nicenano.upload.bootloader_mode=uf2
 usb_dongle_nrf52840.menu.bootloader.nicenano.upload.uf2_family_id=0xADA52840
 usb_dongle_nrf52840.menu.bootloader.nicenano.upload.uf2_app_start=0x26000
@@ -1379,7 +1460,7 @@ usb_dongle_nrf52840.menu.bootloader.nicenano.upload.uf2_board_id=nRF52840-nicena
 usb_dongle_nrf52840.menu.bootloader.nicenano.upload.maximum_size=876544
 usb_dongle_nrf52840.menu.bootloader.nicenano.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 usb_dongle_nrf52840.menu.bootloader.nicenano.build.bootloader_app_start=0x26000
-usb_dongle_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2
+usb_dongle_nrf52840.menu.bootloader.xiaouf2=Seeed XIAO UF2 mass storage
 usb_dongle_nrf52840.menu.bootloader.xiaouf2.upload.bootloader_mode=uf2
 usb_dongle_nrf52840.menu.bootloader.xiaouf2.upload.uf2_family_id=0xADA52840
 usb_dongle_nrf52840.menu.bootloader.xiaouf2.upload.uf2_app_start=0x27000
@@ -1389,7 +1470,7 @@ usb_dongle_nrf52840.menu.bootloader.xiaouf2.upload.uf2_board_id=
 usb_dongle_nrf52840.menu.bootloader.xiaouf2.upload.maximum_size=872448
 usb_dongle_nrf52840.menu.bootloader.xiaouf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 usb_dongle_nrf52840.menu.bootloader.xiaouf2.build.bootloader_app_start=0x27000
-usb_dongle_nrf52840.menu.buildprofile.release=Release (-Os)
+usb_dongle_nrf52840.menu.buildprofile.release=Release (smaller/faster, -Os)
 usb_dongle_nrf52840.menu.buildprofile.release.compiler.optimization_flags=-Os
 usb_dongle_nrf52840.menu.buildprofile.release.build.debug_flags=
 usb_dongle_nrf52840.menu.buildprofile.release.build.profile_flags=-DNRF_BUILD_PROFILE=0
@@ -1397,13 +1478,13 @@ usb_dongle_nrf52840.menu.buildprofile.debug=Debug symbols (-Og -g3)
 usb_dongle_nrf52840.menu.buildprofile.debug.compiler.optimization_flags=-Og
 usb_dongle_nrf52840.menu.buildprofile.debug.build.debug_flags=-g3
 usb_dongle_nrf52840.menu.buildprofile.debug.build.profile_flags=-DNRF_BUILD_PROFILE=1
-usb_dongle_nrf52840.menu.buildprofile.usbgdbstub=USB CDC GDB stub (-Og -g3)
+usb_dongle_nrf52840.menu.buildprofile.usbgdbstub=Arduino IDE Debug over USB CDC (GDB stub)
 usb_dongle_nrf52840.menu.buildprofile.usbgdbstub.compiler.optimization_flags=-Og
 usb_dongle_nrf52840.menu.buildprofile.usbgdbstub.build.debug_flags=-g3
 usb_dongle_nrf52840.menu.buildprofile.usbgdbstub.build.profile_flags=-DNRF_BUILD_PROFILE=2 -DNRF_SYSTEM_USB_GDB_STUB=1
-usb_dongle_nrf52840.menu.storage.log=Log-structured wear leveling
+usb_dongle_nrf52840.menu.storage.log=Wear leveling (recommended)
 usb_dongle_nrf52840.menu.storage.log.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=16384
 usb_dongle_nrf52840.menu.storage.log.build.storage_reserved_bytes=16384
-usb_dongle_nrf52840.menu.storage.legacy=Legacy single-page
+usb_dongle_nrf52840.menu.storage.legacy=Single page (legacy)
 usb_dongle_nrf52840.menu.storage.legacy.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=1 -DNRF_STORAGE_REGION_BYTES=16384
 usb_dongle_nrf52840.menu.storage.legacy.build.storage_reserved_bytes=16384

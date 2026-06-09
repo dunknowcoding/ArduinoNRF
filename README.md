@@ -7,7 +7,7 @@
 [![platform](https://img.shields.io/badge/platform-Arduino-00979D)](https://www.arduino.cc/)
 [![mcu](https://img.shields.io/badge/MCU-nRF52840%20%2F%20nRF52833-0a7bbb)](https://www.nordicsemi.com/)
 [![boards](https://img.shields.io/badge/boards-10-success)](#-supported-boards)
-[![version](https://img.shields.io/badge/version-0.2.1-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.2.1)
+[![version](https://img.shields.io/badge/version-0.3.2-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.3.2)
 [![upload](https://img.shields.io/badge/upload-no%20button%2C%20one%20cable-brightgreen)](#-hands-free-uploads)
 [![debug](https://img.shields.io/badge/debug-USB%20CDC%20GDB%20stub-orange)](#-single-cable-debugging)
 [![ble](https://img.shields.io/badge/BLE-NimBLE%20GATT%20verified-blueviolet)](#-bluetooth-low-energy-nimble)
@@ -71,6 +71,8 @@ The host-side pipeline (`upload.ps1`) is hardened against the messy real world:
 - **Double-click safe** — a per-port lock makes a second Upload fail fast *before* any touch, so two uploads can never interleave and corrupt flash.
 - **Coexists with debugging** — if a debug session holds the port, the upload signals the debug bridge to release it, then proceeds.
 - **Wrong-port guard** — selecting the *user* CDC instead of the service CDC is rejected with an actionable message; your firmware is never touched.
+- **UF2-aware** — on Windows, `Auto-detect` prefers the selected board's mounted UF2 drive when it is present, and falls back only to the requested serial-DFU path.
+- **Multi-board safe** — UF2 volumes are matched to the selected upload COM by stable USB identity, so two `NICENANO` drives do not collide.
 - **Fast** — slow Windows PnP enumerations are cached during the stable pre-touch window (~3 s saved per upload).
 
 See **[docs/uploads/hands_free_upload.md](docs/uploads/hands_free_upload.md)** and **[docs/platform/UPLOAD_BEHAVIOR.md](docs/platform/UPLOAD_BEHAVIOR.md)**.
@@ -137,9 +139,9 @@ Identities were re-checked against the upstream `Adafruit_nRF52_Bootloader` `boa
 
 | Board | Bootloader VID:PID | Pipeline | Status |
 |---|---|---|---|
-| **AliExpress ProMicro nRF52840** | `0x239A:0x00B3` | Adafruit serial DFU | ✅ **Verified on hardware** (hands-free upload + single-cable debug) |
-| nice!nano v2 | `0x239A:0x00B3` | Adafruit serial DFU | Identity corrected; same pipeline as ProMicro |
-| SuperMini nRF52840 | `0x239A:0x00B3` | Adafruit serial DFU | Ships nice!nano bootloader; LED on P0.15 |
+| **AliExpress ProMicro nRF52840** | `0x239A:0x00B3` | UF2 + Adafruit serial DFU | ✅ **Verified on hardware** (hands-free upload + single-cable debug) |
+| nice!nano v2 | `0x239A:0x00B3` | UF2 + Adafruit serial DFU | Identity corrected; same pipeline as ProMicro |
+| SuperMini nRF52840 | `0x239A:0x00B3` | UF2 + Adafruit serial DFU | Ships nice!nano bootloader; LED on P0.15 |
 | nRFMicro | `0x1209:0x5284` | Adafruit serial DFU | joric open-hardware; some DIY units carry nice!nano IDs instead |
 | Seeed XIAO nRF52840 (+ Sense) | `0x2886:0x0044` / `0x0045` | Adafruit serial DFU (Seeed) | Identity corrected, UF2 = `XIAO-BOOT` |
 | Makerdiary Pitaya Go | `0x2886:0xF00E` | Adafruit serial DFU | Identity corrected, UF2 = `PITAYAGO` |
@@ -177,10 +179,10 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **Zigbee / 802.15.4** | ✅ **Working via an external CC2530 module.** Flash it with the built-in **[`libraries/CCDebugger/`](hardware/arduinonrf/nrf52/libraries/CCDebugger/)** — the nRF52840 *is* the CC-Debugger, no external programmer (HW-verified erase / flash / read-back verify) — then drive it over UART (raw 802.15.4 send / receive / promiscuous sniff) with the separate **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)** library. The nRF52840's *own*-radio Zigbee ([`libraries/Zigbee/`](hardware/arduinonrf/nrf52/libraries/Zigbee/)) is still a skeleton (Zboss not vendored, `begin()` → `ZIGBEE_NOT_VENDORED`). Guide: **[docs/platform/ZIGBEE.md](docs/platform/ZIGBEE.md)**. |
 | **Thread (OpenThread)** | ⚠️ [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is **not done yet**: OpenThread headers, some platform glue, and smoke wiring are present, but the real OpenThread core + nrf-802154 radio path are not vendored, `begin()` returns `THREAD_NOT_VENDORED`, and `isAvailable()` / `isAttached()` stay `false`. |
 | **EEPROM** | ✅ Emulated (see EEPROM examples) |
-| **Upload** | ✅ Hands-free serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
+| **Upload** | ✅ Hands-free UF2 or serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |
 
-**Gaps vs. mature Adafruit/Nordic cores:** no SoftDevice menu or Bluefruit/TinyUSB BLE stack; not every clone USB profile is claimed interchangeable (the validated path is `promicroserialnosd`). Hands-free in-app upload is verified for **both** `usbcdc=enabled` and `usbcdc=disabled`; `usbcdc=enabled` is the default because it also gives you a separate user `Serial` port alongside the upload/maintenance CDC.
+**Gaps vs. mature Adafruit/Nordic cores:** no SoftDevice menu or Bluefruit/TinyUSB BLE stack; not every clone USB profile is claimed interchangeable. The validated ProMicro path is `uploadmode=usb,bootloader=auto`, with explicit UF2 and explicit serial DFU also verified. Hands-free in-app upload is verified for **both** `usbcdc=enabled` and `usbcdc=disabled`; `usbcdc=enabled` is the default because it also gives you a separate user `Serial` port alongside the upload/maintenance CDC.
 
 ---
 

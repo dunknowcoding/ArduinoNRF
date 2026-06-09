@@ -8,7 +8,7 @@ What this core actually supports on **Windows / Linux / macOS**, and how its boa
 
 | OS | Hands-free upload | Single-cable debug | How it's done |
 |---|---|---|---|
-| **Windows 10/11 (x86_64)** | ✅ Verified | ✅ Verified | Native `upload.ps1` (touch + adafruit-nrfutil), `.NET` GDB bridge |
+| **Windows 10/11 (x86_64)** | ✅ Verified | ✅ Verified | Native `upload.ps1` (touch + UF2 or adafruit-nrfutil), `.NET` GDB bridge |
 | **Linux (Ubuntu/Debian/Fedora/Arch, x86_64 + arm64)** | ✅ Implemented (untested here) | ✅ Implemented (untested here) | `upload.py` → `adafruit-nrfutil`; `usb_gdbstub_bridge.py` |
 | **macOS (Intel + Apple Silicon)** | ✅ Implemented (untested here) | ✅ Implemented (untested here) | `upload.py` (locale-wrapped) → `adafruit-nrfutil`; `usb_gdbstub_bridge.py` |
 
@@ -34,7 +34,7 @@ The Linux/macOS path follows the **same proven Adafruit cross-platform method** 
 
 ### Why the Windows path is a separate, larger script
 
-`upload.ps1` exists because Windows' `usbser.sys` has clone-board quirks (same-PID app/bootloader ambiguity, stale handles after touch, queued writes replayed on next open). On Linux/macOS the kernel CDC ACM driver is well-behaved, so the simple `adafruit-nrfutil --touch 1200 dfu serial` flow that Adafruit uses is sufficient and that's what `upload.py` does. The PowerShell features specific to Windows (concurrency mutex, bridge-yield IPC, fast-path PnP cache) are not currently replicated in the Python path — they aren't needed there.
+`upload.ps1` exists because Windows' `usbser.sys` has clone-board quirks (same-PID app/bootloader ambiguity, stale handles after touch, queued writes replayed on next open). It also owns the Windows UF2 path so it can match a mounted drive back to the selected upload COM instead of trusting a shared volume label. On Linux/macOS the kernel CDC ACM driver is well-behaved, so the simple `adafruit-nrfutil --touch 1200 dfu serial` flow that Adafruit uses is sufficient and that's what `upload.py` does. The PowerShell features specific to Windows (concurrency mutex, bridge-yield IPC, stable-ID UF2 matching, fast-path PnP cache) are not currently replicated in the Python path.
 
 ## 🧩 Real-board compatibility matrix
 
@@ -42,9 +42,9 @@ Identities below were corrected against the upstream `Adafruit_nRF52_Bootloader`
 
 | Board (lib name) | Bootloader VID:PID | Runtime VID:PID | Bootloader | UF2 label / board-id | Notes |
 |---|---|---|---|---|---|
-| `promicro_nrf52840` | `0x239A:0x00B3` | `0x239A:0x00B4` | Adafruit serial DFU | `NICENANO` / `nRF52840-nicenano` | ✅ **Verified on hardware**; identical bootloader to nice!nano (the clone ships with it). |
-| `nicenano_v2` | `0x239A:0x00B3` | `0x239A:0x00B4` | Adafruit serial DFU | `NICENANO` / `nRF52840-nicenano` | Identity matches upstream; pipeline is the same as ProMicro. |
-| `supermini_nrf52840` | `0x239A:0x00B3` | `0x239A:0x00B4` | Adafruit serial DFU | `NICENANO` | The AliExpress SuperMini ships with the nice!nano bootloader — same identity. LED on P0.15. |
+| `promicro_nrf52840` | `0x239A:0x00B3` | `0x239A:0x00B4` | UF2 + Adafruit serial DFU | `NICENANO` / `nRF52840-nicenano` | ✅ **Verified on hardware**; identical bootloader to nice!nano (the clone ships with it). |
+| `nicenano_v2` | `0x239A:0x00B3` | `0x239A:0x00B4` | UF2 + Adafruit serial DFU | `NICENANO` / `nRF52840-nicenano` | Identity matches upstream; pipeline is the same as ProMicro. |
+| `supermini_nrf52840` | `0x239A:0x00B3` | `0x239A:0x00B4` | UF2 + Adafruit serial DFU | `NICENANO` | The AliExpress SuperMini ships with the nice!nano bootloader — same identity. LED on P0.15. |
 | `nrfmicro_nrf52840` | `0x1209:0x5284` | `0x1209:0x5285` | Adafruit serial DFU | `NRFMICRO` / `nRF52840-nRFMicro-v0` | joric open-hardware identity. Some DIY/JLCPCB builds are flashed with nice!nano IDs instead — verify before relying on the VID:PID. |
 | `xiao_nrf52840` | `0x2886:0x0044` | `0x2886:0x8044` | Adafruit serial DFU (Seeed) | `XIAO-BOOT` / `nRF52840-SeeedXiao-v1` | Seeed XIAO nRF52840. Sense variant uses `0x2886:0x0045/0x8045` (covered in the auto-detect table). |
 | `pitaya_go_nrf52840` | `0x2886:0xF00E` | `0x2886:0xF00E` | Adafruit serial DFU | `PITAYAGO` / `PITAYAGO` | Makerdiary Pitaya Go. |
@@ -73,6 +73,7 @@ The auto-detect table in `upload.ps1` (`$script:NrfBootloaderCandidates`) was al
 - **Nordic nRF52840-DK (official, with J-Link OB)**: flash via SWD using OpenOCD / J-Link / pyOCD; this core's USB hands-free path doesn't apply.
 - **Nordic nRF52840 USB Dongle (PCA10059)**: use Nordic's tooling.
 - **Single-cable USB-CDC GDB-stub debug** is verified on the ProMicro clone only. The Adafruit-fork clones (nice!nano / SuperMini / Pitaya / XIAO / nRFMicro) share the necessary firmware infrastructure (DebugMonitor + USB CDC), so it's expected to work, but it has not been re-verified on those boards in this revision.
+- **Windows UF2 stable-ID matching** is verified with two ProMicro/nice!nano-class boards mounted at the same time. Linux/macOS still use the serial-DFU Python path in this revision.
 
 ## 📚 Sources
 

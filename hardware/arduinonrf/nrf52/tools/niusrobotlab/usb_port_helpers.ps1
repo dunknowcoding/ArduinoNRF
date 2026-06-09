@@ -119,6 +119,110 @@ function Extract-ComPortFromPnpFriendlyName {
     return $null
 }
 
+function Get-UsbInterfaceParentInstancePrefix {
+    param([string]$PnpInstanceId)
+
+    if ([string]::IsNullOrWhiteSpace($PnpInstanceId)) {
+        return $null
+    }
+
+    $normalized = $PnpInstanceId.Trim().ToUpperInvariant()
+    if ($normalized -match '^USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}&MI_[0-9A-F]{2}\\(?<parent>.+&)[0-9A-F]{4}$') {
+        return $matches['parent'].ToUpperInvariant()
+    }
+
+    return $null
+}
+
+function Get-UsbInterfaceParentDeviceInstanceId {
+    param([string]$PnpInstanceId)
+
+    if ([string]::IsNullOrWhiteSpace($PnpInstanceId)) {
+        return $null
+    }
+
+    try {
+        $parent = Get-PnpDeviceProperty -InstanceId $PnpInstanceId -KeyName 'DEVPKEY_Device_Parent' -ErrorAction Stop | Select-Object -First 1
+        if ($parent -and $parent.PSObject.Properties['Data']) {
+            return [string]$parent.Data
+        }
+    }
+    catch {
+    }
+
+    return $null
+}
+
+function Get-UsbDeviceCompositeStableId {
+    param([string]$PnpInstanceId)
+
+    if ([string]::IsNullOrWhiteSpace($PnpInstanceId)) {
+        return $null
+    }
+
+    $normalized = $PnpInstanceId.Trim().ToUpperInvariant()
+    if ($normalized -match '^USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}\\(?<tail>.+)$') {
+        return $matches['tail'].ToUpperInvariant()
+    }
+
+    return $null
+}
+
+function Get-UsbInterfaceParentCompositeStableId {
+    param([string]$PnpInstanceId)
+
+    $parentInstanceId = Get-UsbInterfaceParentDeviceInstanceId -PnpInstanceId $PnpInstanceId
+    if ([string]::IsNullOrWhiteSpace($parentInstanceId)) {
+        return $null
+    }
+
+    return Get-UsbDeviceCompositeStableId -PnpInstanceId $parentInstanceId
+}
+
+function Get-SerialPortUsbInterfaceParentInstancePrefix {
+    param(
+        [string]$PortName,
+        [switch]$Fresh
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PortName) -or $PortName.StartsWith('{')) {
+        return $null
+    }
+
+    $normalizedPort = $PortName.Trim().ToUpperInvariant()
+    foreach ($port in @(Get-SerialPortInventory -Fresh:$Fresh)) {
+        if (([string]$port.DeviceID).Trim().ToUpperInvariant() -ne $normalizedPort) {
+            continue
+        }
+
+        return Get-UsbInterfaceParentInstancePrefix -PnpInstanceId ([string]$port.PNPDeviceID)
+    }
+
+    return $null
+}
+
+function Get-SerialPortUsbParentCompositeStableId {
+    param(
+        [string]$PortName,
+        [switch]$Fresh
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PortName) -or $PortName.StartsWith('{')) {
+        return $null
+    }
+
+    $normalizedPort = $PortName.Trim().ToUpperInvariant()
+    foreach ($port in @(Get-SerialPortInventory -Fresh:$Fresh)) {
+        if (([string]$port.DeviceID).Trim().ToUpperInvariant() -ne $normalizedPort) {
+            continue
+        }
+
+        return Get-UsbInterfaceParentCompositeStableId -PnpInstanceId ([string]$port.PNPDeviceID)
+    }
+
+    return $null
+}
+
 function Get-PnpPortsMatchingBoardRuntimeUsb {
     param([string]$BoardName)
 
@@ -369,7 +473,7 @@ function Resolve-AdafruitSerialControlPort {
         }
     }
 
-    if ($selectedPnpId -match '^USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}&MI_[0-9A-F]{2}\\(?<parent>.+&0&)[0-9A-F]{4}$') {
+    if ($selectedPnpId -match '^USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}&MI_[0-9A-F]{2}\\(?<parent>.+&)[0-9A-F]{4}$') {
         $parentPrefix = $matches['parent'].ToUpperInvariant()
         $parentMatch = @($siblingCandidates | Where-Object {
             ([string]$_.PNPDeviceID).ToUpperInvariant() -like ('*\' + $parentPrefix + '*')
@@ -385,6 +489,101 @@ function Resolve-AdafruitSerialControlPort {
     return [pscustomobject]@{
         Port = $SelectedPort
         Reason = 'runtime sibling service CDC not found'
+    }
+}
+
+function Resolve-AdafruitBootloaderControlPort {
+    param(
+        [string]$SelectedPort,
+        [string]$CurrentPort = '',
+        [string]$BootloaderVid = '',
+        [string]$BootloaderPid = '',
+        [string]$PreferredCompositeStableId = '',
+        [string]$InterfaceParentPrefix = '',
+        [switch]$Fresh
+    )
+
+    $fallbackPort = if (-not [string]::IsNullOrWhiteSpace($CurrentPort)) { $CurrentPort } else { $SelectedPort }
+    if ([string]::IsNullOrWhiteSpace($fallbackPort) -or
+        $fallbackPort.StartsWith('{') -or
+        [string]::IsNullOrWhiteSpace($BootloaderVid) -or
+        [string]::IsNullOrWhiteSpace($BootloaderPid)) {
+        return [pscustomobject]@{
+            Port = $fallbackPort
+            Reason = 'no bootloader remap context'
+        }
+    }
+
+    $ports = @(Get-SerialPortInventory -Fresh:$Fresh)
+    if ($ports.Count -eq 0) {
+        return [pscustomobject]@{
+            Port = $fallbackPort
+            Reason = 'no serial inventory'
+        }
+    }
+
+    $bootVidLetters = $BootloaderVid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
+    $bootPidLetters = $BootloaderPid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
+    $bootNeedle = ('USB\VID_{0}&PID_{1}' -f $bootVidLetters, $bootPidLetters).ToUpperInvariant()
+    $fallbackPortNormalized = $fallbackPort.Trim().ToUpperInvariant()
+
+    $candidates = @($ports | Where-Object {
+        $pnpId = ([string]$_.PNPDeviceID).ToUpperInvariant()
+        $pnpId.StartsWith($bootNeedle) -and $pnpId -like '*&MI_00\*'
+    })
+    if ($candidates.Count -eq 0) {
+        return [pscustomobject]@{
+            Port = $fallbackPort
+            Reason = 'bootloader service CDC not enumerated'
+        }
+    }
+
+    $exact = @($candidates | Where-Object {
+        ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $fallbackPortNormalized
+    } | Select-Object -First 1)
+    if ($exact) {
+        return [pscustomobject]@{
+            Port = [string]$exact[0].DeviceID
+            Reason = 'current port already on bootloader service interface'
+        }
+    }
+
+    $preferredStable = $PreferredCompositeStableId.Trim().ToUpperInvariant()
+    if (-not [string]::IsNullOrWhiteSpace($preferredStable)) {
+        $stableMatches = @($candidates | Where-Object {
+            (Get-UsbInterfaceParentCompositeStableId -PnpInstanceId ([string]$_.PNPDeviceID)) -eq $preferredStable
+        })
+        if ($stableMatches.Count -eq 1) {
+            return [pscustomobject]@{
+                Port = [string]$stableMatches[0].DeviceID
+                Reason = ('bootloader service CDC matched runtime composite identity {0}' -f $preferredStable)
+            }
+        }
+    }
+
+    $normalizedParentPrefix = $InterfaceParentPrefix.Trim().ToUpperInvariant()
+    if (-not [string]::IsNullOrWhiteSpace($normalizedParentPrefix)) {
+        $parentMatches = @($candidates | Where-Object {
+            (Get-UsbInterfaceParentInstancePrefix -PnpInstanceId ([string]$_.PNPDeviceID)) -eq $normalizedParentPrefix
+        })
+        if ($parentMatches.Count -eq 1) {
+            return [pscustomobject]@{
+                Port = [string]$parentMatches[0].DeviceID
+                Reason = ('bootloader service CDC matched runtime interface parent prefix {0}' -f $normalizedParentPrefix)
+            }
+        }
+    }
+
+    if ($candidates.Count -eq 1) {
+        return [pscustomobject]@{
+            Port = [string]$candidates[0].DeviceID
+            Reason = 'single bootloader service CDC candidate'
+        }
+    }
+
+    return [pscustomobject]@{
+        Port = $fallbackPort
+        Reason = 'bootloader service CDC ambiguous'
     }
 }
 

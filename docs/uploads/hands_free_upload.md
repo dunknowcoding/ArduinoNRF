@@ -1,13 +1,15 @@
-# Hands-free upload (1200-bps touch → serial DFU)
+# Hands-free upload (1200-bps touch → UF2 / serial DFU)
 
 The default upload path for every Adafruit-fork board in this package. Plug a USB cable in, click **Upload**, and the new firmware is on the board — no button press, no manual bootloader entry.
+
+On Windows, `upload.ps1` now handles both UF2 mass-storage bootloaders and Adafruit serial DFU. With **Bootloader / DFU → Auto-detect**, a mounted UF2 drive for the selected board is preferred; explicit serial-DFU menu entries still force the `adafruit-nrfutil` path.
 
 ## How it works
 
 1. The Arduino IDE / `arduino-cli` opens the **service / maintenance CDC** at **1200 baud** and immediately closes it (this is the long-standing Arduino "1200-bps touch").
-2. The firmware sees the touch and triggers `SYSRESETREQ` with the bootloader magic in `GPREGRET`, rebooting straight into the Adafruit serial-DFU bootloader.
-3. The bootloader re-enumerates its CDC; `adafruit-nrfutil dfu serial` streams the packaged firmware over it.
-4. The bootloader resets back to the new app, which re-enumerates on the same COM.
+2. The firmware sees the touch and triggers `SYSRESETREQ` with the bootloader magic in `GPREGRET`, rebooting straight into the bootloader.
+3. If a matching UF2 drive is present, the wrapper converts the sketch HEX to UF2 and copies it to that drive. If an explicit serial-DFU bootloader menu is selected, `adafruit-nrfutil dfu serial` streams the packaged firmware over the bootloader CDC instead.
+4. The bootloader resets back to the new app.
 
 ## Required board settings
 
@@ -17,7 +19,7 @@ The default upload path for every Adafruit-fork board in this package. Plug a US
 upload.tool=niusdfu
 upload.use_1200bps_touch=true       # IDE owns the touch (cross-platform)
 upload.wait_for_upload_port=true    # IDE waits for the bootloader CDC
-upload.bootloader_mode=adafruit-dfu # serial DFU via adafruit-nrfutil
+upload.bootloader_mode=auto         # Windows auto-detects UF2 vs serial DFU
 ```
 
 The verified ProMicro path keeps `use_1200bps_touch=false` and lets `upload.ps1` own the touch instead — this gives it VID/PID-aware port remap and concurrency-safe retries on Windows where `usbser.sys` is touchy. Both designs are valid; the IDE-driven touch is what Adafruit's BSP uses and is the cross-platform default.
@@ -29,6 +31,9 @@ A hardened PowerShell pipeline drives the touch and DFU. Beyond the basics it pr
 - A per-port mutex so double-clicking **Upload** can't interleave two flashes.
 - A bridge-yield IPC so an active debug session releases the COM for the upload.
 - A wrong-port guard (selecting the user CDC is rejected with a clear message).
+- A stale-port guard: if the selected COM disappeared after a bootloader transition, the upload fails clearly instead of matching another board.
+- Stable-ID UF2 matching so two boards with the same volume label (for example two `NICENANO` drives) do not conflict.
+- **Upload Method → Enter UF2 drive only (no upload)**, which leaves the selected board mounted as a UF2 drive and stops before copying firmware.
 - A pre-touch PnP-snapshot cache (~3 s saved on the wall-clock).
 
 Driven by `tools.niusdfu.upload.pattern.windows` in `platform.txt`.
@@ -59,7 +64,7 @@ sudo usermod -a -G dialout $USER     # log out / back in
 
 ## Per-board status
 
-See **[../COMPATIBILITY.md](../COMPATIBILITY.md)** for the full matrix. The path is verified end-to-end on the **AliExpress ProMicro nRF52840** clone. The same Adafruit serial-DFU family is packaged for nice!nano v2, SuperMini, XIAO, Pitaya Go, and nRFMicro once the corrected VID:PIDs are in place, but those boards remain modeled / reference-core rather than re-verified on physical hardware in this revision.
+See **[../COMPATIBILITY.md](../COMPATIBILITY.md)** for the full matrix. UF2 upload, explicit Adafruit serial DFU, the UF2-drive-only helper, and two-board UF2 volume disambiguation are verified end-to-end on the **AliExpress ProMicro nRF52840** clone. The same bootloader family is packaged for nice!nano v2, SuperMini, XIAO, Pitaya Go, and nRFMicro once the corrected VID:PIDs are in place, but those boards remain modeled / reference-core rather than re-verified on physical hardware in this revision.
 
 ## When this doesn't apply
 

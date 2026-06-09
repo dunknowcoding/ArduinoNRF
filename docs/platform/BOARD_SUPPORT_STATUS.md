@@ -1,6 +1,6 @@
 # Board Support Status
 
-Date: 2026-05-29
+Date: 2026-06-09
 
 Evidence levels used in this repository:
 
@@ -11,7 +11,7 @@ Evidence levels used in this repository:
 
 | Board | Family | Evidence | Pin map | Battery model | Upload profile | Secondary buses |
 | --- | --- | --- | --- | --- | --- | --- |
-| AliExpress ProMicro nRF52840 | promicro-compatible | verified + modeled | partial | partial | verified (`promicroserialnosd` USB DFU, SWD fallback) | modeled absent |
+| AliExpress ProMicro nRF52840 | promicro-compatible | verified + modeled | partial | partial | verified (UF2, serial DFU, UF2 drive-only, SWD fallback) | modeled absent |
 | nice!nano v2 | promicro-compatible | modeled + reference-core | partial | partial | partial | reference-modeled present |
 | SuperMini nRF52840 | promicro-compatible | modeled + reference-core | partial | partial | partial | reference-modeled present |
 | nRFMicro nRF52840 | promicro-compatible | modeled + reference-core | partial | partial | partial | reference-modeled present |

@@ -1,18 +1,20 @@
 # Bootloader Notes
 
-Date: 2026-05-29
+Date: 2026-06-09
 
 ## Bootloader families in this package
 
+### UF2 mass storage
+
+UF2 is now a first-class Windows upload path for boards that expose a UF2 drive. `upload.ps1` converts the sketch HEX to UF2, matches the drive to the selected upload COM by stable USB identity, copies the file, and resets the board.
+
+The **Upload Method -> Enter UF2 drive only (no upload)** menu is for inspection/recovery: it enters bootloader mode, reports the matched drive, and stops before copying firmware.
+
 ### Adafruit serial DFU
 
-This is the default hands-free upload family for the package's USB-DFU boards. On Windows the package uses `upload.ps1`; on Linux/macOS it uses `upload.py` plus `adafruit-nrfutil`.
+Adafruit serial DFU remains available through explicit bootloader menu entries such as `Serial DFU, SoftDevice BLE`. On Windows the package uses `upload.ps1`; on Linux/macOS it uses `upload.py` plus `adafruit-nrfutil`.
 
 Boards packaged on this family include the validated AliExpress ProMicro nRF52840 path plus the modeled nice!nano v2, SuperMini, nRFMicro, XIAO, and Pitaya Go definitions. See [../uploads/hands_free_upload.md](../uploads/hands_free_upload.md) and [../COMPATIBILITY.md](../COMPATIBILITY.md).
-
-### UF2
-
-Some board menus still carry UF2 metadata and legacy/manual bootloader options. Those paths remain useful for recovery and manual drag-and-drop workflows, but the repository's currently verified no-button path is the ProMicro clone's Adafruit serial DFU flow rather than a generic UF2 claim.
 
 ### Nordic Open DFU
 

@@ -10,7 +10,7 @@ All project documentation lives here. Start with the [project README](../README.
 
 ## Uploading
 
-- [uploads/hands_free_upload.md](uploads/hands_free_upload.md) — button-less serial-DFU on the maintenance CDC (the default verified path is the ProMicro clone's `promicroserialnosd` workflow); also covers the double-reset and SWD-probe fallbacks
+- [uploads/hands_free_upload.md](uploads/hands_free_upload.md) — button-less UF2 / serial-DFU on the maintenance CDC, UF2 drive-only mode, stale-port protection, and SWD-probe fallbacks
 - [platform/UPLOAD_BEHAVIOR.md](platform/UPLOAD_BEHAVIOR.md) — upload policy and behavior
 - [bootloaders/README.md](bootloaders/README.md) — bootloader families
 

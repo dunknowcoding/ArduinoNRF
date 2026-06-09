@@ -4,7 +4,7 @@
 
 - Pin map: partial; **primary I2C pins hardware-verified 2026-06-03** (see below)
 - Battery model: partial
-- Upload profile: verified on hardware for `bootloader=promicroserialnosd,usbcdc=enabled`
+- Upload profile: verified on hardware for `uploadmode=usb,bootloader=auto`, explicit UF2, and explicit Adafruit serial DFU
 - LFCLK: `lfxo` with schematic evidence
 - Debug access: user-image-backed SWD pads
 - Single-cable USB-CDC GDB stub: verified on hardware
@@ -13,13 +13,13 @@
 
 | Item | Current truth |
 | ------ | --------------- |
-| Active clone menu under test | `bootloader=promicroserialnosd` |
-| Application start | `0x1000` |
+| Active clone menu under test | `uploadmode=usb,bootloader=auto` |
+| Application start | `0x26000` on the verified nice!nano-compatible UF2 path |
 | Bootloader family | `0x239A:0x00B3` |
-| Upload transport | Adafruit serial DFU through `upload.ps1` |
-| Runtime service COM in `promicroserialnosd` | may still appear under the same `0x239A:0x00B3` family |
+| Upload transport | UF2 mass storage or Adafruit serial DFU through `upload.ps1` |
+| Runtime service COM | may re-enumerate after upload; always select the current service/DFU COM |
 | Software reset target in code | full bootloader (`GPREGRET = 0x57`) |
-| Current status | V1 hands-free reflash and USB-CDC GDB-stub debug are both PASSING; see [`../VALIDATION.md`](../VALIDATION.md) |
+| Current status | UF2 upload, explicit serial DFU, UF2-drive-only, multi-board matching, hands-free reflash, and USB-CDC GDB-stub debug are PASSING; see [`../VALIDATION.md`](../VALIDATION.md) |
 
 ## Current live-board status
 
@@ -29,6 +29,10 @@
 - after the first flash, the board returns to user mode
 - with `usbcdc=enabled`, the board exposes separate user and service CDC paths
 - selecting the user CDC for upload is rejected; the service CDC hands-free reupload path works repeatedly without manual reset
+- UF2 upload from DFU mode works with both `bootloader=auto` and explicit UF2 menu selection
+- explicit Adafruit serial DFU from DFU mode works while another UF2 drive is mounted
+- `Upload Method -> Enter UF2 drive only (no upload)` mounts the selected board and stops before copying firmware
+- stale COM selection is rejected so a second mounted `NICENANO` drive is not used accidentally
 - with `usbcdc=disabled`, hands-free in-app upload also works on the single service CDC (verified 3× back-to-back and across `usbcdc` transitions both ways)
 - USB-only GDB-stub debug over the service CDC works with breakpoints, step, registers, memory, watchpoints, and pause
 
@@ -68,7 +72,7 @@ silk-screen.
 
 ### Still board-specific
 
-- For `promicroserialnosd`, runtime and bootloader phase detection cannot rely on VID/PID alone.
+- Runtime and bootloader phase detection cannot rely on VID/PID alone; use the service/DFU COM that Arduino IDE currently shows.
 
 ## Current package model
 

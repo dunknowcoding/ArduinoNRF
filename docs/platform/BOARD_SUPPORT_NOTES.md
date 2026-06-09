@@ -1,6 +1,6 @@
 # Board Support Notes
 
-Date: 2026-05-29
+Date: 2026-06-09
 
 ## Evidence vocabulary
 
@@ -20,18 +20,18 @@ Boards:
 
 Current truth:
 
-- `promicro_nrf52840` is now verified end-to-end on physical hardware for hands-free upload and single-cable USB-CDC debug when using the validated `bootloader=promicroserialnosd,usbcdc=enabled` path.
-- The verified ProMicro clone can expose the same `0x239A:0x00B3` family in both runtime and bootloader phases, so host tooling must disambiguate by interface / port role rather than VID:PID alone.
+- `promicro_nrf52840` is now verified end-to-end on physical hardware for hands-free UF2 upload, explicit Adafruit serial DFU, UF2 drive-only mode, multi-board UF2 disambiguation, and single-cable USB-CDC debug.
+- The verified ProMicro clone can expose the same `NICENANO` UF2 label as a second connected board, so host tooling must disambiguate by stable USB identity and current port role rather than VID/PID or volume label alone.
 - `promicro_nrf52840`, `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` all declare `lfxo` as the low-frequency clock source in this repository.
 - `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` expose secondary-bus pins in metadata and variants.
 - The core now exposes global `Wire1` and `SPI1` objects. `promicro_nrf52840` leaves the secondary-bus pins unassigned, while the other three ProMicro-like variants map them to concrete pins.
-- `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` still rely on modeled / reference-core evidence for upload and debug behavior in this revision even though they share the same Adafruit serial-DFU family.
+- `nice!nano v2`, `SuperMini nRF52840`, and `nRFMicro nRF52840` still rely on modeled / reference-core evidence for upload and debug behavior in this revision even though they share the same UF2 / Adafruit serial-DFU family.
 
 Known risks:
 
 - Some SuperMini-class clones may expose a VCC behavior that is unsafe to treat as always-regulated 3.3V when USB is present.
 - Battery measurement differs by board: some use `VDDHDIV5`, others use a dedicated VBAT ADC pin.
-- Non-ProMicro upload/debug claims in this family are still modeled as the same DFU + optional double-reset fallback, not re-verified on physical hardware in this revision.
+- Non-ProMicro upload/debug claims in this family are still modeled as the same UF2/DFU + optional double-reset fallback, not re-verified on physical hardware in this revision.
 
 ## Remaining families
 

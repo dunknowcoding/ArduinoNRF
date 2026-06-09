@@ -10,7 +10,7 @@ Before this addition the core didn't expose them at all.
 
 ## Peripheral-claim warnings (read first)
 
-- **RTC0** is reserved by the Nordic SoftDevice on with-SD build profiles. The verified `promicroserialnosd` path leaves all three RTCs free.
+- **RTC0** is reserved by the Nordic SoftDevice on with-SD build profiles. No-SoftDevice bootloader menu entries leave all three RTCs free.
 - **RTC1** is a popular choice for an RTOS tick on other cores (Mbed, Adafruit). This core does not use it.
 - **RTC2** is normally idle and the safe default for new sketches.
 
