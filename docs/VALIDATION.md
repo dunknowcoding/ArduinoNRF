@@ -19,10 +19,17 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | Explicit serial DFU from DFU mode | **PASS** | `bootloader=promicroserial` enters `Starting Adafruit serial DFU transfer` and completes even while another UF2 drive is mounted. |
 | UF2 drive-only helper | **PASS** | `uploadmode=uf2boot` leaves the selected board mounted as UF2 and exits with `Upload skipped`. |
 | Multi-board UF2 disambiguation | **PASS** | Two `NICENANO` volumes were mounted simultaneously; board1 matched `J:\` by stable ID and board2 matched `K:\`. Stale COM selection is rejected. |
+| CC2530 flash via built-in CCDebugger | **PASS** | Two CC2530 modules wired to board1/board2 were detected as `0xA5xx`; the SDCC transceiver firmware was erased, programmed, and read-back verified. |
+| CC2530 runtime UART PING | **PASS** | `CC2530Radio.begin(11)` reports firmware `v0.1` and repeated `ping -> PONG` after the NiusZigbee UART resync fix. |
+| CC2530 two-node raw 802.15.4 link | **PASS** | `CC2530_Link` on board1 and board2 produced `TX "hello N" ok` and reciprocal `RX (... dBm): hello N` frames on channel 11. |
 
 ## ⚠️ Known limitations
 
 - **Raw `adafruit-nrfutil dfu serial`** is less robust than `arduino-cli upload` on this clone because it lacks the package's port identity checks, retries, and stale-COM guard.
+- A no-SoftDevice nice!nano-compatible bootloader reports `SoftDevice: not found`
+  in `INFO_UF2.TXT`; use the no-SoftDevice menu (`bootloader=promicroserialnosd`,
+  app start `0x1000`) for sketches on that bootloader. Uploading a SoftDevice
+  layout can appear to succeed while the application does not run.
 
 ## ⏱️ Upload timing (measured)
 

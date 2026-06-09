@@ -14,8 +14,8 @@ need no external programmer.
   turns the nRF52840 into a TI CC2530 programmer (bit-bang debug + DMA flash +
   read-back verify) — no external TI CC-Debugger required.
 
-Hardware-verified on an AliExpress CC2530 clone: flash + read-back verify, and
-boot-announce / PING over UART at 115200.
+Hardware-verified on two AliExpress CC2530 clones: flash + read-back verify,
+runtime PING over UART at 115200, and a two-node raw 802.15.4 link.
 
 ### Quick use
 1. Install the **ArduinoNRF board package** (provides the board + `CCDebugger`)
@@ -27,6 +27,15 @@ boot-announce / PING over UART at 115200.
 
 ### Notes & gotchas
 - **3.3 V only** — the CC2530 is not 5 V tolerant.
+- **nice!nano-style bootloader layout:** if `INFO_UF2.TXT` says
+  `SoftDevice: not found`, select the no-SoftDevice bootloader option
+  (`bootloader=promicroserialnosd`) so sketches are linked at `0x1000`. A
+  SoftDevice layout (`0x26000` / `0x27000`) may upload successfully but the
+  application will not run on that bootloader.
+- **Serial1 reliability:** ArduinoNRF 0.3.3 fixes UARTE0 single-byte RX handling
+  for short framed UART replies. NiusZigbee 0.1.2 also resynchronizes the
+  CC2530 UART parser in `CC2530Radio.begin()` so uploads/resets do not leave the
+  module mid-frame.
 - **P2.0 (CFG1):** not used by the SDCC firmware (floating or grounded both work);
   ground it only if you later flash TI Z-Stack.
 - This is **raw 802.15.4**, not full Zigbee PRO — ideal for custom links and
@@ -35,6 +44,23 @@ boot-announce / PING over UART at 115200.
 - Many **clone** CC2530 modules won't boot stock TI Z-Stack (a crystal-startup
   quirk). The ArduinoNRF-Zigbee SDCC firmware starts the clock differently and
   runs on them.
+
+### Verified CC2530_Link output
+
+With the same sketch on two boards, both serial monitors should show periodic
+transmits and receives:
+
+```text
+Link up on channel 11. Broadcasting every 2 s.
+TX "hello 0" ok
+RX (-47 dBm): hello 0
+TX "hello 1" ok
+RX (-44 dBm): hello 1
+```
+
+`CC2530_Link` enables promiscuous receive mode, so other 802.15.4 traffic on the
+same channel can appear as non-printable or noisy frames. The `hello N` frames
+from the other board are the link-health signal.
 
 ## nRF-native Zigbee (not vendored)
 

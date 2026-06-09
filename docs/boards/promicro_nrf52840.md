@@ -14,7 +14,7 @@
 | Item | Current truth |
 | ------ | --------------- |
 | Active clone menu under test | `uploadmode=usb,bootloader=auto` |
-| Application start | `0x26000` on the verified nice!nano-compatible UF2 path |
+| Application start | `0x26000` on SoftDevice UF2 builds; `0x1000` when the bootloader reports `SoftDevice: not found` |
 | Bootloader family | `0x239A:0x00B3` |
 | Upload transport | UF2 mass storage or Adafruit serial DFU through `upload.ps1` |
 | Runtime service COM | may re-enumerate after upload; always select the current service/DFU COM |
@@ -35,6 +35,8 @@
 - stale COM selection is rejected so a second mounted `NICENANO` drive is not used accidentally
 - with `usbcdc=disabled`, hands-free in-app upload also works on the single service CDC (verified 3× back-to-back and across `usbcdc` transitions both ways)
 - USB-only GDB-stub debug over the service CDC works with breakpoints, step, registers, memory, watchpoints, and pause
+- no-SoftDevice nice!nano-compatible bootloaders (`INFO_UF2.TXT`: `SoftDevice: not found`) run sketches correctly with `bootloader=promicroserialnosd`
+- CC2530 external radio workflow is verified: D8/D9/D10 debug flash, D0/D1 runtime UART, and two-node `CC2530_Link` traffic on channel 11
 
 ### Pinout — Arduino number == silk-screen "Dn"
 

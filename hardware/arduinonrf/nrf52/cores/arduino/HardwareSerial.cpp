@@ -55,9 +55,9 @@ inline void nvicDisableIrq(uint32_t irq) {
 }
 
 // UARTE0 RX state: a 1-byte EasyDMA target plus a software ring the ISR fills.
-// The ENDRX_STARTRX short auto-restarts RX, so by the time the ENDRX interrupt
-// copies the byte the hardware is already receiving the next one. (Power-of-two
-// ring size lets us mask instead of modulo.)
+// Do not use the ENDRX_STARTRX short with this single-byte target: the next byte
+// can overwrite g_uarteRxByte before the ISR copies it, corrupting short framed
+// UART replies. Instead the ISR copies first, then explicitly re-arms RX.
 constexpr uint16_t UARTE_RX_RING_SIZE = 256;
 volatile uint8_t  g_uarteRxRing[UARTE_RX_RING_SIZE];
 volatile uint16_t g_uarteRxHead = 0;   // advanced by the ISR (producer)
@@ -345,14 +345,13 @@ void HardwareSerial::configureUart() {
     }
     reg32(UARTE0_BASE, UARTE_BAUDRATE) = baudRegisterValue(actualBaudRate);
 
-    // Continuous 1-byte DMA RX: point RXD at our byte, MAXCNT=1, and let the
-    // ENDRX_STARTRX short re-arm RX automatically. The ENDRX interrupt copies
-    // the byte into the ring.
+    // Continuous 1-byte DMA RX: point RXD at our byte, MAXCNT=1. The ENDRX
+    // interrupt copies the byte into the ring and then re-arms RX.
     g_uarteRxHead = 0;
     g_uarteRxTail = 0;
     reg32(UARTE0_BASE, UARTE_RXD_PTR) = reinterpret_cast<uint32_t>(&g_uarteRxByte);
     reg32(UARTE0_BASE, UARTE_RXD_MAXCNT) = 1UL;
-    reg32(UARTE0_BASE, UARTE_SHORTS) = UARTE_SHORTS_ENDRX_STARTRX;
+    reg32(UARTE0_BASE, UARTE_SHORTS) = 0UL;
     reg32(UARTE0_BASE, UARTE_EVENTS_ENDRX) = 0UL;
     reg32(UARTE0_BASE, UARTE_INTENCLR) = 0xFFFFFFFFUL;
     reg32(UARTE0_BASE, UARTE_INTENSET) = UARTE_INT_ENDRX;
@@ -363,9 +362,9 @@ void HardwareSerial::configureUart() {
     enabled_ = true;
 }
 
-// UARTE0 RX interrupt: one byte has landed in g_uarteRxByte via EasyDMA and the
-// ENDRX_STARTRX short has already re-armed RX for the next one. Copy the byte
-// into the software ring (dropping it only if the ring is full).
+// UARTE0 RX interrupt: one byte has landed in g_uarteRxByte via EasyDMA. Copy
+// it into the software ring (dropping it only if the ring is full), then re-arm
+// RX for the next byte.
 extern "C" void UARTE0_UART0_IRQHandler(void) {
     if (reg32(UARTE0_BASE, UARTE_EVENTS_ENDRX) != 0UL) {
         reg32(UARTE0_BASE, UARTE_EVENTS_ENDRX) = 0UL;
@@ -374,5 +373,8 @@ extern "C" void UARTE0_UART0_IRQHandler(void) {
             g_uarteRxRing[g_uarteRxHead] = g_uarteRxByte;
             g_uarteRxHead = next;
         }
+        reg32(UARTE0_BASE, UARTE_RXD_PTR) = reinterpret_cast<uint32_t>(&g_uarteRxByte);
+        reg32(UARTE0_BASE, UARTE_RXD_MAXCNT) = 1UL;
+        reg32(UARTE0_BASE, UARTE_TASKS_STARTRX) = 1UL;
     }
 }
