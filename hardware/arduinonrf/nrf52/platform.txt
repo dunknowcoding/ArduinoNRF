@@ -42,6 +42,11 @@ tools.openocd.bootloader.params.verbose=-d2
 tools.openocd.bootloader.params.quiet=-d0
 tools.openocd.bootloader.pattern="{path}/{cmd}" {bootloader.verbose} -s "{path}/share/openocd/scripts" -f "{runtime.platform.path}/tools/openocd/{programmer.protocol}" -c "telnet_port disabled; init; halt; nrf52_recover; reset halt; program {{runtime.platform.path}/bootloaders/{bootloader.file}} verify reset; shutdown"
 
+tools.niusboot.erase.pattern.windows=
+tools.niusboot.bootloader.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode bootloader -Tool '{runtime.tools.openocd-0.11.0-arduino2.path}/bin/openocd.exe' -ScriptRoot '{runtime.tools.openocd-0.11.0-arduino2.path}/share/openocd/scripts' -Config '{runtime.platform.path}/tools/openocd/{programmer.protocol}' -ProgrammerProtocol '{programmer.protocol}' -JLinkDevice '{build.jlink_device}' -Hex '{runtime.platform.path}/bootloaders/{bootloader.file}' -Board '{build.variant}' {bootloader.verbose}"
+tools.niusboot.bootloader.params.verbose=-ArduinoIdeVerboseUpload 'true'
+tools.niusboot.bootloader.params.quiet=-ArduinoIdeVerboseUpload 'false'
+
 tools.dfuutil.path={runtime.tools.dfu-util.path}
 tools.dfuutil.cmd=bin/dfu-util
 tools.dfuutil.cmd.windows=dfu-util.exe
@@ -57,6 +62,13 @@ tools.niusopenocd.upload.pattern="{runtime.tools.openocd-0.11.0-arduino2.path}/b
 tools.niusopenocd.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode openocd -Tool '{runtime.tools.openocd-0.11.0-arduino2.path}/bin/openocd.exe' -ScriptRoot '{runtime.tools.openocd-0.11.0-arduino2.path}/share/openocd/scripts' -Config '{runtime.platform.path}/tools/openocd/{build.openocdscript}' -Hex '{build.path}/{build.project_name}.hex' -Board '{build.variant}' {upload.verbose}"
 tools.niusopenocd.upload.params.verbose=-ArduinoIdeVerboseUpload 'true'
 tools.niusopenocd.upload.params.quiet=-ArduinoIdeVerboseUpload 'false'
+
+tools.niusjlink.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode jlink -Tool 'auto' -JLinkDevice '{build.jlink_device}' -Hex '{build.path}/{build.project_name}.hex' -Board '{build.variant}' {upload.verbose}"
+tools.niusjlink.upload.params.verbose=-ArduinoIdeVerboseUpload 'true'
+tools.niusjlink.upload.params.quiet=-ArduinoIdeVerboseUpload 'false'
+tools.niusjlink.program.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode jlink -Tool 'auto' -JLinkDevice '{build.jlink_device}' -Hex '{build.path}/{build.project_name}.hex' -Board '{build.variant}' {program.verbose}"
+tools.niusjlink.program.params.verbose=-ArduinoIdeVerboseUpload 'true'
+tools.niusjlink.program.params.quiet=-ArduinoIdeVerboseUpload 'false'
 
 tools.niusdfu.upload.pattern="{runtime.tools.dfu-util.path}/bin/dfu-util" {upload.verbose} -d {upload.usb_vid}:{upload.usb_pid} -a {upload.dfu_alt} -D "{build.path}/{build.project_name}.bin" -R
 # Arduino CLI performs its own 1200-bps touch when upload.use_1200bps_touch=true, which races our
@@ -87,6 +99,9 @@ debug.server.openocd.path.windows={runtime.tools.openocd-0.11.0-arduino2.path}\b
 debug.server.openocd.scripts_dir={runtime.tools.openocd-0.11.0-arduino2.path}/share/openocd/scripts/
 debug.server.openocd.scripts_dir.windows={runtime.tools.openocd-0.11.0-arduino2.path}\share\openocd\scripts\
 debug.server.openocd.scripts.0={runtime.platform.path}/tools/openocd/{build.openocdscript}
+debug.server.jlink.path=
+debug.server.jlink.scripts_dir=
+debug.server.jlink.script=
 debug.cortex-debug.custom.request=attach
 debug.cortex-debug.custom.postAttachCommands.0=set remote hardware-watchpoint-limit 2
 debug.cortex-debug.custom.postAttachCommands.1=monitor reset halt

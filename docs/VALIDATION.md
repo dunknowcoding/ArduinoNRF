@@ -18,7 +18,11 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | UF2 upload from DFU mode | **PASS** | `bootloader=auto` and explicit `bootloader=promicro` both match the selected board's UF2 drive and complete `Upload complete`. |
 | Explicit serial DFU from DFU mode | **PASS** | `bootloader=promicroserial` enters `Starting Adafruit serial DFU transfer` and completes even while another UF2 drive is mounted. |
 | UF2 drive-only helper | **PASS** | `uploadmode=uf2boot` leaves the selected board mounted as UF2 and exits with `Upload skipped`. |
+| UF2 layout guard | **PASS** | A mounted `NICENANO` drive reporting `SoftDevice: not found` was rejected when the sketch was compiled for `0x26000`; recompiling/selecting the no-SoftDevice `0x1000` layout allowed the UF2 path to proceed. |
 | Multi-board UF2 disambiguation | **PASS** | Two `NICENANO` volumes were mounted simultaneously; board1 matched `J:\` by stable ID and board2 matched `K:\`. Stale COM selection is rejected. |
+| SEGGER J-Link SWD upload | **PASS** | `Upload Method -> SWD programmer (SEGGER J-Link)` uses SEGGER `JLink.exe`; board1 flashed a smoke sketch over SWD in ~1.3-2.3 s. |
+| Upload Using Programmer, J-Link | **PASS** | `Tools -> Programmer -> SEGGER J-Link (SWD)` plus `Upload Using Programmer` flashed the same smoke sketch through the SEGGER path. |
+| Burn Bootloader recipe, J-Link/CMSIS-DAP | **NOT RUN** | Recipe is wired through `niusboot`: J-Link uses SEGGER `JLink.exe`; CMSIS-DAP uses OpenOCD `nrf52_recover`. Not executed during validation because it performs a full chip erase. |
 | CC2530 flash via built-in CCDebugger | **PASS** | Two CC2530 modules wired to board1/board2 were detected as `0xA5xx`; the SDCC transceiver firmware was erased, programmed, and read-back verified. |
 | CC2530 runtime UART PING | **PASS** | `CC2530Radio.begin(11)` reports firmware `v0.1` and repeated `ping -> PONG` after the NiusZigbee UART resync fix. |
 | CC2530 two-node raw 802.15.4 link | **PASS** | `CC2530_Link` on board1 and board2 produced `TX "hello N" ok` and reciprocal `RX (... dBm): hello N` frames on channel 11. |

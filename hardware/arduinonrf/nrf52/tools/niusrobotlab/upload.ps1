@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('dfu', 'openocd')]
+    [ValidateSet('dfu', 'openocd', 'jlink', 'bootloader')]
     [string]$Mode,
 
     [Parameter(Mandatory = $true)]
@@ -13,6 +13,10 @@ param(
     [string]$ScriptRoot = '',
     [AllowEmptyString()]
     [string]$Config = '',
+    [AllowEmptyString()]
+    [string]$JLinkDevice = '',
+    [AllowEmptyString()]
+    [string]$ProgrammerProtocol = '',
     [AllowEmptyString()]
     [string]$Hex = '',
     [AllowEmptyString()]
@@ -379,6 +383,74 @@ function Assert-ToolExists {
     if (-not (Test-Path -LiteralPath $Path)) {
         throw ('Upload tool not found: {0}. Check the installed Arduino tool layout and the platform upload recipe.' -f $Path)
     }
+}
+
+function Test-NiusSeggerJLinkExe {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return $false
+    }
+    if ([System.IO.Path]::GetFileName($Path) -notmatch '^(?i)JLink\.exe$') {
+        return $false
+    }
+    try {
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+        $versionInfo = $item.VersionInfo
+        $text = @($item.FullName, $versionInfo.ProductName, $versionInfo.CompanyName, $versionInfo.FileDescription) -join ' '
+        return ($text -match '(?i)SEGGER|J-Link')
+    }
+    catch {
+        return ($Path -match '(?i)\\SEGGER\\')
+    }
+}
+
+function Resolve-NiusJLinkExe {
+    param([string]$Preferred = '')
+
+    $candidates = New-Object 'System.Collections.Generic.List[string]'
+
+    if (-not [string]::IsNullOrWhiteSpace($Preferred) -and $Preferred -ne 'auto') {
+        if (Test-Path -LiteralPath $Preferred -PathType Container) {
+            $candidates.Add((Join-Path $Preferred 'JLink.exe'))
+        }
+        else {
+            $candidates.Add($Preferred)
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:NIUS_JLINK_PATH)) {
+        if (Test-Path -LiteralPath $env:NIUS_JLINK_PATH -PathType Container) {
+            $candidates.Add((Join-Path $env:NIUS_JLINK_PATH 'JLink.exe'))
+        }
+        else {
+            $candidates.Add($env:NIUS_JLINK_PATH)
+        }
+    }
+
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        $seggerRoot = Join-Path $root 'SEGGER'
+        if (Test-Path -LiteralPath $seggerRoot) {
+            foreach ($hit in @(Get-ChildItem -LiteralPath $seggerRoot -Directory -Filter 'JLink*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+                $candidates.Add((Join-Path $hit.FullName 'JLink.exe'))
+            }
+        }
+    }
+
+    foreach ($cmd in @(Get-Command JLink.exe -ErrorAction SilentlyContinue)) {
+        if ($cmd.Source) {
+            $candidates.Add($cmd.Source)
+        }
+    }
+
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (Test-NiusSeggerJLinkExe -Path $candidate) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    throw 'SEGGER JLink.exe was not found. Install SEGGER J-Link Software, or set NIUS_JLINK_PATH to JLink.exe or its installation directory.'
 }
 
 function Assert-InputArtifact {
@@ -1918,6 +1990,107 @@ function Invoke-CommandChecked {
     }
 }
 
+function Invoke-JLinkDeploy {
+    param(
+        [string]$JLinkExe,
+        [string]$HexPath,
+        [string]$Device = ''
+    )
+
+    Assert-InputArtifact -Path $HexPath -Label 'hex'
+    if ([string]::IsNullOrWhiteSpace($Device)) {
+        $Device = 'NRF52840_XXAA'
+    }
+
+    $scriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ('nius-jlink-{0}.jlink' -f ([Guid]::NewGuid().ToString('n')))
+    $escapedHex = $HexPath.Replace('"', '\"')
+    @(
+        'r',
+        'h',
+        ('loadfile "{0}"' -f $escapedHex),
+        'r',
+        'g',
+        'q'
+    ) | Set-Content -LiteralPath $scriptPath -Encoding ASCII
+
+    try {
+        Write-Stage -Percent 0 -Label 'Connecting' -Detail 'SEGGER J-Link SWD'
+        Write-NiusDetail ('[nius] Resolved SEGGER J-Link: {0}' -f $JLinkExe) -ForegroundColor DarkGray
+        Write-NiusDetail ('[nius] J-Link device: {0}' -f $Device) -ForegroundColor DarkGray
+        Invoke-CommandChecked -Exe $JLinkExe -Arguments @(
+            '-Device', $Device,
+            '-If', 'SWD',
+            '-Speed', '1000',
+            '-CommanderScript', $scriptPath
+        ) -FailureKind 'jlink' -ProgressPercent 76 -ProgressLabel 'SEGGER J-Link flash transaction active'
+        Write-NiusUploadComplete -Note 'SEGGER J-Link SWD upload path'
+    }
+    finally {
+        Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-NiusBootloaderDeploy {
+    param(
+        [string]$OpenOcdExe,
+        [string]$ScriptRootPath,
+        [string]$OpenOcdConfig,
+        [string]$BootloaderHexPath,
+        [string]$Protocol,
+        [string]$Device = ''
+    )
+
+    Assert-InputArtifact -Path $BootloaderHexPath -Label 'bootloader hex'
+
+    $isJLink = ($Protocol -match '(?i)jlink')
+    if ($isJLink) {
+        $jlinkExe = Resolve-NiusJLinkExe
+        if ([string]::IsNullOrWhiteSpace($Device)) {
+            $Device = 'NRF52840_XXAA'
+        }
+        $scriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ('nius-jlink-bootloader-{0}.jlink' -f ([Guid]::NewGuid().ToString('n')))
+        $escapedHex = $BootloaderHexPath.Replace('"', '\"')
+        @(
+            'r',
+            'h',
+            'erase',
+            ('loadfile "{0}"' -f $escapedHex),
+            'r',
+            'g',
+            'q'
+        ) | Set-Content -LiteralPath $scriptPath -Encoding ASCII
+
+        try {
+            Write-Stage -Percent 0 -Label 'Connecting' -Detail 'SEGGER J-Link bootloader flash'
+            Write-NiusDetail ('[nius] Resolved SEGGER J-Link: {0}' -f $jlinkExe) -ForegroundColor DarkGray
+            Invoke-CommandChecked -Exe $jlinkExe -Arguments @(
+                '-Device', $Device,
+                '-If', 'SWD',
+                '-Speed', '1000',
+                '-CommanderScript', $scriptPath
+            ) -FailureKind 'jlink' -ProgressPercent 76 -ProgressLabel 'SEGGER J-Link bootloader flash active'
+            Write-NiusUploadComplete -Note 'SEGGER J-Link bootloader flash path'
+        }
+        finally {
+            Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
+        }
+        return
+    }
+
+    Assert-ToolExists -Path $OpenOcdExe
+    if ([string]::IsNullOrWhiteSpace($ScriptRootPath) -or [string]::IsNullOrWhiteSpace($OpenOcdConfig)) {
+        Throw-NiusUploadFailure (New-UploadFailure -Kind 'openocd' -ExitCode 1 -Output 'OpenOCD script root/config missing from bootloader recipe.' -Exe $OpenOcdExe)
+    }
+
+    Write-Stage -Percent 0 -Label 'Connecting' -Detail 'OpenOCD bootloader flash'
+    Invoke-CommandChecked -Exe $OpenOcdExe -Arguments @(
+        '-s', $ScriptRootPath,
+        '-f', $OpenOcdConfig,
+        '-c', ('telnet_port disabled; init; halt; nrf52_recover; reset halt; program {{{0}}} verify reset; shutdown' -f $BootloaderHexPath)
+    ) -FailureKind 'openocd' -ProgressPercent 76 -ProgressLabel 'OpenOCD bootloader flash active'
+    Write-NiusUploadComplete -Note 'OpenOCD bootloader flash path'
+}
+
 function Get-RelevantLogLines {
     param(
         [string]$Output,
@@ -1978,6 +2151,13 @@ function Get-FailureHints {
                 'Confirm SWDIO, SWCLK, GND, and target power are all present.',
                 'If the probe is seen but programming fails, reduce cable length or retry after a full power cycle.',
                 'The firmware already compiles; this class of failure usually means wiring, probe, or target state.'
+            )
+        }
+        'jlink' {
+            return @(
+                'Confirm SWDIO, SWCLK, GND, and target power are all present.',
+                'Install SEGGER J-Link Software, or set NIUS_JLINK_PATH to JLink.exe / the J-Link installation directory.',
+                'Use Upload Method -> SWD programmer (SEGGER J-Link) only for SEGGER probes; CMSIS-DAP probes should use the CMSIS-DAP SWD option.'
             )
         }
         'uf2-convert' {
@@ -2954,7 +3134,12 @@ function Wait-SamePidAdafruitBootloaderTransition {
     throw ('No same-PID bootloader transition observed after touch ({0}); snapshot: {1}' -f $lastIssue, $summary)
 }
 
-$toolPath = [System.IO.Path]::GetFullPath($Tool)
+$toolPath = if ($Mode -eq 'jlink') {
+    Resolve-NiusJLinkExe -Preferred $Tool
+}
+else {
+    [System.IO.Path]::GetFullPath($Tool)
+}
 try {
     Assert-ToolExists -Path $toolPath
     Write-Banner -BoardName $Board
@@ -3624,6 +3809,22 @@ try {
         exit 0
     }
 
+    if ($Mode -eq 'bootloader') {
+        Invoke-NiusBootloaderDeploy `
+            -OpenOcdExe $toolPath `
+            -ScriptRootPath $ScriptRoot `
+            -OpenOcdConfig $Config `
+            -BootloaderHexPath $Hex `
+            -Protocol $ProgrammerProtocol `
+            -Device $JLinkDevice
+        exit 0
+    }
+
+    if ($Mode -eq 'jlink') {
+        Invoke-JLinkDeploy -JLinkExe $toolPath -HexPath $Hex -Device $JLinkDevice
+        exit 0
+    }
+
     Assert-InputArtifact -Path $Hex -Label 'hex'
     Write-Stage -Percent 10 -Label 'Connecting'
     Write-Stage -Percent 42 -Label 'Uploading'
@@ -3650,16 +3851,19 @@ catch {
 finally {
     # Remove the bridge-yield request so a bridge started later doesn't see a
     # stale request and release its port. (It is also freshness-gated.)
-    if ($script:NiusBridgeYieldFile) {
+    $bridgeYieldVar = Get-Variable -Name NiusBridgeYieldFile -Scope Script -ErrorAction SilentlyContinue
+    if ($bridgeYieldVar -and $script:NiusBridgeYieldFile) {
         try { Remove-Item -LiteralPath $script:NiusBridgeYieldFile -Force -ErrorAction SilentlyContinue } catch {}
     }
     # Best-effort release of the concurrency lock on the normal-completion path.
     # On `exit`, crash, or kill the OS releases the named mutex automatically, so
     # a held lock never wedges future uploads even if this block is skipped.
-    if ($script:NiusUploadMutexHeld -and $script:NiusUploadMutex) {
+    $mutexHeldVar = Get-Variable -Name NiusUploadMutexHeld -Scope Script -ErrorAction SilentlyContinue
+    $mutexVar = Get-Variable -Name NiusUploadMutex -Scope Script -ErrorAction SilentlyContinue
+    if ($mutexHeldVar -and $mutexVar -and $script:NiusUploadMutexHeld -and $script:NiusUploadMutex) {
         try { $script:NiusUploadMutex.ReleaseMutex() } catch {}
     }
-    if ($script:NiusUploadMutex) {
+    if ($mutexVar -and $script:NiusUploadMutex) {
         try { $script:NiusUploadMutex.Dispose() } catch {}
     }
 }

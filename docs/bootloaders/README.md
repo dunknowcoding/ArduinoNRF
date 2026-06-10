@@ -33,9 +33,13 @@ Method**:
 For **Sketch -> Upload Using Programmer** and **Tools -> Burn Bootloader**,
 choose the probe from **Tools -> Programmer** instead.
 
-Arduino IDE 2 SWD Debug uses the same OpenOCD script selected by **Upload
-Method**, so use the J-Link upload method before starting a J-Link debug
-session.
+On Windows, the J-Link paths use SEGGER's command-line tools. This avoids the
+common OpenOCD/libusb failure mode on machines that have the official SEGGER
+driver installed. CMSIS-DAP paths continue to use OpenOCD.
+
+Arduino IDE 2 SWD Debug follows the selected **Upload Method**: CMSIS-DAP keeps
+the OpenOCD server, while the J-Link upload method switches the debug metadata
+to Arduino IDE's `jlink` server type.
 
 Arduino IDE **Tools -> Burn Bootloader** is available for the nice!nano-family
 definitions that have a known bundled bootloader image:
@@ -45,8 +49,9 @@ definitions that have a known bundled bootloader image:
 - `supermini_nrf52840`
 
 Select **Tools -> Programmer -> SEGGER J-Link (SWD)** or **CMSIS-DAP (SWD)**
-first. The recipe uses OpenOCD, performs `nrf52_recover` / chip erase, then
-programs the bundled nice!nano bootloader HEX:
+first. The wrapper performs a chip erase/recover and then programs the bundled
+nice!nano bootloader HEX. J-Link uses SEGGER `JLink.exe`; CMSIS-DAP uses
+OpenOCD `nrf52_recover`.
 
 `hardware/arduinonrf/nrf52/bootloaders/nice_nano/nice_nano_bootloader-0.6.0_s140_6.1.1.hex`
 

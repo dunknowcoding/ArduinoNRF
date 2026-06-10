@@ -23,17 +23,19 @@ These boards currently declare USB-backed upload support in package metadata:
 Boards with SWD upload support expose explicit Arduino IDE **Upload Method**
 entries for the probe type:
 
-- `SWD programmer (CMSIS-DAP)` uses `tools/openocd/nrf52-cmsis-dap.cfg`.
-- `SWD programmer (SEGGER J-Link)` uses `tools/openocd/nrf52-jlink.cfg`.
+- `SWD programmer (CMSIS-DAP)` uses OpenOCD with `tools/openocd/nrf52-cmsis-dap.cfg`.
+- `SWD programmer (SEGGER J-Link)` uses SEGGER `JLink.exe` through `upload.ps1`.
 
 These entries are for the normal **Upload** button. They do not depend on the
 IDE **Tools -> Programmer** selection, because Arduino upload recipes use the
 board's selected `Upload Method` properties. Use **Tools -> Programmer** for
 **Sketch -> Upload Using Programmer** and **Tools -> Burn Bootloader**.
+`SEGGER J-Link (SWD)` uses SEGGER's command-line tools; `CMSIS-DAP (SWD)` uses
+OpenOCD.
 
-Arduino IDE 2 SWD Debug also uses the selected `Upload Method`'s
-`build.openocdscript`, so choose `SWD programmer (SEGGER J-Link)` before
-starting a J-Link-backed debug session.
+Arduino IDE 2 SWD Debug follows the selected `Upload Method`: CMSIS-DAP keeps
+the OpenOCD server, while the J-Link upload method switches the debug server
+metadata to Arduino IDE's `jlink` server type.
 
 The `devboard_nrf52833` target is SWD-first and exposes only these SWD upload
 choices because it has no native USB upload path in this package.

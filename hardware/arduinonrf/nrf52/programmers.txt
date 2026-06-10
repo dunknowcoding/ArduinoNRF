@@ -7,8 +7,8 @@ cmsis_dap.program.tool.default=openocd
 jlink.name=SEGGER J-Link (SWD)
 jlink.communication=swd
 jlink.protocol=nrf52-jlink.cfg
-jlink.program.tool=openocd
-jlink.program.tool.default=openocd
+jlink.program.tool=niusjlink
+jlink.program.tool.default=niusjlink
 
 openocd.name=Generic OpenOCD Target
 openocd.communication=swd

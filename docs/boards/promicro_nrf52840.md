@@ -36,6 +36,7 @@
 - with `usbcdc=disabled`, hands-free in-app upload also works on the single service CDC (verified 3× back-to-back and across `usbcdc` transitions both ways)
 - USB-only GDB-stub debug over the service CDC works with breakpoints, step, registers, memory, watchpoints, and pause
 - no-SoftDevice nice!nano-compatible bootloaders (`INFO_UF2.TXT`: `SoftDevice: not found`) run sketches correctly with the no-SoftDevice menu entries (`bootloader=autonosd`, `bootloader=promicronosduf2`, or `bootloader=promicroserialnosd`)
+- SEGGER J-Link SWD application upload works from `Tools -> Upload Method -> SWD programmer (SEGGER J-Link)`; `Sketch -> Upload Using Programmer` with `Tools -> Programmer -> SEGGER J-Link (SWD)` also works
 - CC2530 external radio workflow is verified: D8/D9/D10 debug flash, D0/D1 runtime UART, and two-node `CC2530_Link` traffic on channel 11
 
 ### Bootloader layout choices
@@ -61,6 +62,11 @@ Use `Tools -> Programmer -> SEGGER J-Link (SWD)` for board1's J-Link setup, then
 run Burn Bootloader. The recipe performs a chip recover/erase and flashes the
 bundled nice!nano bootloader image
 `nice_nano_bootloader-0.6.0_s140_6.1.1.hex`.
+
+On Windows, the J-Link path uses SEGGER `JLink.exe`; CMSIS-DAP uses OpenOCD.
+The J-Link upload/programmer paths were hardware-verified without erasing the
+bootloader. Burn Bootloader was not executed during validation because it
+performs a full chip erase.
 
 After this, the board is back on the S140 v6 layout; select a `0x26000`
 Bootloader / DFU option before compiling sketches. Do not use this command when
