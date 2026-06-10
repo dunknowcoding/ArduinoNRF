@@ -28,8 +28,9 @@ sniffer during bring-up.
    (same network name / channel / PAN id / key on all of them).
 3. Watch the serial monitors: first board → `leader`, the rest → `child` /
    `router`.
-4. Move on to *UdpBroadcast* for real data across the mesh and *NetworkInfo*
-   for a live neighbor dashboard.
+4. Move on to *UdpBroadcast* for real data across the mesh, *CoapLamp* for
+   CoAP resource control (the boards toggle each other's LEDs), and
+   *NetworkInfo* for a live neighbor dashboard.
 
 ### Verified UdpBroadcast output
 
@@ -53,11 +54,12 @@ RX  from fd00:db8:0:0:535d:5645:501c:5ef2  "hello #62 from 0xE400"
   `SoftDevice: not found`, build with a no-SoftDevice bootloader option
   (e.g. `bootloader=promicroserialnosd`) so the sketch links at `0x1000` — a
   SoftDevice layout uploads fine but never runs.
-- **Footprint:** ~225 KB flash (28 %), ~35 KB RAM (14 %) with the UDP example.
-- **Settings are RAM-backed** for now: a reboot loses the dataset and the node
-  re-attaches with the sketch's credentials. NVMC flash persistence is future
-  work, as are CSL (sleepy children), commissioner/joiner and border-router
-  roles.
+- **Footprint:** ~226 KB flash, ~32 KB RAM with the CoAP example.
+- **Settings persist in flash**: the dataset, key sequence and frame counters
+  live in two 4 KB pages directly below the bootloader (default `0xF2000`,
+  override `NIUSTHREAD_SETTINGS_FLASH_BASE`), so nodes re-attach by themselves
+  after a reboot. Still future work: CSL (sleepy children),
+  commissioner/joiner and border-router roles.
 - `Thread.process()` must run every `loop()` pass — the whole stack (alarms,
   radio events, tasklets) is polled from thread context.
 
