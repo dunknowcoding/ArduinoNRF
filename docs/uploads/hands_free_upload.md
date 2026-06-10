@@ -66,6 +66,18 @@ sudo usermod -a -G dialout $USER     # log out / back in
 
 See **[../COMPATIBILITY.md](../COMPATIBILITY.md)** for the full matrix. UF2 upload, explicit Adafruit serial DFU, the UF2-drive-only helper, and two-board UF2 volume disambiguation are verified end-to-end on the **AliExpress ProMicro nRF52840** clone. The same bootloader family is packaged for nice!nano v2, SuperMini, XIAO, Pitaya Go, and nRFMicro once the corrected VID:PIDs are in place, but those boards remain modeled / reference-core rather than re-verified on physical hardware in this revision.
 
+## SWD upload from the IDE
+
+For boards with SWD pads or an onboard debugger, use **Tools -> Upload Method**
+to choose the probe used by the normal **Upload** button:
+
+- `SWD programmer (CMSIS-DAP)`
+- `SWD programmer (SEGGER J-Link)`
+
+This is separate from **Tools -> Programmer**. The Programmer menu is used by
+**Sketch -> Upload Using Programmer** and **Tools -> Burn Bootloader**, while
+the normal Upload button follows the board's Upload Method selection.
+
 ## When this doesn't apply
 
 - The **Nordic nRF52840 USB Dongle (PCA10059)** uses Nordic Open DFU, not Adafruit serial DFU — flash with **nRF Connect for Desktop → Programmer** or `nrfutil`.

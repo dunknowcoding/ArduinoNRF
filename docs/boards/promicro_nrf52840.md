@@ -66,6 +66,17 @@ After this, the board is back on the S140 v6 layout; select a `0x26000`
 Bootloader / DFU option before compiling sketches. Do not use this command when
 you only want to upload an application.
 
+### SWD sketch upload
+
+For application-only SWD upload, do not use Burn Bootloader. Select
+`Tools -> Upload Method -> SWD programmer (SEGGER J-Link)` for board1's J-Link
+setup, then click the normal Upload button. CMSIS-DAP probes use
+`Tools -> Upload Method -> SWD programmer (CMSIS-DAP)`.
+
+`Tools -> Programmer` is only needed for `Sketch -> Upload Using Programmer`
+and `Tools -> Burn Bootloader`; it does not change the normal Upload Method
+recipe.
+
 ### Pinout — Arduino number == silk-screen "Dn"
 
 `digitalWrite(6, ...)` drives the pad marked **D6**, `Wire.begin()` uses the

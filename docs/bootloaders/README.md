@@ -24,6 +24,19 @@ The `usb_dongle_nrf52840` target (PCA10059) uses Nordic Open DFU, not Adafruit s
 
 Generic dev boards, official Nordic DK-style hardware, and any board exposing usable pads can be flashed over SWD.
 
+For normal sketch upload, choose the probe directly from **Tools -> Upload
+Method**:
+
+- `SWD programmer (CMSIS-DAP)`
+- `SWD programmer (SEGGER J-Link)`
+
+For **Sketch -> Upload Using Programmer** and **Tools -> Burn Bootloader**,
+choose the probe from **Tools -> Programmer** instead.
+
+Arduino IDE 2 SWD Debug uses the same OpenOCD script selected by **Upload
+Method**, so use the J-Link upload method before starting a J-Link debug
+session.
+
 Arduino IDE **Tools -> Burn Bootloader** is available for the nice!nano-family
 definitions that have a known bundled bootloader image:
 

@@ -94,13 +94,22 @@ promicro_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 promicro_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 promicro_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 promicro_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-promicro_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+promicro_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 promicro_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 promicro_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 promicro_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 promicro_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 promicro_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+promicro_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 promicro_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+promicro_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+promicro_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+promicro_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+promicro_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+promicro_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+promicro_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+promicro_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+promicro_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 promicro_nrf52840.menu.bootloader.auto=Auto-detect upload, SoftDevice S140 v6 layout (0x26000)
 promicro_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 promicro_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
@@ -396,13 +405,22 @@ nicenano_v2.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 nicenano_v2.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 nicenano_v2.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 nicenano_v2.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-nicenano_v2.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+nicenano_v2.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 nicenano_v2.menu.uploadmode.swd.upload.tool=niusopenocd
 nicenano_v2.menu.uploadmode.swd.upload.tool.default=niusopenocd
 nicenano_v2.menu.uploadmode.swd.upload.protocol=swd
 nicenano_v2.menu.uploadmode.swd.upload.use_1200bps_touch=false
 nicenano_v2.menu.uploadmode.swd.upload.wait_for_upload_port=false
+nicenano_v2.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 nicenano_v2.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+nicenano_v2.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+nicenano_v2.menu.uploadmode.jlink.upload.tool=niusopenocd
+nicenano_v2.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+nicenano_v2.menu.uploadmode.jlink.upload.protocol=swd
+nicenano_v2.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+nicenano_v2.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+nicenano_v2.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+nicenano_v2.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 nicenano_v2.menu.bootloader.auto=Auto-detect (recommended)
 nicenano_v2.menu.bootloader.auto.upload.bootloader_mode=auto
 nicenano_v2.menu.bootloader.auto.upload.usb_vid=auto
@@ -544,13 +562,22 @@ supermini_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 supermini_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 supermini_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 supermini_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-supermini_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+supermini_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 supermini_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 supermini_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 supermini_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 supermini_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 supermini_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+supermini_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 supermini_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+supermini_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+supermini_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+supermini_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+supermini_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+supermini_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+supermini_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+supermini_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+supermini_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 supermini_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 supermini_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 supermini_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
@@ -688,13 +715,22 @@ nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 nrfmicro_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 nrfmicro_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-nrfmicro_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+nrfmicro_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 nrfmicro_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+nrfmicro_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 nrfmicro_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+nrfmicro_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+nrfmicro_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+nrfmicro_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+nrfmicro_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+nrfmicro_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+nrfmicro_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+nrfmicro_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+nrfmicro_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 nrfmicro_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 nrfmicro_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 nrfmicro_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
@@ -831,13 +867,22 @@ mini_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 mini_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 mini_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 mini_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-mini_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+mini_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 mini_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 mini_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 mini_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 mini_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 mini_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+mini_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 mini_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+mini_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+mini_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+mini_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+mini_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+mini_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+mini_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+mini_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+mini_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 mini_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 mini_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 mini_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
@@ -975,13 +1020,22 @@ xiao_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 xiao_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 xiao_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 xiao_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-xiao_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+xiao_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 xiao_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 xiao_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 xiao_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 xiao_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 xiao_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+xiao_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 xiao_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+xiao_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+xiao_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+xiao_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+xiao_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+xiao_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+xiao_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+xiao_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+xiao_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 xiao_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 xiao_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 xiao_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
@@ -1118,13 +1172,22 @@ devboard_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 devboard_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 devboard_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 devboard_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-devboard_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+devboard_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 devboard_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 devboard_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 devboard_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 devboard_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 devboard_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+devboard_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 devboard_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+devboard_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+devboard_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+devboard_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+devboard_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+devboard_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+devboard_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+devboard_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+devboard_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 devboard_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 devboard_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 devboard_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
@@ -1222,6 +1285,22 @@ devboard_nrf52833.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=0
 devboard_nrf52833.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORAGE_REGION_BYTES=8192
 devboard_nrf52833.build.storage_reserved_bytes=8192
 devboard_nrf52833.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags}
+devboard_nrf52833.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
+devboard_nrf52833.menu.uploadmode.swd.upload.tool=niusopenocd
+devboard_nrf52833.menu.uploadmode.swd.upload.tool.default=niusopenocd
+devboard_nrf52833.menu.uploadmode.swd.upload.protocol=swd
+devboard_nrf52833.menu.uploadmode.swd.upload.use_1200bps_touch=false
+devboard_nrf52833.menu.uploadmode.swd.upload.wait_for_upload_port=false
+devboard_nrf52833.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
+devboard_nrf52833.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+devboard_nrf52833.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+devboard_nrf52833.menu.uploadmode.jlink.upload.tool=niusopenocd
+devboard_nrf52833.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+devboard_nrf52833.menu.uploadmode.jlink.upload.protocol=swd
+devboard_nrf52833.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+devboard_nrf52833.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+devboard_nrf52833.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+devboard_nrf52833.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 devboard_nrf52833.menu.usbcdc.disabled=Unavailable (no native USB)
 devboard_nrf52833.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
 devboard_nrf52833.menu.flashprofile.internal512k=Internal flash only (512 KB)
@@ -1309,13 +1388,22 @@ pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 pitaya_go_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 pitaya_go_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-pitaya_go_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+pitaya_go_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 pitaya_go_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+pitaya_go_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 pitaya_go_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+pitaya_go_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+pitaya_go_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+pitaya_go_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+pitaya_go_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+pitaya_go_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+pitaya_go_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+pitaya_go_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+pitaya_go_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 pitaya_go_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 pitaya_go_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 pitaya_go_nrf52840.menu.bootloader.auto.upload.usb_vid=auto
@@ -1450,13 +1538,22 @@ usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.use_1200bps_touch=true
 usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.wait_for_upload_port=true
 usb_dongle_nrf52840.menu.uploadmode.uf2boot.upload.enter_bootloader_only=true
 usb_dongle_nrf52840.menu.uploadmode.uf2boot.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
-usb_dongle_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP/OpenOCD)
+usb_dongle_nrf52840.menu.uploadmode.swd=SWD programmer (CMSIS-DAP)
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.tool=niusopenocd
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.tool.default=niusopenocd
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.protocol=swd
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.use_1200bps_touch=false
 usb_dongle_nrf52840.menu.uploadmode.swd.upload.wait_for_upload_port=false
+usb_dongle_nrf52840.menu.uploadmode.swd.build.openocdscript=nrf52-cmsis-dap.cfg
 usb_dongle_nrf52840.menu.uploadmode.swd.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
+usb_dongle_nrf52840.menu.uploadmode.jlink=SWD programmer (SEGGER J-Link)
+usb_dongle_nrf52840.menu.uploadmode.jlink.upload.tool=niusopenocd
+usb_dongle_nrf52840.menu.uploadmode.jlink.upload.tool.default=niusopenocd
+usb_dongle_nrf52840.menu.uploadmode.jlink.upload.protocol=swd
+usb_dongle_nrf52840.menu.uploadmode.jlink.upload.use_1200bps_touch=false
+usb_dongle_nrf52840.menu.uploadmode.jlink.upload.wait_for_upload_port=false
+usb_dongle_nrf52840.menu.uploadmode.jlink.build.openocdscript=nrf52-jlink.cfg
+usb_dongle_nrf52840.menu.uploadmode.jlink.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=0
 usb_dongle_nrf52840.menu.bootloader.auto=Auto-detect (recommended)
 usb_dongle_nrf52840.menu.bootloader.auto.upload.bootloader_mode=auto
 usb_dongle_nrf52840.menu.bootloader.auto.upload.usb_vid=auto

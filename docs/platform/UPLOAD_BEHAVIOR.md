@@ -18,6 +18,26 @@ These boards currently declare USB-backed upload support in package metadata:
 - `pitaya_go_nrf52840`
 - `usb_dongle_nrf52840`
 
+## SWD upload choices
+
+Boards with SWD upload support expose explicit Arduino IDE **Upload Method**
+entries for the probe type:
+
+- `SWD programmer (CMSIS-DAP)` uses `tools/openocd/nrf52-cmsis-dap.cfg`.
+- `SWD programmer (SEGGER J-Link)` uses `tools/openocd/nrf52-jlink.cfg`.
+
+These entries are for the normal **Upload** button. They do not depend on the
+IDE **Tools -> Programmer** selection, because Arduino upload recipes use the
+board's selected `Upload Method` properties. Use **Tools -> Programmer** for
+**Sketch -> Upload Using Programmer** and **Tools -> Burn Bootloader**.
+
+Arduino IDE 2 SWD Debug also uses the selected `Upload Method`'s
+`build.openocdscript`, so choose `SWD programmer (SEGGER J-Link)` before
+starting a J-Link-backed debug session.
+
+The `devboard_nrf52833` target is SWD-first and exposes only these SWD upload
+choices because it has no native USB upload path in this package.
+
 ## Current Windows wrapper behavior
 
 - `tools/niusrobotlab/upload.ps1` owns the touch/reset sequence on Windows instead of relying on the Arduino CLI default touch path.
