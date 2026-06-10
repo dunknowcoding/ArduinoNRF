@@ -22,8 +22,32 @@ The `usb_dongle_nrf52840` target (PCA10059) uses Nordic Open DFU, not Adafruit s
 
 ### SWD / J-Link / OpenOCD
 
-Generic dev boards, official Nordic DK-style hardware, and any board exposing usable pads can be flashed over SWD. The package supports application flashing over SWD / OpenOCD, but it does not currently provide a bootburn-style workflow to install or replace bootloaders.
+Generic dev boards, official Nordic DK-style hardware, and any board exposing usable pads can be flashed over SWD.
+
+Arduino IDE **Tools -> Burn Bootloader** is available for the nice!nano-family
+definitions that have a known bundled bootloader image:
+
+- `promicro_nrf52840`
+- `nicenano_v2`
+- `supermini_nrf52840`
+
+Select **Tools -> Programmer -> SEGGER J-Link (SWD)** or **CMSIS-DAP (SWD)**
+first. The recipe uses OpenOCD, performs `nrf52_recover` / chip erase, then
+programs the bundled nice!nano bootloader HEX:
+
+`hardware/arduinonrf/nrf52/bootloaders/nice_nano/nice_nano_bootloader-0.6.0_s140_6.1.1.hex`
+
+After burning this image, select a S140 v6 / `0x26000` Bootloader / DFU layout
+before compiling sketches. Do not use the no-SoftDevice `0x1000` menu entries
+with this bootloader image.
+
+Burn Bootloader is intentionally **not** exposed as a single-USB operation. If
+the existing bootloader still works, USB DFU bootloader updates can be done with
+the vendor DFU package, but IDE Burn Bootloader is the recovery path and requires
+SWD.
 
 ## Current package assumption
 
-The package assumes either USB DFU or SWD-based upload depending on the board definition. It does not currently bundle or manage bootloader flashing through a bootburn-style workflow.
+The package assumes either USB DFU or SWD-based upload depending on the board
+definition. Bootloader replacement is limited to boards with an explicitly
+configured, bundled bootloader image and is always SWD-only.

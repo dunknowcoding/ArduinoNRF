@@ -537,6 +537,7 @@ function Get-Uf2ProbeSummary {
                 Label = $label
                 Model = if ($uf2Info.PSObject.Properties.Name -contains 'Model') { $uf2Info.Model } else { $null }
                 BoardId = if ($uf2Info.PSObject.Properties.Name -contains 'Board-ID') { $uf2Info.'Board-ID' } else { $null }
+                SoftDevice = if ($uf2Info.PSObject.Properties.Name -contains 'SoftDevice') { $uf2Info.SoftDevice } else { $null }
                 CompositeStableId = Get-Uf2VolumeCompositeStableId -RootPath $root
             }
 
@@ -792,6 +793,98 @@ $script:NrfBootloaderCandidates = @(
 )
 foreach ($pidByte in @('5280','5281','5282','5283','5284','5285','5286','5287','5288','5289','528a','528b','528c','528d','528e','528f')) {
     $script:NrfBootloaderCandidates += @{ Vid = '1915'; Pid = $pidByte; Kind = 'dfu'; Family = ''; AppStart = '0x0'; MaxSize = 1032192; Note = ('Nordic Open DFU clone (PID 0x{0})' -f $pidByte) }
+}
+
+function Resolve-Uf2FlashLayout {
+    param(
+        [object]$Uf2Summary,
+        [string]$DefaultAppStart,
+        [int]$DefaultMaxSize,
+        [string]$DefaultNote
+    )
+
+    $appStart = $DefaultAppStart
+    $maxSize = $DefaultMaxSize
+    $note = $DefaultNote
+
+    if ($Uf2Summary -and ($Uf2Summary.PSObject.Properties.Name -contains 'SoftDevice')) {
+        $softDevice = ([string]$Uf2Summary.SoftDevice).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($softDevice)) {
+            $softDeviceLower = $softDevice.ToLowerInvariant()
+            if ($softDeviceLower -match 'not\s+found|none|no\s+softdevice') {
+                $appStart = '0x1000'
+                if ($maxSize -le 0 -or $maxSize -gt 950272) {
+                    $maxSize = 950272
+                }
+            }
+            elseif ($softDeviceLower -match 's140.*(\bv?7\b|7\.)') {
+                $appStart = '0x27000'
+                if ($maxSize -le 0) {
+                    $maxSize = 811008
+                }
+            }
+            elseif ($softDeviceLower -match 's140.*(\bv?6\b|6\.)') {
+                $appStart = '0x26000'
+                if ($maxSize -le 0) {
+                    $maxSize = 815104
+                }
+            }
+
+            $note = ('{0}; INFO_UF2 SoftDevice="{1}" -> app start {2}' -f $DefaultNote, $softDevice, $appStart)
+        }
+    }
+
+    return [pscustomobject]@{
+        AppStart = $appStart
+        MaxSize = $maxSize
+        Note = $note
+    }
+}
+
+function Normalize-NiusHexAddress {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return ''
+    }
+
+    $text = $Value.Trim().ToLowerInvariant()
+    try {
+        if ($text.StartsWith('0x')) {
+            return ('0x{0:x}' -f [Convert]::ToInt64($text.Substring(2), 16))
+        }
+        return ('0x{0:x}' -f [Convert]::ToInt64($text, 10))
+    }
+    catch {
+        return $text
+    }
+}
+
+function Assert-Uf2BuildLayoutMatchesBootloader {
+    param(
+        [object]$Uf2Summary,
+        [string]$ExpectedAppStart,
+        [string]$Context
+    )
+
+    if (-not $Uf2Summary) {
+        return
+    }
+
+    $layout = Resolve-Uf2FlashLayout -Uf2Summary $Uf2Summary -DefaultAppStart $ExpectedAppStart -DefaultMaxSize 0 -DefaultNote $Context
+    $expected = Normalize-NiusHexAddress -Value $ExpectedAppStart
+    $actual = Normalize-NiusHexAddress -Value $layout.AppStart
+    if ([string]::IsNullOrWhiteSpace($expected) -or [string]::IsNullOrWhiteSpace($actual) -or $expected -eq $actual) {
+        return
+    }
+
+    $softDevice = if ($Uf2Summary.PSObject.Properties.Name -contains 'SoftDevice') { ([string]$Uf2Summary.SoftDevice).Trim() } else { '' }
+    Throw-NiusUploadFailure (New-UploadFailure -Kind 'layout' -ExitCode 1 -Output (@(
+                ('The selected Arduino IDE bootloader option compiled this sketch for app start {0}, but the mounted UF2 bootloader reports app start {1}.' -f $expected, $actual),
+                ('UF2 drive={0}; label="{1}"; model="{2}"; board-id="{3}"; SoftDevice="{4}".' -f $Uf2Summary.Drive, $Uf2Summary.Label, $Uf2Summary.Model, $Uf2Summary.BoardId, $softDevice),
+                'Select the matching Bootloader / DFU layout before compiling. For board1/no-SoftDevice nice!nano-style firmware, use an option that says "no SoftDevice / MBR only (0x1000)".',
+                'ZH: Compiled app start does not match the UF2 bootloader flash layout. Select the matching 0x1000/0x26000/0x27000 Bootloader / DFU option, then compile and upload again.'
+            ) -join [Environment]::NewLine) -Exe $toolPath)
 }
 
 function Find-PnpVidPid {
@@ -1108,7 +1201,8 @@ function Resolve-AutoBootloader {
                 }
 
                 $resolvedKind = if ($uf2) { 'uf2' } else { $candidate.Kind }
-                Write-NiusDetail ('[nius] auto-detect: matched {0} via {1} -- {2}{3}' -f $needle, $(if ($hitDfu) { 'dfu-util' } else { 'PnP' }), $candidate.Note, $(if ($uf2) { '; mounted UF2 volume preferred' } else { '' }))
+                $layout = Resolve-Uf2FlashLayout -Uf2Summary $uf2 -DefaultAppStart $candidate.AppStart -DefaultMaxSize $candidate.MaxSize -DefaultNote $candidate.Note
+                Write-NiusDetail ('[nius] auto-detect: matched {0} via {1} -- {2}{3}' -f $needle, $(if ($hitDfu) { 'dfu-util' } else { 'PnP' }), $layout.Note, $(if ($uf2) { '; mounted UF2 volume preferred' } else { '' }))
                 return [pscustomobject]@{
                     Resolved = $true
                     Source = $(if ($hitDfu) { 'dfu' } else { 'pnp' })
@@ -1116,9 +1210,9 @@ function Resolve-AutoBootloader {
                     Pid = ('0x{0}' -f $candidate.Pid)
                     Kind = $resolvedKind
                     Family = $candidate.Family
-                    AppStart = $candidate.AppStart
-                    MaxSize = $candidate.MaxSize
-                    Note = $candidate.Note
+                    AppStart = $layout.AppStart
+                    MaxSize = $layout.MaxSize
+                    Note = $layout.Note
                     VolumeLabel = if ($uf2) { $uf2.Label } elseif ($candidate.ContainsKey('VolumeLabel')) { $candidate.VolumeLabel } else { '' }
                     Model = if ($uf2) { $uf2.Model } elseif ($candidate.ContainsKey('Model')) { $candidate.Model } else { '' }
                     BoardId = if ($uf2) { $uf2.BoardId } elseif ($candidate.ContainsKey('BoardId')) { $candidate.BoardId } else { '' }
@@ -1134,7 +1228,8 @@ function Resolve-AutoBootloader {
         # via a mounted volume rather than a USB identity match.)
         $uf2Any = Get-Uf2ProbeSummary -PreferredCompositeStableId $PreferredCompositeStableId
         if ($uf2Any) {
-            Write-NiusDetail ('[nius] auto-detect: matched UF2 volume {0} (label={1}, model={2}); VID/PID unknown, treating as Adafruit-fork UF2' -f $uf2Any.Drive, $uf2Any.Label, $uf2Any.Model)
+            $layout = Resolve-Uf2FlashLayout -Uf2Summary $uf2Any -DefaultAppStart '0x26000' -DefaultMaxSize 876544 -DefaultNote 'UF2 volume identified by INFO_UF2.TXT only'
+            Write-NiusDetail ('[nius] auto-detect: matched UF2 volume {0} (label={1}, model={2}); VID/PID unknown, treating as Adafruit-fork UF2; {3}' -f $uf2Any.Drive, $uf2Any.Label, $uf2Any.Model, $layout.Note)
             return [pscustomobject]@{
                 Resolved = $true
                 Source = 'uf2-volume'
@@ -1142,9 +1237,9 @@ function Resolve-AutoBootloader {
                 Pid = '0x00B3'
                 Kind = 'uf2'
                 Family = '0xADA52840'
-                AppStart = '0x26000'
-                MaxSize = 876544
-                Note = 'UF2 volume identified by INFO_UF2.TXT only'
+                AppStart = $layout.AppStart
+                MaxSize = $layout.MaxSize
+                Note = $layout.Note
                 VolumeLabel = $uf2Any.Label
                 Model = $uf2Any.Model
                 BoardId = $uf2Any.BoardId
@@ -1921,6 +2016,13 @@ function Get-FailureHints {
                 'If this clone sometimes mounts a UF2 drive letter (for example J:), use the explicit UF2 bootloader menu entry or let the wrapper''s UF2 fallback retry path handle it.',
                 'On clone boards this usually means the bootloader never marked the app as valid; switch to SWD upload/recovery to separate firmware issues from bootloader/settings corruption.',
                 'If the board has no button, USB-only recovery is limited once the bootloader keeps re-entering itself on every power cycle.'
+            )
+        }
+        'layout' {
+            return @(
+                'Arduino compiles the sketch before upload; upload.ps1 cannot relocate an already-linked image.',
+                'Re-select the Bootloader / DFU option whose app start matches the mounted bootloader, then compile and upload again.',
+                'For a UF2 drive that reports `SoftDevice: not found`, use a no-SoftDevice / MBR only (0x1000) option.'
             )
         }
         default {
@@ -3103,6 +3205,19 @@ try {
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output ('Auto-detect probed for known nRF52 bootloaders ({0}); none visible on host. Check that the board is plugged in, that the user firmware honors 1200 bps touch, and that no other process is holding the COM port open.' -f $resolved.ProbedCandidates) -Exe $toolPath)
             }
             Write-NiusDetail ('[nius] auto-detect resolved to {0} ({1}:{2}, {3})' -f $resolved.Kind.ToUpper(), $resolved.Vid, $resolved.Pid, $resolved.Note)
+            $compiledAppStart = Normalize-NiusHexAddress -Value $Uf2AppStart
+            $resolvedAppStart = Normalize-NiusHexAddress -Value $resolved.AppStart
+            if (-not [string]::IsNullOrWhiteSpace($compiledAppStart) -and
+                -not [string]::IsNullOrWhiteSpace($resolvedAppStart) -and
+                $compiledAppStart -ne $resolvedAppStart) {
+                Throw-NiusUploadFailure (New-UploadFailure -Kind 'layout' -ExitCode 1 -Output (@(
+                            ('Auto-detect found a bootloader layout at app start {0}, but the selected Arduino IDE option compiled this sketch for {1}.' -f $resolvedAppStart, $compiledAppStart),
+                            ('Detected: {0}:{1}; {2}' -f $resolved.Vid, $resolved.Pid, $resolved.Note),
+                            'Arduino compiles before upload, so upload.ps1 cannot move an already-linked image to a different app start.',
+                            'Select a Bootloader / DFU option with the matching layout and compile again. For board1/no-SoftDevice nice!nano-style firmware, choose a no SoftDevice / MBR only (0x1000) option.',
+                            'ZH: Auto-detect found a bootloader app start that differs from this compile option. Select the matching 0x1000/0x26000/0x27000 Bootloader / DFU menu, then compile and upload again.'
+                        ) -join [Environment]::NewLine) -Exe $toolPath)
+            }
             $BootloaderMode = $resolved.Kind
             $UsbVid = $resolved.Vid
             $UsbPid = $resolved.Pid
@@ -3493,6 +3608,7 @@ try {
             }
 
             Write-Stage -Percent 68 -Label 'Uploading'
+            Assert-Uf2BuildLayoutMatchesBootloader -Uf2Summary $detectedBootloader.Summary -ExpectedAppStart $Uf2AppStart -Context 'Selected UF2 bootloader'
             Invoke-Uf2Deploy -HexPath $Hex -FamilyId $Uf2FamilyId -DrivePath $detectedBootloader.Summary.Drive
             Write-NiusUploadComplete
             exit 0

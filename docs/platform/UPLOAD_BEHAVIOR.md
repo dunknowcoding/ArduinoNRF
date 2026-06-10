@@ -23,6 +23,12 @@ These boards currently declare USB-backed upload support in package metadata:
 - `tools/niusrobotlab/upload.ps1` owns the touch/reset sequence on Windows instead of relying on the Arduino CLI default touch path.
 - `Bootloader / DFU → Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use `adafruit-nrfutil`.
 - UF2 drives are matched to the selected serial port by stable USB identity. If two boards expose the same volume label, the wrapper refuses ambiguous matches instead of choosing the first drive.
+- When a UF2 volume is visible, `upload.ps1` reads `INFO_UF2.TXT` and uses the
+  `SoftDevice` field to infer the mounted layout (`0x1000`, `0x26000`, or
+  `0x27000`). If that layout conflicts with the app start used by the selected
+  Arduino IDE `Bootloader / DFU` option, upload fails before copying firmware.
+  This is intentional: Arduino compiles before upload, so the wrapper cannot
+  safely relocate an already-linked image.
 - `Upload Method → Enter UF2 drive only (no upload)` performs the touch/bootloader wait, reports the matched drive, and exits before copying firmware.
 - If the selected upload COM is stale after a mode change, the wrapper fails with a clear "re-select the current SERVICE/DFU port" message instead of falling through to another board.
 - The wrapper treats same-PID runtime/bootloader cases as a separate class, rather than assuming a visible `0x239A:0x00B3` COM is already a bootloader port. On these boards it does NOT block the DFU on a PnP-level "transition observed" signal (because runtime and bootloader share `0x00B3`) — it surfaces a `[warn] ... Port never detached after touch` informational line and proceeds with a direct DFU attempt, which now succeeds because the firmware-side touch fix lands the chip in the bootloader before the warn fires.

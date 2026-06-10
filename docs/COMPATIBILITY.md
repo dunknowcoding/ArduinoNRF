@@ -68,6 +68,36 @@ Identities below were corrected against the upstream `Adafruit_nRF52_Bootloader`
 
 The auto-detect table in `upload.ps1` (`$script:NrfBootloaderCandidates`) was also extended with the Seeed (`0x2886:0x0044/0x8044/0x0045/0x8045`), Makerdiary (`0x2886:0xF00E`) and pid.codes nRFMicro (`0x1209:0x5284/0x5285`) entries, so `bootloader_mode=auto` also recognises them.
 
+## Flash layout / app-start compatibility
+
+The application start address is not fixed by the board name alone. It is a
+property of the bootloader plus reserved flash layout:
+
+| Layout shown in Arduino IDE | App start | When to use it |
+|---|---:|---|
+| No SoftDevice / MBR only | `0x1000` | UF2 `INFO_UF2.TXT` reports `SoftDevice: not found`, or the board was flashed with a bootloader/MBR-only image. |
+| SoftDevice S140 v6 | `0x26000` | Adafruit/nice!nano-style S140 v6 bootloader layout. This is the normal nice!nano v2 public layout. |
+| SoftDevice S140 v7 / legacy | `0x27000` | Bootloaders using the larger S140 v7 layout, including Seeed XIAO-style UF2 profiles. |
+| Bare / Nordic DFU | `0x0` | True bare-metal or Nordic USB DFU profiles without an MBR/SoftDevice-reserved application offset. |
+
+Why the ProMicro/nice!nano clone can look contradictory: the UF2 drive label,
+model and VID:PID can still say `NICENANO` / `nice!nano`, but the actual flash
+layout changes if the SoftDevice was erased or the bootloader was flashed
+without the SoftDevice image. In that state `INFO_UF2.TXT` reports
+`SoftDevice: not found` and sketches must be linked at `0x1000`. A sketch linked
+at `0x26000` may upload successfully but will not run.
+
+`upload.ps1` reads the UF2 `SoftDevice` field when a UF2 volume is visible and
+fails fast if the mounted bootloader layout conflicts with the Arduino IDE
+option used for compilation. Because Arduino compiles before upload, the wrapper
+cannot repair a mismatched app start after the fact; choose the matching
+`Bootloader / DFU` entry and compile again.
+
+Do not add an independent `Flash Partition` menu unless there is a strong need
+for expert-only combinations. In this core the layout is intentionally coupled
+to the `Bootloader / DFU` entry, which avoids invalid combinations such as UF2
+transport with an app linked for the wrong SoftDevice boundary.
+
 ## 🔭 What's not (yet) covered
 
 - **Nordic nRF52840-DK (official, with J-Link OB)**: flash via SWD using OpenOCD / J-Link / pyOCD; this core's USB hands-free path doesn't apply.
@@ -78,6 +108,8 @@ The auto-detect table in `upload.ps1` (`$script:NrfBootloaderCandidates`) was al
 ## 📚 Sources
 
 - Adafruit_nRF52_Bootloader board.h files (authoritative for VID:PID, UF2 label, board-id, LED pins): <https://github.com/adafruit/Adafruit_nRF52_Bootloader/tree/master/src/boards>
+- Adafruit_nRF52_Bootloader README (UF2 app address depends on SoftDevice size/version; S140 v6 `0x26000`, v7 `0x27000`; `flash` and `flash-sd` are distinct): <https://github.com/adafruit/Adafruit_nRF52_Bootloader/blob/master/README.md>
+- nice!nano troubleshooting (USB DFU update when the existing bootloader works; J-Link/OpenOCD recovery when it does not; bundled `nice_nano_bootloader-0.6.0_s140_6.1.1.hex`): <https://nicekeyboards.com/docs/nice-nano/troubleshooting/>
 - Seeed XIAO Arduino core boards.txt (XIAO `0x0044`/`0x8044`): <https://github.com/Seeed-Studio/Adafruit_nRF52_Arduino/blob/master/boards.txt>
 - pdcook nRFMicro-Arduino-Core (SuperMini LED P0.15, nRFMicro runtime PID): <https://github.com/pdcook/nRFMicro-Arduino-Core>
 - joric nrfmicro wiki (nRFMicro identity, SuperMini ships nice!nano bootloader): <https://github.com/joric/nrfmicro/wiki/Bootloader>, <https://github.com/joric/nrfmicro/wiki/Alternatives>

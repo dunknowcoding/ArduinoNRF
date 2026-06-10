@@ -27,9 +27,11 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 
 - **Raw `adafruit-nrfutil dfu serial`** is less robust than `arduino-cli upload` on this clone because it lacks the package's port identity checks, retries, and stale-COM guard.
 - A no-SoftDevice nice!nano-compatible bootloader reports `SoftDevice: not found`
-  in `INFO_UF2.TXT`; use the no-SoftDevice menu (`bootloader=promicroserialnosd`,
-  app start `0x1000`) for sketches on that bootloader. Uploading a SoftDevice
-  layout can appear to succeed while the application does not run.
+  in `INFO_UF2.TXT`; use a no-SoftDevice menu (`bootloader=autonosd`,
+  `bootloader=promicronosduf2`, or `bootloader=promicroserialnosd`, app start
+  `0x1000`) for sketches on that bootloader. Uploading a SoftDevice layout can
+  appear to succeed while the application does not run; the Windows UF2 path now
+  fails fast when the mounted UF2 layout conflicts with the compiled app start.
 
 ## ⏱️ Upload timing (measured)
 

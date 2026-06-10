@@ -29,7 +29,8 @@ runtime PING over UART at 115200, and a two-node raw 802.15.4 link.
 - **3.3 V only** — the CC2530 is not 5 V tolerant.
 - **nice!nano-style bootloader layout:** if `INFO_UF2.TXT` says
   `SoftDevice: not found`, select the no-SoftDevice bootloader option
-  (`bootloader=promicroserialnosd`) so sketches are linked at `0x1000`. A
+  (`bootloader=autonosd`, `bootloader=promicronosduf2`, or
+  `bootloader=promicroserialnosd`) so sketches are linked at `0x1000`. A
   SoftDevice layout (`0x26000` / `0x27000`) may upload successfully but the
   application will not run on that bootloader.
 - **Serial1 reliability:** ArduinoNRF 0.3.3 fixes UARTE0 single-byte RX handling

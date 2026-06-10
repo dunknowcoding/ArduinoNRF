@@ -14,7 +14,7 @@
 | Item | Current truth |
 | ------ | --------------- |
 | Active clone menu under test | `uploadmode=usb,bootloader=auto` |
-| Application start | `0x26000` on SoftDevice UF2 builds; `0x1000` when the bootloader reports `SoftDevice: not found` |
+| Application start | `0x26000` on SoftDevice S140 v6 UF2 builds; `0x1000` when the bootloader reports `SoftDevice: not found`; `0x27000` for S140 v7/legacy layouts |
 | Bootloader family | `0x239A:0x00B3` |
 | Upload transport | UF2 mass storage or Adafruit serial DFU through `upload.ps1` |
 | Runtime service COM | may re-enumerate after upload; always select the current service/DFU COM |
@@ -35,8 +35,36 @@
 - stale COM selection is rejected so a second mounted `NICENANO` drive is not used accidentally
 - with `usbcdc=disabled`, hands-free in-app upload also works on the single service CDC (verified 3× back-to-back and across `usbcdc` transitions both ways)
 - USB-only GDB-stub debug over the service CDC works with breakpoints, step, registers, memory, watchpoints, and pause
-- no-SoftDevice nice!nano-compatible bootloaders (`INFO_UF2.TXT`: `SoftDevice: not found`) run sketches correctly with `bootloader=promicroserialnosd`
+- no-SoftDevice nice!nano-compatible bootloaders (`INFO_UF2.TXT`: `SoftDevice: not found`) run sketches correctly with the no-SoftDevice menu entries (`bootloader=autonosd`, `bootloader=promicronosduf2`, or `bootloader=promicroserialnosd`)
 - CC2530 external radio workflow is verified: D8/D9/D10 debug flash, D0/D1 runtime UART, and two-node `CC2530_Link` traffic on channel 11
+
+### Bootloader layout choices
+
+The ProMicro clone can identify as `NICENANO` / `nice!nano` in both the normal
+S140 v6 layout and a bootloader/MBR-only layout. The name is therefore not
+enough to choose the linker origin:
+
+| UF2 `INFO_UF2.TXT` / bootloader state | Arduino IDE `Bootloader / DFU` choice |
+|---|---|
+| Original nice!nano v2-style SoftDevice S140 v6 | `Auto-detect upload, SoftDevice S140 v6 layout (0x26000)` or `UF2 mass storage, SoftDevice S140 v6 layout (0x26000)` |
+| `SoftDevice: not found` | `Auto-detect upload, no SoftDevice / MBR only (0x1000)`, `UF2 mass storage, no SoftDevice / MBR only (0x1000)`, or `Serial DFU, no SoftDevice / MBR only (0x1000)` |
+| S140 v7 / legacy | `UF2 mass storage, SoftDevice S140 v7 / legacy layout (0x27000)` or `Serial DFU, SoftDevice S140 v7 / legacy layout (0x27000)` |
+
+`upload.ps1` refuses UF2 uploads when the mounted bootloader reports an app
+start that does not match the IDE option used for compilation. This catches the
+common failure mode where upload appears successful but the app never starts.
+
+### Burn Bootloader
+
+Arduino IDE `Tools -> Burn Bootloader` is wired for this board through SWD only.
+Use `Tools -> Programmer -> SEGGER J-Link (SWD)` for board1's J-Link setup, then
+run Burn Bootloader. The recipe performs a chip recover/erase and flashes the
+bundled nice!nano bootloader image
+`nice_nano_bootloader-0.6.0_s140_6.1.1.hex`.
+
+After this, the board is back on the S140 v6 layout; select a `0x26000`
+Bootloader / DFU option before compiling sketches. Do not use this command when
+you only want to upload an application.
 
 ### Pinout — Arduino number == silk-screen "Dn"
 
