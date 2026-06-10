@@ -1,37 +1,54 @@
-# Vendoring OpenThread + nrf-802154 for nRF52840
+# Vendored OpenThread + mbedtls
 
-Part of the in-progress OpenThread vendoring effort (not yet complete).
+Status: **vendored and hardware-verified** (single-node Leader formation;
+MLE advertisements confirmed over the air by a CC2530 sniffer, 2026-06-10).
 
-## Where to get it
+## What is vendored (in `src/`)
 
-```bash
-# OpenThread (Google's reference impl, BSD-3)
-git clone https://github.com/openthread/openthread.git --depth 1
+| Source                                   | Pin                | Destination in `src/`        |
+|------------------------------------------|--------------------|------------------------------|
+| `openthread/src/core/*` (15 subdirs)     | `fa3213ec`         | `api/ ... utils/` (flattened)|
+| `openthread/src/include/common/*.hpp`    | `fa3213ec`         | `common/`                    |
+| `openthread/include/openthread/`         | `fa3213ec`         | `openthread/`                |
+| `mbedtls/include/{mbedtls,psa}`          | 3.6.5 (`e185d7fd`) | `mbedtls/`, `psa/`           |
+| `mbedtls/library/*.{c,h}`                | 3.6.5 (`e185d7fd`) | `mbedtls_lib/`               |
 
-# Nordic nrf-802154 PHY driver
-git clone https://github.com/nrfconnect/sdk-nrfxlib.git
-```
+The OT core tree is flattened to the `src/` root because the Arduino build
+adds exactly one include root (`src/`) and the OT sources use
+`"common/code_utils.hpp"`-style includes relative to their core root.
 
-Copy these into `vendor/`:
+## Local patches (all marked `ARDUINONRF-PATCH`)
 
-| Source                                  | Destination                       |
-|-----------------------------------------|-----------------------------------|
-| `openthread/src/core/`                  | `vendor/src/openthread_core/`     |
-| `openthread/src/include/openthread/`    | `vendor/include/openthread/`      |
-| `openthread/src/cli/` (optional)        | `vendor/src/openthread_cli/`      |
-| `sdk-nrfxlib/nrf_802154/`               | `vendor/src/nrf_802154/`          |
+1. `src/openthread-core-config.h` - defaults
+   `OPENTHREAD_PROJECT_CORE_CONFIG_FILE` to `"arduino-ot-config.h"`
+   (Arduino cannot inject `-D` flags per library).
+2. `src/mbedtls/mbedtls_config.h` - replaced with OpenThread's
+   `third_party/mbedtls/mbedtls-config.h` so the OT crypto configuration is
+   the library default (same reason).
+3. `src/instance/extension_example.cpp` - deleted (vendor-extension template
+   that upstream excludes from builds; Arduino compiles everything).
 
-Pin OpenThread and nrf-802154 to versions that are known to interoperate
-(see Nordic's nRF Connect SDK release notes for tested pairs).
+All build configuration lives in `src/arduino-ot-config.h` (FTD by default,
+software MAC sub-layer, CSL off, TCP off, log -> Serial at NOTE level).
 
-After vendoring set `-DNRF_THREAD_VENDORED=1` in `boards.txt`.
+## Platform glue (ours, not vendored)
+
+- `src/ot_radio_nrf52840.cpp` - register-level IEEE 802.15.4 RADIO driver
+  (OT_RADIO_CAPS_NONE; IRQ RX ring, software address filter, imm-ack TX with
+  source-match frame-pending, single hardware CCA per transmit).
+- `src/platform_impl.cpp` - alarms (RTC2 ms / TIMER3 us, polled), TRNG
+  entropy, RAM settings store (flash/NVMC backend is future work), logging,
+  mbedtls static heap.
+- `src/Thread.{h,cpp}` - the Arduino-facing API.
 
 ## Conflicts
 
-- **RADIO** — exclusive with NimBLE / Zigbee.
-- **TIMER0** — claimed by `nrf-802154`.
-- **PPI 0..7** — claimed.
-- **RAM** — MTD ~12 KB, MED ~20 KB, SED ~8 KB.
-- **Flash** — OpenThread MTD ~60–80 KB; adding Matter brings to ~200 KB.
+- **RADIO** - exclusive with NimBLE / Zigbee / NrfRadio.
+- **RTC2** + **TIMER3** - claimed by the alarm backends.
+- **Flash/RAM** - FTD build: ~223 KB flash, ~35 KB static RAM.
 
-See the integration plan for milestones M1..M6.
+## Updating
+
+Re-run the copy table above against a newer openthread pin, re-apply the
+three patches, and pin mbedtls to the submodule SHA recorded in
+`openthread/.gitmodules` history (`git ls-tree <rev> third_party/mbedtls/repo`).

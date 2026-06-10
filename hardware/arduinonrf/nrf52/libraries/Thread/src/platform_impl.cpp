@@ -1,244 +1,459 @@
-// platform_impl.cpp - Thread M2 implementation of the OpenThread platform
-// abstraction (otPlat*) for nRF52840 bare-metal Arduino.
+// platform_impl.cpp - OpenThread platform abstraction (otPlat*) for the
+// ArduinoNRF nRF52840 bare-metal core. Radio lives in ot_radio_nrf52840.cpp.
 //
-// What's in M2 (this file):
-//   * Real implementations for the platform functions that need ZERO
-//     external vendoring - they sit on top of the core's existing
-//     drivers (NrfRtc / NrfRng / NrfPower / FICR registers).
-//   * Stubs for the platform contract that the OpenThread core will pull
-//     in at M3+: they return OT_ERROR_NOT_IMPLEMENTED so any uncovered
-//     code path is loud about being a stub.
+// Time bases:
+//   * Millisecond alarm - RTC2 at 32768 Hz (prescaler 0, exact LFCLK ticks),
+//     extended to 64 bits with the overflow interrupt; ms = ticks * 125 / 4096.
+//   * Microsecond alarm - TIMER3 at 1 MHz, 32-bit free-running.
 //
-// What lands in M3:
-//   * Radio driver (otPlatRadio*) - the most complex single block,
-//     needs the nrf-802154 PHY driver vendored from nrfxlib alongside
-//     the OpenThread core itself.
-//   * Crypto (otPlatCrypto*) - hooked into mbedTLS or CC310 once that
-//     library lands.
-//   * DNS-SD / mDNS / SRP / TREL - infrastructure services; only Border
-//     Router roles need them.
-//   * Flash settings (otPlatFlash*, otPlatSettings*) - wires to NrfNvmc.
-//   * Logging output - currently a no-op; M3 routes to Serial.
+// Both alarms are POLLED: ISRs never call into the OT core (it is not
+// ISR-safe). nrfOtPlatformProcess() compares "now" against the armed targets
+// with wrap-tolerant math and fires otPlatAlarm*Fired() from the main loop.
+// The Thread example sketches call Thread.process() every loop() pass, so
+// alarm latency is one loop iteration.
 //
-// IMPORTANT: At M2 the OpenThread core source itself is NOT yet vendored,
-// so this file's only consumer is Thread.cpp's smoke test. The functions
-// below all link cleanly when OpenThread core arrives.
-//
-// File is C++ so it can directly use the core's NrfRtc / NrfTimer / NrfRng
-// classes, but every otPlat* symbol is wrapped in extern "C" so OpenThread's
-// C callers resolve them by their plain C ABI names.
+// Settings are a RAM key-value store: functional for bring-up (a reboot
+// loses the dataset and the device re-attaches), to be replaced by an NVMC
+// flash backend.
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <Arduino.h>
 
 #include "../../../cores/arduino/NrfRtc.h"
 #include "../../../cores/arduino/NrfPeripherals.h"
 
+#include "openthread-core-config.h"
+
 extern "C" {
 
-#include "openthread/error.h"
-#include "openthread/instance.h"
+#include <openthread/error.h>
+#include <openthread/instance.h>
+#include <openthread/tasklet.h>
+#include <openthread/platform/alarm-milli.h>
+#include <openthread/platform/alarm-micro.h>
+#include <openthread/platform/entropy.h>
+#include <openthread/platform/logging.h>
+#include <openthread/platform/memory.h>
+#include <openthread/platform/misc.h>
+#include <openthread/platform/radio.h>
+#include <openthread/platform/settings.h>
 
-// =============================================================================
-// Real implementations
-// =============================================================================
-
-// ---- Alarm (millisecond) ----------------------------------------------------
-//
-// OpenThread expects a free-running millisecond counter and the ability to
-// schedule a wakeup at an absolute tick. Backed by RTC2 (LFCLK / 32 -> 1 kHz
-// tick). The core's NrfRtc already exposes RTC2 via a singleton; we drive its
-// CC0 channel here.
-
-static volatile bool s_milli_alarm_active = false;
-
-static void onMilliAlarm(void) {
-    s_milli_alarm_active = false;
-    // M3: call otPlatAlarmMilliFired(aInstance) here, once the OT core
-    // is in place. For now the firing event just clears state.
 }
 
-void otPlatAlarmMilliInit(void) {
+#include "ot_platform_arduino.h"
+
+#if !OPENTHREAD_CONFIG_HEAP_EXTERNAL_ENABLE
+#include "mbedtls/version.h"
+#if defined(MBEDTLS_MEMORY_BUFFER_ALLOC_C)
+#include "mbedtls/memory_buffer_alloc.h"
+#endif
+#endif
+
+// =============================================================================
+// Millisecond time base (RTC2)
+// =============================================================================
+
+static volatile uint32_t sRtcOverflows; // each overflow = 2^24 LFCLK ticks
+
+static void onRtcOverflow(void)
+{
+    sRtcOverflows++;
+}
+
+static uint64_t rtcTicks64(void)
+{
+    uint32_t ovf1, ovf2, cnt;
+
+    do
+    {
+        ovf1 = sRtcOverflows;
+        cnt  = nrfRtc2().counter();
+        ovf2 = sRtcOverflows;
+    } while (ovf1 != ovf2);
+
+    return ((uint64_t)ovf2 << 24) | cnt;
+}
+
+static uint64_t nowMs64(void)
+{
+    // 32768 Hz -> ms: * 1000 / 32768 == * 125 / 4096
+    return (rtcTicks64() * 125U) >> 12;
+}
+
+static bool     sMilliArmed;
+static uint32_t sMilliTarget;
+
+extern "C" void otPlatAlarmMilliInit(void)
+{
     NrfRtc &rtc = nrfRtc2();
-    if (!rtc.isRunning()) {
-        rtc.begin(1000U);
-        rtc.attachCompareInterrupt(0, onMilliAlarm);
+    if (!rtc.isRunning())
+    {
+        rtc.begin(32768U); // prescaler 0: exact LFCLK ticks
+        rtc.attachOverflowInterrupt(onRtcOverflow);
         rtc.start();
     }
 }
 
-uint32_t otPlatAlarmMilliGetNow(void) {
-    // RTC2 ticks at 1 kHz. The 24-bit counter wraps every ~16777 seconds
-    // (~4.7 hours); the OT alarm API uses 32-bit ms with wrap-tolerant
-    // comparison.
-    NrfRtc &rtc = nrfRtc2();
-    return rtc.isRunning() ? rtc.counter() : 0U;
+extern "C" uint32_t otPlatAlarmMilliGetNow(void)
+{
+    return (uint32_t)nowMs64();
 }
 
-void otPlatAlarmMilliStartAt(otInstance *aInstance, uint32_t aT0, uint32_t aDt) {
+extern "C" void otPlatAlarmMilliStartAt(otInstance *aInstance, uint32_t aT0, uint32_t aDt)
+{
     (void)aInstance;
-    NrfRtc &rtc = nrfRtc2();
-    if (!rtc.isRunning()) {
-        otPlatAlarmMilliInit();
-    }
-    rtc.setCompare(0, (aT0 + aDt) & 0x00FFFFFFUL);
-    s_milli_alarm_active = true;
+    sMilliTarget = aT0 + aDt;
+    sMilliArmed  = true;
 }
 
-void otPlatAlarmMilliStop(otInstance *aInstance) {
+extern "C" void otPlatAlarmMilliStop(otInstance *aInstance)
+{
     (void)aInstance;
-    s_milli_alarm_active = false;
-    nrfRtc2().detachCompareInterrupt(0);
+    sMilliArmed = false;
 }
 
-// ---- Alarm (microsecond) ----------------------------------------------------
-//
-// Backed by TIMER3 (free for non-NimBLE/Zigbee builds), 1 MHz tick.
+// =============================================================================
+// Microsecond time base (TIMER3)
+// =============================================================================
 
-void otPlatAlarmMicroInit(void) {
+static bool     sMicroArmed;
+static uint32_t sMicroTarget;
+
+extern "C" void otPlatAlarmMicroInit(void)
+{
     NrfTimer &t = nrfTimer3();
-    if (!t.isRunning()) {
+    if (!t.isRunning())
+    {
         t.begin(1000000U);
         t.start();
     }
 }
 
-uint32_t otPlatAlarmMicroGetNow(void) {
-    NrfTimer &t = nrfTimer3();
-    return t.isRunning() ? t.counter() : 0U;
+extern "C" uint32_t otPlatAlarmMicroGetNow(void)
+{
+    return nrfTimer3().counter();
 }
 
-void otPlatAlarmMicroStartAt(otInstance *aInstance, uint32_t aT0, uint32_t aDt) {
+extern "C" void otPlatAlarmMicroStartAt(otInstance *aInstance, uint32_t aT0, uint32_t aDt)
+{
     (void)aInstance;
-    NrfTimer &t = nrfTimer3();
-    if (!t.isRunning()) {
-        otPlatAlarmMicroInit();
-    }
-    t.setCompare(0, aT0 + aDt);
+    sMicroTarget = aT0 + aDt;
+    sMicroArmed  = true;
 }
 
-void otPlatAlarmMicroStop(otInstance *aInstance) {
+extern "C" void otPlatAlarmMicroStop(otInstance *aInstance)
+{
     (void)aInstance;
-    nrfTimer3().detachCompareInterrupt(0);
+    sMicroArmed = false;
 }
 
-// ---- Entropy / RNG ---------------------------------------------------------
+// =============================================================================
+// Entropy (TRNG)
+// =============================================================================
 
-otError otPlatEntropyGet(uint8_t *aOutput, uint16_t aOutputLength) {
-    if (aOutput == NULL || aOutputLength == 0) {
+extern "C" otError otPlatEntropyGet(uint8_t *aOutput, uint16_t aOutputLength)
+{
+    if (aOutput == NULL || aOutputLength == 0)
+    {
         return OT_ERROR_INVALID_ARGS;
     }
     NrfRng::randomBytes(aOutput, aOutputLength);
     return OT_ERROR_NONE;
 }
 
-// ---- Memory ---------------------------------------------------------------
+// =============================================================================
+// Memory
+// =============================================================================
 
-void *otPlatCAlloc(size_t aNum, size_t aSize) {
-    return calloc(aNum, aSize);
-}
+extern "C" void *otPlatCAlloc(size_t aNum, size_t aSize) { return calloc(aNum, aSize); }
+extern "C" void  otPlatFree(void *aPtr) { free(aPtr); }
 
-void otPlatFree(void *aPtr) {
-    free(aPtr);
-}
+// =============================================================================
+// Misc
+// =============================================================================
 
-// ---- Misc -----------------------------------------------------------------
-
-void otPlatReset(otInstance *aInstance) {
+extern "C" void otPlatReset(otInstance *aInstance)
+{
     (void)aInstance;
-    // NVIC SystemReset.
-    *(volatile uint32_t *)0xE000ED0C = 0x05FA0004UL;
-    while (1) {}
+    *(volatile uint32_t *)0xE000ED0C = 0x05FA0004UL; // AIRCR.SYSRESETREQ
+    while (1)
+    {
+    }
 }
 
-otError otPlatResetToBootloader(otInstance *aInstance) {
+extern "C" otError otPlatResetToBootloader(otInstance *aInstance)
+{
     (void)aInstance;
-    // GPREGRET magic 0x57 then SYSRESETREQ - same as the verified hands-free
-    // upload path the rest of the core uses.
+    // GPREGRET magic 0x57 + SYSRESETREQ - the verified hands-free DFU path.
     *(volatile uint32_t *)0x4000051C = 0x57UL;
     *(volatile uint32_t *)0xE000ED0C = 0x05FA0004UL;
-    while (1) {}
-    return OT_ERROR_NONE;   // unreachable
+    while (1)
+    {
+    }
+    return OT_ERROR_NONE; // unreachable
 }
 
-int otPlatGetResetReason(otInstance *aInstance) {
+extern "C" otPlatResetReason otPlatGetResetReason(otInstance *aInstance)
+{
     (void)aInstance;
-    return 0;   // OT_PLAT_RESET_REASON_POWER_ON - M3 maps from POWER_RESETREAS
+    return OT_PLAT_RESET_REASON_POWER_ON;
 }
 
-void otPlatAssertFail(const char *aFilename, int aLineNumber) {
-    (void)aFilename;
-    (void)aLineNumber;
-    // Trip a system reset so the existing debug path catches it.
+extern "C" void otPlatAssertFail(const char *aFilename, int aLineNumber)
+{
+    if (Serial)
+    {
+        Serial.print("OT ASSERT ");
+        Serial.print(aFilename);
+        Serial.print(":");
+        Serial.println(aLineNumber);
+        Serial.flush();
+    }
     *(volatile uint32_t *)0xE000ED0C = 0x05FA0004UL;
-    while (1) {}
+    while (1)
+    {
+    }
 }
 
-void otPlatWakeHost(void) {
-    // No-op on this single-chip platform.
+extern "C" void otPlatWakeHost(void)
+{
+    // Single-chip platform: no host to wake.
 }
 
-// ---- Radio (EUI-64 only at M2; full radio in M3) --------------------------
+// =============================================================================
+// Radio identity (the radio driver itself is in ot_radio_nrf52840.cpp)
+// =============================================================================
 
-void otPlatRadioGetIeeeEui64(otInstance *aInstance, uint8_t *aIeeeEui64) {
+extern "C" void otPlatRadioGetIeeeEui64(otInstance *aInstance, uint8_t *aIeeeEui64)
+{
     (void)aInstance;
-    if (aIeeeEui64 == NULL) return;
-    // FICR.DEVICEID0/DEVICEID1 - factory-unique 64-bit ID.
-    const uint32_t devid0 = *(volatile uint32_t *)0x10000060UL;
-    const uint32_t devid1 = *(volatile uint32_t *)0x10000064UL;
-    aIeeeEui64[0] = (uint8_t)(devid0 >> 0);
-    aIeeeEui64[1] = (uint8_t)(devid0 >> 8);
-    aIeeeEui64[2] = (uint8_t)(devid0 >> 16);
-    aIeeeEui64[3] = (uint8_t)(devid0 >> 24);
-    aIeeeEui64[4] = (uint8_t)(devid1 >> 0);
-    aIeeeEui64[5] = (uint8_t)(devid1 >> 8);
-    aIeeeEui64[6] = (uint8_t)(devid1 >> 16);
-    aIeeeEui64[7] = (uint8_t)(devid1 >> 24);
+    if (aIeeeEui64 == NULL)
+    {
+        return;
+    }
+    const uint32_t devid0 = *(volatile uint32_t *)0x10000060UL; // FICR.DEVICEID[0]
+    const uint32_t devid1 = *(volatile uint32_t *)0x10000064UL; // FICR.DEVICEID[1]
+    aIeeeEui64[0] = (uint8_t)(devid1 >> 24) | 0x02U; // locally administered
+    aIeeeEui64[1] = (uint8_t)(devid1 >> 16);
+    aIeeeEui64[2] = (uint8_t)(devid1 >> 8);
+    aIeeeEui64[3] = (uint8_t)(devid1 >> 0);
+    aIeeeEui64[4] = (uint8_t)(devid0 >> 24);
+    aIeeeEui64[5] = (uint8_t)(devid0 >> 16);
+    aIeeeEui64[6] = (uint8_t)(devid0 >> 8);
+    aIeeeEui64[7] = (uint8_t)(devid0 >> 0);
 }
 
 // =============================================================================
-// Stub implementations - return NOT_IMPLEMENTED so any M3 caller knows the
-// function exists but is awaiting a real backend.
+// Logging -> Serial
 // =============================================================================
 
-otError otPlatFlashErase(otInstance *aInstance, uint8_t aSwapIndex) {
-    (void)aInstance; (void)aSwapIndex;
-    return OT_ERROR_NOT_IMPLEMENTED;
+extern "C" void otPlatLog(otLogLevel aLogLevel, otLogRegion aLogRegion, const char *aFormat, ...)
+{
+    (void)aLogRegion;
+
+    if (!Serial)
+    {
+        return;
+    }
+
+    char    buf[160];
+    va_list args;
+
+    va_start(args, aFormat);
+    vsnprintf(buf, sizeof(buf), aFormat, args);
+    va_end(args);
+
+    Serial.print("[OT");
+    Serial.print((int)aLogLevel);
+    Serial.print("] ");
+    Serial.println(buf);
 }
 
-void otPlatLog(int aLogLevel, int aLogRegion, const char *aFormat, ...) {
-    (void)aLogLevel; (void)aLogRegion; (void)aFormat;
-    // M3: route to Serial.
+// =============================================================================
+// Settings - RAM-backed key-value store (volatile; NVMC backend is future work)
+// =============================================================================
+
+#define SETTINGS_SLOT_COUNT 24
+#define SETTINGS_VALUE_MAX  144
+
+struct SettingsSlot
+{
+    bool     used;
+    uint16_t key;
+    uint16_t length;
+    uint8_t  value[SETTINGS_VALUE_MAX];
+};
+
+static SettingsSlot sSettings[SETTINGS_SLOT_COUNT];
+
+extern "C" void otPlatSettingsInit(otInstance *aInstance, const uint16_t *aSensitiveKeys, uint16_t aSensitiveKeysLength)
+{
+    (void)aInstance;
+    (void)aSensitiveKeys;
+    (void)aSensitiveKeysLength;
 }
 
-void otPlatSettingsInit(otInstance *aInstance, const uint16_t *aSensitiveKeys, uint16_t aSensitiveKeysLength) {
-    (void)aInstance; (void)aSensitiveKeys; (void)aSensitiveKeysLength;
-}
+extern "C" void otPlatSettingsDeinit(otInstance *aInstance) { (void)aInstance; }
 
-otError otPlatSettingsGet(otInstance *aInstance, uint16_t aKey, int aIndex, uint8_t *aValue, uint16_t *aValueLength) {
-    (void)aInstance; (void)aKey; (void)aIndex; (void)aValue; (void)aValueLength;
+extern "C" otError otPlatSettingsGet(otInstance *aInstance, uint16_t aKey, int aIndex, uint8_t *aValue, uint16_t *aValueLength)
+{
+    (void)aInstance;
+
+    int match = 0;
+
+    for (int i = 0; i < SETTINGS_SLOT_COUNT; i++)
+    {
+        if (!sSettings[i].used || sSettings[i].key != aKey)
+        {
+            continue;
+        }
+        if (match == aIndex)
+        {
+            if (aValueLength != NULL)
+            {
+                uint16_t copyLen = sSettings[i].length;
+
+                if (aValue != NULL)
+                {
+                    if (copyLen > *aValueLength)
+                    {
+                        copyLen = *aValueLength;
+                    }
+                    memcpy(aValue, sSettings[i].value, copyLen);
+                }
+                *aValueLength = sSettings[i].length;
+            }
+            return OT_ERROR_NONE;
+        }
+        match++;
+    }
+
     return OT_ERROR_NOT_FOUND;
 }
 
-otError otPlatSettingsSet(otInstance *aInstance, uint16_t aKey, const uint8_t *aValue, uint16_t aValueLength) {
-    (void)aInstance; (void)aKey; (void)aValue; (void)aValueLength;
-    return OT_ERROR_NOT_IMPLEMENTED;
+extern "C" otError otPlatSettingsAdd(otInstance *aInstance, uint16_t aKey, const uint8_t *aValue, uint16_t aValueLength)
+{
+    (void)aInstance;
+
+    if (aValueLength > SETTINGS_VALUE_MAX)
+    {
+        return OT_ERROR_NO_BUFS;
+    }
+
+    for (int i = 0; i < SETTINGS_SLOT_COUNT; i++)
+    {
+        if (!sSettings[i].used)
+        {
+            sSettings[i].used   = true;
+            sSettings[i].key    = aKey;
+            sSettings[i].length = aValueLength;
+            if (aValueLength > 0 && aValue != NULL)
+            {
+                memcpy(sSettings[i].value, aValue, aValueLength);
+            }
+            return OT_ERROR_NONE;
+        }
+    }
+
+    return OT_ERROR_NO_BUFS;
 }
 
-otError otPlatSettingsAdd(otInstance *aInstance, uint16_t aKey, const uint8_t *aValue, uint16_t aValueLength) {
-    (void)aInstance; (void)aKey; (void)aValue; (void)aValueLength;
-    return OT_ERROR_NOT_IMPLEMENTED;
+extern "C" otError otPlatSettingsDelete(otInstance *aInstance, uint16_t aKey, int aIndex)
+{
+    (void)aInstance;
+
+    otError err   = OT_ERROR_NOT_FOUND;
+    int     match = 0;
+
+    for (int i = 0; i < SETTINGS_SLOT_COUNT; i++)
+    {
+        if (!sSettings[i].used || sSettings[i].key != aKey)
+        {
+            continue;
+        }
+        if (aIndex < 0 || match == aIndex)
+        {
+            sSettings[i].used = false;
+            err = OT_ERROR_NONE;
+            if (aIndex >= 0)
+            {
+                break;
+            }
+        }
+        match++;
+    }
+
+    return err;
 }
 
-otError otPlatSettingsDelete(otInstance *aInstance, uint16_t aKey, int aIndex) {
-    (void)aInstance; (void)aKey; (void)aIndex;
-    return OT_ERROR_NOT_IMPLEMENTED;
+extern "C" otError otPlatSettingsSet(otInstance *aInstance, uint16_t aKey, const uint8_t *aValue, uint16_t aValueLength)
+{
+    (void)otPlatSettingsDelete(aInstance, aKey, -1);
+    return otPlatSettingsAdd(aInstance, aKey, aValue, aValueLength);
 }
 
-void otPlatSettingsWipe(otInstance *aInstance) { (void)aInstance; }
-void otPlatSettingsDeinit(otInstance *aInstance) { (void)aInstance; }
+extern "C" void otPlatSettingsWipe(otInstance *aInstance)
+{
+    (void)aInstance;
+    memset(sSettings, 0, sizeof(sSettings));
+}
 
-}   // extern "C"
+// =============================================================================
+// Tasklets - polled from Thread.process(), so the signal is a no-op
+// =============================================================================
+
+extern "C" void otTaskletsSignalPending(otInstance *aInstance)
+{
+    (void)aInstance;
+}
+
+// =============================================================================
+// Init + event pump
+// =============================================================================
+
+extern "C" void nrfOtPlatformInit(void)
+{
+    otPlatAlarmMilliInit();
+    otPlatAlarmMicroInit();
+
+#if !OPENTHREAD_CONFIG_HEAP_EXTERNAL_ENABLE && defined(MBEDTLS_MEMORY_BUFFER_ALLOC_C)
+    // mbedtls runs on its static-buffer allocator (no libc heap): md/hmac
+    // contexts allocate from here during MLE key derivation.
+    static uint8_t sMbedtlsHeap[8192];
+    mbedtls_memory_buffer_alloc_init(sMbedtlsHeap, sizeof(sMbedtlsHeap));
+#endif
+}
+
+extern "C" void nrfOtPlatformProcess(otInstance *aInstance)
+{
+    if (sMilliArmed)
+    {
+        uint32_t now = otPlatAlarmMilliGetNow();
+
+        if ((int32_t)(now - sMilliTarget) >= 0)
+        {
+            sMilliArmed = false;
+            otPlatAlarmMilliFired(aInstance);
+        }
+    }
+
+#if OPENTHREAD_CONFIG_PLATFORM_USEC_TIMER_ENABLE
+    if (sMicroArmed)
+    {
+        uint32_t now = otPlatAlarmMicroGetNow();
+
+        if ((int32_t)(now - sMicroTarget) >= 0)
+        {
+            sMicroArmed = false;
+            otPlatAlarmMicroFired(aInstance);
+        }
+    }
+#endif
+}
