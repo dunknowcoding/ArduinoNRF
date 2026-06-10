@@ -125,9 +125,11 @@ NimBLE::onReceive([](const uint8_t *d, size_t n) {  // central -> board (RX writ
 Start from **`examples/NimBLESmoke`** to confirm the stack is up, then
 **`examples/BLESend`** (push data to a phone/PC) and **`examples/BLEReceive`**
 (receive data from one) — both drive the Nordic UART service and work with the
-free **nRF Connect** app. CC310 crypto and the nRF52840's *own*-radio
-Zigbee/Thread stacks are still skeletons; **working Zigbee is available today via
-an external CC2530 module** (see the capability table below).
+free **nRF Connect** app. **Thread (OpenThread) mesh runs on the same radio** via
+the separate [NiusThread](https://github.com/dunknowcoding/ArduinoNRF-Thread)
+library (RADIO is exclusive: BLE *or* Thread per sketch). CC310 crypto and the
+own-radio Zigbee stack are still skeletons; **working Zigbee is available today
+via an external CC2530 module** (see the capability table below).
 
 ---
 
@@ -177,7 +179,7 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **BLE (NimBLE)** | ✅ **Working over-the-air BLE.** [`libraries/NimBLE/`](hardware/arduinonrf/nrf52/libraries/NimBLE/) vendors the Apache Mynewt NimBLE host **and** controller on a bare-metal cooperative port. Advertising, connection, MTU exchange, and full GATT service / characteristic / descriptor discovery are **verified on hardware** against Windows (bleak/WinRT), Android (nRF Connect), and board-to-board. See **[§ Bluetooth Low Energy (NimBLE)](#-bluetooth-low-energy-nimble)** and `examples/NimBLESmoke`. |
 | **CC310 (crypto)** | ⚠️ [`libraries/CC310/`](hardware/arduinonrf/nrf52/libraries/CC310/) is still a true skeleton: the public API is defined, but without Nordic's `libcc_310.a` every operation returns `CC_NOT_VENDORED` and `isAvailable()` stays `false`. |
 | **Zigbee / 802.15.4** | ✅ **Working via an external CC2530 module.** Flash it with the built-in **[`libraries/CCDebugger/`](hardware/arduinonrf/nrf52/libraries/CCDebugger/)** — the nRF52840 *is* the CC-Debugger, no external programmer (HW-verified erase / flash / read-back verify) — then drive it over UART (raw 802.15.4 send / receive / promiscuous sniff) with the separate **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)** library. The nRF52840's *own*-radio Zigbee ([`libraries/Zigbee/`](hardware/arduinonrf/nrf52/libraries/Zigbee/)) is still a skeleton (Zboss not vendored, `begin()` → `ZIGBEE_NOT_VENDORED`). Guide: **[docs/platform/ZIGBEE.md](docs/platform/ZIGBEE.md)**. |
-| **Thread (OpenThread)** | ⚠️ [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is **not done yet**: OpenThread headers, some platform glue, and smoke wiring are present, but the real OpenThread core + nrf-802154 radio path are not vendored, `begin()` returns `THREAD_NOT_VENDORED`, and `isAvailable()` / `isAttached()` stay `false`. |
+| **Thread (OpenThread)** | ✅ **Working IPv6 mesh on the nRF52840's own radio** via the separate **[NiusThread](https://github.com/dunknowcoding/ArduinoNRF-Thread)** library: full OpenThread FTD (vendored, with mbedtls) on a bare-metal 802.15.4 RADIO driver — no SoftDevice, no nrfx, no external module. HW-verified two-node mesh (Leader + Child → Router) with bidirectional UDP multicast. The in-package [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is now a thin shim that keeps `#include <Thread.h>` working. Guide: **[docs/platform/THREAD.md](docs/platform/THREAD.md)**. |
 | **EEPROM** | ✅ Emulated (see EEPROM examples) |
 | **Upload** | ✅ Hands-free UF2 or serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |

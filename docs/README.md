@@ -49,10 +49,15 @@ All project documentation lives here. Start with the [project README](../README.
   no external programmer) and drive it with the separate
   **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)**
   library. Full guide: **[platform/ZIGBEE.md](platform/ZIGBEE.md)**.
+- **Thread (OpenThread) — working IPv6 mesh on the nRF52840's own radio.**
+  Full OpenThread FTD on a bare-metal 802.15.4 driver, in the separate
+  **[NiusThread](https://github.com/dunknowcoding/ArduinoNRF-Thread)** library
+  (the in-package `libraries/Thread/` is a compatibility shim). HW-verified
+  two-node mesh with UDP. Full guide: **[platform/THREAD.md](platform/THREAD.md)**.
 - **Not yet vendored:** CC310 crypto (`libraries/CC310/` — needs Nordic's
-  `libcc_310.a`), the nRF *own-radio* Zigbee stack (`libraries/Zigbee/` — Zboss
-  not in-tree), and Thread (`libraries/Thread/` — OpenThread core not vendored).
-  Each exposes its API but returns `*_NOT_VENDORED` until the runtime is added.
+  `libcc_310.a`) and the nRF *own-radio* Zigbee stack (`libraries/Zigbee/` —
+  Zboss not in-tree). Each exposes its API but returns `*_NOT_VENDORED` until
+  the runtime is added.
 
 ## Platform reference (capabilities & truth)
 
@@ -60,4 +65,6 @@ All project documentation lives here. Start with the [project README](../README.
 - [platform/PWM_BEHAVIOR.md](platform/PWM_BEHAVIOR.md) · [platform/PWM_TIMER_BOUNDARIES.md](platform/PWM_TIMER_BOUNDARIES.md) — PWM model & limits (legacy single-module notes)
 - [platform/POWER_ADC_NOTES.md](platform/POWER_ADC_NOTES.md) — ADC / battery-sense behavior
 - [platform/BLE_WIFI_BOUNDARIES.md](platform/BLE_WIFI_BOUNDARIES.md) — BLE/WiFi facade boundaries (BLE is now a full NimBLE stack; WiFi remains out of scope on nRF52)
+- [platform/THREAD.md](platform/THREAD.md) — Thread (OpenThread) mesh on the native radio via the NiusThread library
+- [platform/ZIGBEE.md](platform/ZIGBEE.md) — Zigbee / raw 802.15.4 via an external CC2530 module
 - [platform/REFERENCE_COMPARISON.md](platform/REFERENCE_COMPARISON.md) — comparison vs `pdcook/nRFMicro-Arduino-Core`
