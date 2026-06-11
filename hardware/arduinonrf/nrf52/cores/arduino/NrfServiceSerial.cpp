@@ -17,14 +17,17 @@ void NrfServiceSerial::end() {
 }
 
 int NrfServiceSerial::available() {
+    nrfUsbdDriver().pumpRx(); // fetch any host OUT packet the ISR missed
     return nrfUsbdDriver().available();
 }
 
 int NrfServiceSerial::read() {
+    nrfUsbdDriver().pumpRx();
     return nrfUsbdDriver().read();
 }
 
 int NrfServiceSerial::peek() {
+    nrfUsbdDriver().pumpRx();
     return nrfUsbdDriver().peek();
 }
 

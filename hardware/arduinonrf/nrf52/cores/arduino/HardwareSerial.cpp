@@ -155,6 +155,7 @@ void HardwareSerial::end(void) {
 int HardwareSerial::available(void) {
     if (usbBacked_) {
         if (nrfSerialUsbUsesServicePortOnly()) {
+            nrfUsbdDriver().pumpRx(); // fetch any host OUT packet the ISR missed
             return nrfUsbdDriver().available();
         }
         return nrfUsbSerialBackend().available();
@@ -165,6 +166,7 @@ int HardwareSerial::available(void) {
 int HardwareSerial::read(void) {
     if (usbBacked_) {
         if (nrfSerialUsbUsesServicePortOnly()) {
+            nrfUsbdDriver().pumpRx();
             return nrfUsbdDriver().read();
         }
         return nrfUsbSerialBackend().read();
@@ -180,6 +182,7 @@ int HardwareSerial::read(void) {
 int HardwareSerial::peek(void) {
     if (usbBacked_) {
         if (nrfSerialUsbUsesServicePortOnly()) {
+            nrfUsbdDriver().pumpRx();
             return nrfUsbdDriver().peek();
         }
         return nrfUsbSerialBackend().peek();

@@ -1082,11 +1082,19 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         if (inAck != 0UL) {
             reg32(USBD_BASE, EPDATASTATUS) = inAck; // clear handled IN bits (W1C)
         }
+        // OUT bits: fetch any complete host packet into the rx rings. Without
+        // this (or a foreground pumpRx() call) a latched EPOUT bit NAKs every
+        // later host OUT and writes from the PC time out. Bit-gated and
+        // in-flight-guarded inside, so it cannot collide with an IN DMA.
+        drainServiceDataOut();
     }
 
     if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {
+        // Clear-only: this branch served the dead queueDataOut() model. Real
+        // packets are consumed via their EPDATASTATUS bit (drainServiceDataOut
+        // below / pumpRx); a bare ENDEPOUT on an armed endpoint is a stale
+        // speculative re-delivery and must NOT be pushed into the rx ring.
         reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) = 0UL;
-        serviceDataOut(false);
     }
 
     if (reg32(USBD_BASE, eventEndEpinOffset(SERVICE_DATA_EP)) != 0UL) {
@@ -1097,8 +1105,7 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
     }
 
     if (userPortEnabled() && reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) != 0UL) {
-        reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) = 0UL;
-        serviceDataOut(true);
+        reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) = 0UL; // clear-only, see above
     }
 
     if (userPortEnabled() && reg32(USBD_BASE, eventEndEpinOffset(USER_DATA_EP)) != 0UL) {
@@ -1233,6 +1240,48 @@ void NrfUsbdDriver::kickServiceDataIn() {
     UsbdIrqLock lock;
     serviceDataIn(false);
     serviceNotificationIn(false);
+}
+
+void NrfUsbdDriver::pumpRx() {
+    if (!enabled_ || !configured_ || suspended_) {
+        return;
+    }
+    UsbdIrqLock lock;
+
+    // This silicon NAKs every host OUT until a first STARTEPOUT arms the
+    // endpoint, and armCdcDataOut() is unsafe during enumeration — so arm
+    // lazily here, on the first post-configuration foreground pump (the GDB
+    // stub does the same on takeover). The arming STARTEPOUT can pull stale
+    // FIFO content whose ENDEPOUT lands after armCdcDataOut's own discard
+    // window — drop it here too and return, so it can never be harvested as
+    // host data on this pass.
+    if (!cdcOutArmed_) {
+        armCdcDataOut();
+        for (uint32_t spin = 0UL; spin < (USBD_DRAIN_OUT_SPINS * 4UL); ++spin) {
+            if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {
+                reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) = 0UL;
+            }
+            if (userPortEnabled() && reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) != 0UL) {
+                reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) = 0UL;
+            }
+        }
+        cdcOutArmed_ = true;
+        return;
+    }
+
+    // Real host packets are signalled ONLY by their EPDATASTATUS bit (the
+    // GDB-stub-proven reception model). A bare ENDEPOUT on an armed endpoint
+    // is a speculative DMA completion re-delivering stale FIFO content —
+    // clear it WITHOUT servicing, or the same dead bytes get pushed into the
+    // rx ring after every real packet.
+    if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {
+        reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) = 0UL;
+    }
+    if (userPortEnabled() && reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) != 0UL) {
+        reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) = 0UL;
+    }
+
+    drainServiceDataOut();
 }
 
 bool NrfUsbdDriver::sendInPacket(uint8_t endpoint, const void *data, size_t length) {
@@ -1604,7 +1653,8 @@ void NrfUsbdDriver::startCdcEndpoints() {
         resetEndpointDataState(epAddressIn(USER_DATA_EP));
         resetEndpointDataState(epAddressOut(USER_DATA_EP));
     }
-    cdcActive_ = true;
+    cdcActive_   = true;
+    cdcOutArmed_ = false; // re-arm lazily from the first foreground pumpRx()
 }
 
 // Arm the OUT endpoint's EasyDMA to receive the next host packet directly into
@@ -1670,6 +1720,13 @@ void NrfUsbdDriver::fetchOutPacket(uint8_t endpoint, bool userPort, uint32_t sta
             const uint32_t amount = reg32(USBD_BASE, epoutAmountOffset(endpoint));
             reg32(USBD_BASE, EPDATASTATUS) = statusBit; // consume/ACK (W1C)
             if (amount != 0UL) {
+                // KNOWN CLONE QUIRK: occasionally the OUT data bit re-latches
+                // with no new host packet and this fetch replays tail bytes of
+                // an OLD packet (plus a constant FIFO-residue blob). Content
+                // fingerprinting cannot tell those replays from genuine
+                // repeats of the same command, so the bytes are delivered
+                // as-is; line-oriented consumers should drop non-printable
+                // noise (see the NiusThread ThreadCli example).
                 serviceDataOut(userPort);
             }
             return;

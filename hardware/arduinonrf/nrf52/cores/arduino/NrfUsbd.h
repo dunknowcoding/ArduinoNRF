@@ -111,6 +111,14 @@ public:
     // accepted (this silicon needs an initial STARTEPOUT to arm reception).
     void armCdcDataOut();
 
+    // Foreground RX pump for sketches: bit-gated drain of both CDC OUT
+    // endpoints, PRIMASK-guarded against the ISR. Serial.available()/read()
+    // call this so host->device bulk OUT works without the GDB stub's poll
+    // loop — on this silicon a received OUT packet does not reliably raise
+    // EVENTS_EPDATA, so an ISR-only model strands the packet (the endpoint
+    // NAKs every later OUT and host writes time out).
+    void pumpRx();
+
 private:
     enum class ControlOutTransfer : uint8_t {
         None,
@@ -173,6 +181,7 @@ private:
     volatile bool dtr_ = false;
     volatile bool rts_ = false;
     volatile bool cdcActive_ = false;
+    volatile bool cdcOutArmed_ = false; // OUT endpoints armed since last config
     volatile bool dataInFlight_ = false;
     volatile bool notificationInFlight_ = false;
     volatile bool notificationPending_ = false;

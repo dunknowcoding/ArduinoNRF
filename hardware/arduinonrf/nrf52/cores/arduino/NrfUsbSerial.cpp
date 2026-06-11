@@ -34,14 +34,17 @@ void NrfUsbSerialBackend::end() {
 }
 
 int NrfUsbSerialBackend::available() const {
+    nrfUsbdDriver().pumpRx(); // fetch any host OUT packet the ISR missed
     return nrfUsbdDriver().userAvailable();
 }
 
 int NrfUsbSerialBackend::read() {
+    nrfUsbdDriver().pumpRx();
     return nrfUsbdDriver().userRead();
 }
 
 int NrfUsbSerialBackend::peek() const {
+    nrfUsbdDriver().pumpRx();
     return nrfUsbdDriver().userPeek();
 }
 
