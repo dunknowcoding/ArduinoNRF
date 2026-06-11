@@ -3256,6 +3256,8 @@ try {
     }
     $adafruitControlPort = $Port
     $controlPortAlreadyBootloader = $false
+    $explicitUf2UploadMode = ($BootloaderMode -eq 'uf2')
+    $uf2AlreadyMountedSummary = $null
     if (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid) -and -not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid)) {
         Write-NiusTiming 'port resolution start'
         $portResolution = Resolve-AdafruitSerialControlPort -SelectedPort $Port -RuntimeVid $effectiveRuntimeUsbVid -RuntimePid $effectiveRuntimeUsbPid
@@ -3309,10 +3311,29 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($adafruitControlPort) -and
             [string]::IsNullOrWhiteSpace($adafruitControlPortParentPrefix) -and
             [string]::IsNullOrWhiteSpace($adafruitControlPortCompositeStableId)) {
-            Throw-NiusUploadFailure (New-UploadFailure -Kind 'port' -ExitCode 1 -Output ('Selected upload port "{0}" is not present as a USB serial device. Re-select the board current SERVICE/DFU port in Arduino IDE Tools->Port and upload again.' -f $adafruitControlPort) -Exe $toolPath)
+            if ($explicitUf2UploadMode) {
+                try {
+                    $uf2AlreadyMountedSummary = Get-Uf2ProbeSummary -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId
+                }
+                catch {
+                    $uf2AlreadyMountedSummary = $null
+                }
+            }
+
+            if ($uf2AlreadyMountedSummary) {
+                $UseTouch1200 = 'false'
+                $controlPortAlreadyBootloader = $true
+                Write-NiusDetail ('[nius] Selected upload port "{0}" is not present, but a single matching UF2 drive is already mounted at {1}; using UF2 directly.' -f $adafruitControlPort, $uf2AlreadyMountedSummary.Drive) -ForegroundColor DarkGray
+            }
+            else {
+                Throw-NiusUploadFailure (New-UploadFailure -Kind 'port' -ExitCode 1 -Output (@(
+                            ('Selected upload port "{0}" is not present as a USB serial device.' -f $adafruitControlPort),
+                            'For UF2 uploads, upload.ps1 can continue from an already-mounted UF2 drive only when exactly one matching UF2 volume is visible.',
+                            'Re-select the board current SERVICE/DFU port in Arduino IDE Tools->Port, or leave only the target board mounted in UF2 mode and upload again.'
+                        ) -join ' ') -Exe $toolPath)
+            }
         }
     }
-    $explicitUf2UploadMode = ($BootloaderMode -eq 'uf2')
     $enterBootloaderOnlyRequested = (($EnterBootloaderOnly -eq 'true') -or ($EnterBootloaderOnly -eq '1'))
     if (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid) -and -not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid) -and
         -not [string]::IsNullOrWhiteSpace($UsbVid) -and -not [string]::IsNullOrWhiteSpace($UsbPid) -and
@@ -3420,7 +3441,22 @@ try {
         } else {
             Assert-InputArtifact -Path $Bin -Label 'bin'
         }
-            $touchPrepared = $false
+
+        if ($BootloaderMode -eq 'uf2' -and -not [string]::IsNullOrWhiteSpace($adafruitControlPortCompositeStableId)) {
+            try {
+                $scopedUf2AlreadyMounted = Get-Uf2ProbeSummary -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId -PreferredCompositeStableId $adafruitControlPortCompositeStableId
+                if ($scopedUf2AlreadyMounted) {
+                    $uf2AlreadyMountedSummary = $scopedUf2AlreadyMounted
+                    $UseTouch1200 = 'false'
+                    $controlPortAlreadyBootloader = $true
+                    Write-NiusDetail ('[nius] Selected board already has a matching UF2 drive mounted at {0}; skipping 1200 touch.' -f $uf2AlreadyMountedSummary.Drive) -ForegroundColor DarkGray
+                }
+            }
+            catch {
+            }
+        }
+
+        $touchPrepared = $false
         $bootloaderTransitionConfirmed = $false
         if ($BootloaderMode -eq 'adafruit-dfu' -and $UseTouch1200 -eq 'true' -and $controlPortAlreadyBootloader) {
             Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
@@ -3494,6 +3530,32 @@ try {
         }
         if ($touchPrepared -and $BootloaderMode -eq 'adafruit-dfu') {
             Write-NiusDetail '[nius] DFU: progress ~90% only means nrfutil is in serial DFU wait/transfer (host-side); MCU may still be in application if 1200/DTR reset did not arm yet).' -ForegroundColor DarkGray
+        }
+
+        if ($BootloaderMode -eq 'uf2' -and $UseTouch1200 -eq 'true' -and
+            -not $bootloaderTransitionConfirmed -and -not $controlPortAlreadyBootloader) {
+            $scopedUf2AfterUnconfirmedTouch = $null
+            if (-not [string]::IsNullOrWhiteSpace($adafruitControlPortCompositeStableId)) {
+                try {
+                    $scopedUf2AfterUnconfirmedTouch = Get-Uf2ProbeSummary -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId -PreferredCompositeStableId $adafruitControlPortCompositeStableId
+                }
+                catch {
+                    $scopedUf2AfterUnconfirmedTouch = $null
+                }
+            }
+
+            if ($scopedUf2AfterUnconfirmedTouch) {
+                $bootloaderTransitionConfirmed = $true
+                $controlPortAlreadyBootloader = $true
+                Write-NiusDetail ('[nius] 1200 bps touch did not show a COM detach, but a matching UF2 drive is mounted at {0} for selected board serial {1}; continuing.' -f $scopedUf2AfterUnconfirmedTouch.Drive, $adafruitControlPortCompositeStableId) -ForegroundColor DarkGray
+            }
+            else {
+                Throw-NiusUploadFailure (New-UploadFailure -Kind 'uf2-wait' -ExitCode 1 -Output (@(
+                            ('1200 bps touch on {0} did not confirm that the selected board entered UF2 bootloader.' -f $adafruitControlPort),
+                            'Refusing to use an unscoped UF2 drive already mounted on the host, because another board may be in DFU mode.',
+                            'Select the target board current SERVICE/DFU port, or retry after only the target board is mounted as UF2.'
+                        ) -join ' ') -Exe $toolPath)
+            }
         }
 
         if ($enterBootloaderOnlyRequested) {
