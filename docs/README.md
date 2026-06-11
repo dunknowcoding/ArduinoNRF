@@ -62,7 +62,7 @@ All project documentation lives here. Start with the [project README](../README.
 ## Platform reference (capabilities & truth)
 
 - [platform/HARDWARE_CAPABILITIES.md](platform/HARDWARE_CAPABILITIES.md) — what the core exposes
-- [platform/PWM_BEHAVIOR.md](platform/PWM_BEHAVIOR.md) · [platform/PWM_TIMER_BOUNDARIES.md](platform/PWM_TIMER_BOUNDARIES.md) — PWM model & limits (legacy single-module notes)
+- [platform/PWM_BEHAVIOR.md](platform/PWM_BEHAVIOR.md) · [platform/PWM_TIMER_BOUNDARIES.md](platform/PWM_TIMER_BOUNDARIES.md) — PWM model & frequency/resolution limits (multi-module summary; full model in [platform/PWM_MULTI_MODULE.md](platform/PWM_MULTI_MODULE.md))
 - [platform/POWER_ADC_NOTES.md](platform/POWER_ADC_NOTES.md) — ADC / battery-sense behavior
 - [platform/BLE_WIFI_BOUNDARIES.md](platform/BLE_WIFI_BOUNDARIES.md) — BLE/WiFi facade boundaries (BLE is now a full NimBLE stack; WiFi remains out of scope on nRF52)
 - [platform/THREAD.md](platform/THREAD.md) — Thread (OpenThread) mesh on the native radio via the NiusThread library

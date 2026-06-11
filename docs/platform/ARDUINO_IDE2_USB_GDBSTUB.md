@@ -1,42 +1,82 @@
-# Arduino IDE 2：USB CDC GDB stub 调试（单线）
+# Arduino IDE 2: USB CDC GDB stub debugging (single cable)
 
-本文描述在本平台使用 **Build profile → USB CDC GDB stub** 时的推荐顺序；与 `docs/VALIDATION.md` 中的「维护口 / 用户口」分工一致。
+Debug a sketch over the **same USB cable used for upload** — no J-Link, no
+SWD wiring. The stub lives inside the firmware (DebugMonitor exception, not
+halt-mode), a host bridge turns the maintenance CDC into a GDB server on
+`localhost:3335`, and Arduino IDE 2 / VS Code `cortex-debug` attach to it.
 
-## 1. 板卡与编译选项
+Hardware-verified end to end on the ProMicro nRF52840: breakpoints,
+single-step (`stepi`), **Pause** of free-running code, **DWT watchpoints**
+(data breakpoints), peripheral/memory reads while stopped, and restart.
+With dual CDC enabled, the user `Serial` port stays usable concurrently on
+the second COM port.
 
-1. 板型：例如 **ProMicro nRF52840**（或当前使用的 `promicro_nrf52840` 变体）。
-2. **Build profile**：选 **USB CDC GDB stub**（定义 `NRF_SYSTEM_USB_GDB_STUB`，`-g3`）。
-3. 若使用双 CDC：**USB CDC** 菜单选 **Enabled**（用户 `Serial` 走用户口；GDB 仍只走维护口）。
+## 1. Board and build options
 
-## 2. 串口（必须是维护口）
+1. Board: e.g. **ProMicro nRF52840** (`promicro_nrf52840`).
+2. **Build profile → USB CDC GDB stub** (defines `NRF_SYSTEM_USB_GDB_STUB`,
+   builds with `-g3`).
+3. For dual CDC, set **USB CDC → Enabled**: user `Serial` gets its own COM
+   port; GDB traffic stays on the maintenance port.
 
-在 IDE 右下角或工具栏选择的 **串口必须对应 Service / 维护 CDC**。若误选用户口串口监视器用的 COM，`debug.usbgdbstub` 桥接会连错接口。
+## 2. Pick the right serial port (the maintenance CDC)
 
-双 CDC 时在 Windows 上可对照设备管理器友好名称；也可用主机脚本缩小范围，例如：
+The port selected in the IDE must be the **maintenance / service CDC**
+(USB interface `MI_00`), not the user `Serial` port (`MI_02`). On Windows,
+check Device Manager friendly names, or let the bridge choose:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\hardware\arduinonrf\nrf52\tools\niusrobotlab\usb_gdbstub_bridge.ps1 `
   -Board promicro_nrf52840 -PreferServiceCdc -MatchFriendlyName "Service"
 ```
 
-未指定 `-SerialPort` 且仅有一块目标板时，脚本可按 VID/PID（含 `0x00B3` / `0x00B4` 回退）与 MI 偏好尝试自动选口。
+With no `-SerialPort` and a single target board attached, the bridge
+auto-selects by VID/PID (including the `0x00B3` / `0x00B4` fallbacks) and
+interface preference. `-ListPorts` prints the candidates.
 
-## 3. 启动顺序（IDE 2 + external GDB）
+## 3. Start order (IDE 2 + external GDB server)
 
-平台将 Cortex-Debug 配成 **external server**，GDB 连接 **`localhost:3335`**，并不自动拉起桥接进程。
+The platform configures Cortex-Debug as an **external server**: GDB connects
+to **`localhost:3335`**, and the IDE does *not* spawn the bridge itself.
 
-1. **先**在终端运行桥接（或 IDE **Run Task** 若你已按 `docs/examples/vscode/tasks.json` 配好同类任务）：
-   - `usb_gdbstub_bridge.ps1 -Board promicro_nrf52840 -SerialPort COMx -TcpPort 3335`
-   - 双 CDC 建议加 `-PreferServiceCdc`，必要时 `-MatchFriendlyName`。
-2. 确认桥接打印 **Waiting for a GDB client connection...**
-3. 再在 Arduino IDE 2 中点击 **调试**（附加到 stub）。
+1. Start the bridge first (terminal, or a VS Code task per
+   [docs/examples/vscode/tasks.json](../examples/vscode/tasks.json)):
+   `usb_gdbstub_bridge.ps1 -Board promicro_nrf52840 -SerialPort COMx -TcpPort 3335`
+   (add `-PreferServiceCdc`, and `-MatchFriendlyName` if needed, for dual CDC).
+2. Wait for **`Waiting for a GDB client connection...`**.
+3. Click **Debug** in Arduino IDE 2 (it attaches to the running stub).
 
-## 4. 与 arduino-cli / 本地脚本并行
+On Linux/macOS the bridge is `usb_gdbstub_bridge.py` with the equivalent
+`--serial-port / --tcp-port / --board` arguments (see `platform.txt`,
+`debug.usbgdbstub.bridge.launch.pattern.*`).
 
-若你用 **`arduino-cli`** 编译上传同一套菜单选项，`hardware_upload_minimal_usb.ps1 -UseArduinoCiConfig …` 与 CI 使用相同的 **`--config-file .arduino-ci.yaml`** + sketchbook junction。IDE 里选的串口应与 **`arduino-cli … board list`** 以及 **`usb_gdbstub_bridge.ps1`** 使用的维护口一致。
+## 4. Flashing while debugging
 
-## 5. 参考
+Re-flash through the normal upload path (`arduino-cli upload` / IDE upload —
+serial DFU). Do **not** try to program flash through the stub or attach a
+SWD probe while the DebugMonitor stub is active — an external halt-mode
+debugger and the monitor stub fight over the debug authority, and stale
+break bytes in the host serial driver can surface as phantom stop replies on
+the next session.
 
-- `hardware/arduinonrf/nrf52/platform.txt` — `debug.usbgdbstub.*`、`bridge.launch.pattern`
-- `hardware/arduinonrf/nrf52/boards.txt` — `usbgdbstub` 下的 `debug.cortex-debug.custom.*`
-- `docs/examples/vscode/` — VS Code `tasks.json` / `launch.json` 模板
+## 5. Known behavior and limits
+
+- The stub uses the **DebugMonitor** exception: code in fault/ISR context at
+  higher priority than the monitor cannot be stepped (the stub masks
+  interrupts via `BASEPRI` during `stepi` so stepping stays on the user's
+  instruction stream).
+- **Pause** works by pending the monitor exception on the break byte
+  (`0x03`); watchpoints use the DWT comparators.
+- One GDB client at a time; the bridge owns the maintenance CDC while
+  running, so close it before a serial-DFU upload on the same port (the
+  bridge yields automatically for the platform's own upload tool).
+
+## 6. References
+
+- `hardware/arduinonrf/nrf52/platform.txt` — `debug.usbgdbstub.*`,
+  `bridge.launch.pattern`
+- `hardware/arduinonrf/nrf52/boards.txt` — `debug.cortex-debug.custom.*`
+  under the `usbgdbstub` build profile
+- [docs/examples/vscode/](../examples/vscode/) — VS Code `tasks.json` /
+  `launch.json` templates
+- `examples/UsbGdbStubBreakpoint` — a sketch made to be debugged
