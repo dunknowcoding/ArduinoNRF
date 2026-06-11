@@ -1,6 +1,13 @@
 // NrfCC310.h - Arduino API surface for the nRF52840 CryptoCell 310 hardware
 // crypto accelerator (Arm CryptoCell 310).
 //
+// COMPATIBILITY SHIM — forwards to NiusCrypto when installed:
+//   https://github.com/dunknowcoding/ArduinoNRF-Crypto
+//
+// If the next compile fails with "NiusCrypto.h: No such file or directory",
+// install the NiusCrypto library and vendor its Nordic binaries (see
+// NiusCrypto's docs/VENDORING.md), then build again.
+//
 // SCOPE
 //   This is a COMPATIBILITY SHIM. Working CC310 hardware crypto lives in the
 //   separate NiusCrypto library (https://github.com/dunknowcoding/ArduinoNRF-Crypto).
