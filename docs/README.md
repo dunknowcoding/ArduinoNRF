@@ -54,9 +54,15 @@ All project documentation lives here. Start with the [project README](../README.
   **[NiusThread](https://github.com/dunknowcoding/ArduinoNRF-Thread)** library
   (the in-package `libraries/Thread/` is a compatibility shim). HW-verified
   two-node mesh with UDP. Full guide: **[platform/THREAD.md](platform/THREAD.md)**.
-- **Not yet vendored:** CC310 crypto (`libraries/CC310/` — needs Nordic's
-  `libcc_310.a`) and the nRF *own-radio* Zigbee stack (`libraries/Zigbee/` —
-  Zboss not in-tree). Each exposes its API but returns `*_NOT_VENDORED` until
+- **CC310 (CryptoCell 310) — working hardware crypto on the nRF52840.** SHA-256,
+  AES-CBC/CTR, ECDSA/ECDH P-256, TRNG on the accelerator (CRYS runtime) plus
+  AES-GCM (Oberon), in the separate
+  **[NiusCrypto](https://github.com/dunknowcoding/ArduinoNRF-Crypto)** library
+  (the in-package [`libraries/CC310/`](../hardware/arduinonrf/nrf52/libraries/CC310/)
+  is a compatibility shim). HW-verified on ProMicro. Nordic binaries are fetched
+  locally — see NiusCrypto's `docs/VENDORING.md`.
+- **Not yet vendored:** the nRF *own-radio* Zigbee stack (`libraries/Zigbee/` —
+  Zboss not in-tree). It exposes its API but returns `ZIGBEE_NOT_VENDORED` until
   the runtime is added.
 
 ## Platform reference (capabilities & truth)

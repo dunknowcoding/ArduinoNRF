@@ -77,11 +77,15 @@ These are **not** missing drivers — they're intentional design choices:
   callbacks), not a separate raw peripheral; tracked as an API extension,
   not a driver gap.
 - **CRYPTOCELL (CC310)** — a binary-blob accelerator, intentionally a
-  separate library with its own vendoring roadmap. The on-chip ECB/CCM/AAR above cover
-  hardware AES *without* the blob.
+  separate library with its own vendoring roadmap. Full CC310 support (CRYS
+  runtime + Oberon GCM) lives in
+  **[NiusCrypto](https://github.com/dunknowcoding/ArduinoNRF-Crypto)**; the
+  in-package `libraries/CC310/` shim keeps the legacy API surface. The on-chip
+  ECB/CCM/AAR above cover hardware AES *without* the blob.
 - **DAC** — does not exist on the nRF52840.
 
 ## Protocol stacks (libraries, not drivers)
 
-Tracked separately under their own roadmaps: NimBLE, Thread, Zigbee, CC310.
+Tracked separately under their own roadmaps: NimBLE, Thread, Zigbee, CC310
+(NiusCrypto).
 See `*_INTEGRATION_PLAN.md` and the `project_wireless_stack_progress` memory.

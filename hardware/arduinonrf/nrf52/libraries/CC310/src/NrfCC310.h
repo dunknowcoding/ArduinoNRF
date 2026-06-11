@@ -2,11 +2,12 @@
 // crypto accelerator (Arm CryptoCell 310).
 //
 // SCOPE
-//   This is a SKELETON. The actual hardware driver requires Nordic's
-//   `libcc_310.a` binary (see vendor/README.md). Until the binary is
-//   dropped in, every operation returns NOT_VENDORED and isAvailable()
-//   returns false. The API surface is fixed so sketches written against it
-//   compile clean both ways.
+//   This is a COMPATIBILITY SHIM. Working CC310 hardware crypto lives in the
+//   separate NiusCrypto library (https://github.com/dunknowcoding/ArduinoNRF-Crypto).
+//   The shim keeps `#include <NrfCC310.h>` compiling; without NiusCrypto (or,
+//   for legacy in-package use, Nordic's `libcc_310.a` binary — see vendor/README.md)
+//   every operation returns NOT_VENDORED and isAvailable() returns false. The API
+//   surface is fixed so sketches written against it compile clean both ways.
 //
 // CRYPTOCELL 310 CAPABILITIES
 //   * Symmetric: AES-128 (ECB / CBC / CTR / CCM / GCM), ChaCha20-Poly1305

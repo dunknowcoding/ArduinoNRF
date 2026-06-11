@@ -1082,11 +1082,15 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         if (inAck != 0UL) {
             reg32(USBD_BASE, EPDATASTATUS) = inAck; // clear handled IN bits (W1C)
         }
-        // OUT bits: fetch any complete host packet into the rx rings. Without
-        // this (or a foreground pumpRx() call) a latched EPOUT bit NAKs every
-        // later host OUT and writes from the PC time out. Bit-gated and
-        // in-flight-guarded inside, so it cannot collide with an IN DMA.
-        drainServiceDataOut();
+        // OUT bits are deliberately NOT drained here. Draining in the EPDATA
+        // ISR samples EPDATASTATUS precisely in the IN-ack window, where this
+        // clone glitch-sets OUT bits with no real packet — each phantom fetch
+        // then replays stale FIFO bytes, and because the consumer's response
+        // TX causes the next IN-ack, the replays become a self-sustaining
+        // storm that can starve the sketch loop. The foreground pumpRx()
+        // (Serial.available()/read()) is the sole OUT consumer; it samples at
+        // uncorrelated times, which is the same timing the GDB stub's poll
+        // loop has always used successfully.
     }
 
     if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {

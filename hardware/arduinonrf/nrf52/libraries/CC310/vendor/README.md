@@ -1,12 +1,20 @@
 # Vendoring the Nordic CryptoCell 310 library
 
 The CC310 hardware accelerator on the nRF52840 is driven by a closed-source
-binary library from Nordic (`libcc_310.a` and matching headers). This
-directory is where that binary lands.
+binary library from Nordic. **Working CC310 support lives in the separate
+[NiusCrypto](https://github.com/dunknowcoding/ArduinoNRF-Crypto) library** —
+CRYS runtime on the CryptoCell for SHA/AES/ECC/TRNG, Oberon for AES-GCM, with
+Nordic binaries fetched locally (see NiusCrypto's `docs/VENDORING.md`).
 
-## Where to get it
+The in-package `libraries/CC310/` here is a **compatibility shim**: it keeps
+`#include <NrfCC310.h>` compiling for legacy sketches. Install NiusCrypto for
+the real implementation; without it every operation returns
+`CC310_NOT_VENDORED`.
 
-Download the **nRF5 SDK 17.x** from
+## Legacy in-package vendoring (shim only)
+
+If you are extending this shim rather than using NiusCrypto, the binary still
+lands under this directory. Download the **nRF5 SDK 17.x** from
 <https://www.nordicsemi.com/Products/Development-software/nRF5-SDK> (free
 registration required). After unpacking, the files you need are under
 `external/nrf_cc310/`:

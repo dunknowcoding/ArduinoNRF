@@ -33,6 +33,12 @@ compiler.objcopy.hex.flags=-O ihex -R .eeprom
 
 compiler.includes=-I{build.variant.path} -I{build.core.path}
 
+# Default empty so the token in recipe.c.combine.pattern resolves cleanly when a
+# sketch links no precompiled libraries. arduino-cli overrides this with the
+# aggregated `-L`/`-l` flags (from each precompiled library's library.properties
+# `ldflags=`) when one is present.
+compiler.libraries.ldflags=
+
 tools.openocd.path={runtime.tools.openocd-0.11.0-arduino2.path}
 tools.openocd.cmd=bin/openocd
 tools.openocd.cmd.windows=bin/openocd.exe
@@ -161,7 +167,7 @@ recipe.c.o.pattern="{compiler.path}{compiler.c.cmd}" {build.flags.cpu} {build.fl
 recipe.cpp.o.pattern="{compiler.path}{compiler.cpp.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.cpp.extra_flags} {compiler.cpp.flags} {compiler.includes} {includes} "{source_file}" -c -o "{object_file}"
 recipe.S.o.pattern="{compiler.path}{compiler.c.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.S.extra_flags} {compiler.S.flags} {compiler.includes} {includes} "{source_file}" -c -o "{object_file}"
 recipe.ar.pattern="{compiler.path}{compiler.ar.cmd}" {compiler.ar.flags} "{archive_file_path}" "{object_file}"
-recipe.c.combine.pattern="{compiler.path}{compiler.cpp.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.elf.extra_flags} {compiler.elf.flags} "-T{build.variant.path}/{build.ldscript}" -Wl,--defsym=__nrf_reserved_flash_bytes={build.storage_reserved_bytes} -Wl,--defsym=__nrf_storage_region_bytes={build.storage_reserved_bytes} -Wl,--defsym=__nrf_program_flash_bytes={upload.maximum_size} -Wl,--defsym=__nrf_app_start={build.bootloader_app_start} -o "{build.path}/{build.project_name}.elf" {object_files} "{archive_file_path}" -lm -lc -lgcc
+recipe.c.combine.pattern="{compiler.path}{compiler.cpp.cmd}" {build.flags.cpu} {build.flags.common} {build.extra_flags} {compiler.elf.extra_flags} {compiler.elf.flags} "-T{build.variant.path}/{build.ldscript}" -Wl,--defsym=__nrf_reserved_flash_bytes={build.storage_reserved_bytes} -Wl,--defsym=__nrf_storage_region_bytes={build.storage_reserved_bytes} -Wl,--defsym=__nrf_program_flash_bytes={upload.maximum_size} -Wl,--defsym=__nrf_app_start={build.bootloader_app_start} -o "{build.path}/{build.project_name}.elf" {object_files} "{archive_file_path}" {compiler.libraries.ldflags} -lm -lc -lgcc
 recipe.objcopy.hex.pattern="{compiler.path}{compiler.objcopy.cmd}" {compiler.objcopy.hex.flags} "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.hex"
 recipe.objcopy.bin.pattern="{compiler.path}{compiler.objcopy.cmd}" {compiler.objcopy.eep.flags} "{build.path}/{build.project_name}.elf" "{build.path}/{build.project_name}.bin"
 recipe.size.pattern="{compiler.path}{compiler.size.cmd}" -A "{build.path}/{build.project_name}.elf"
