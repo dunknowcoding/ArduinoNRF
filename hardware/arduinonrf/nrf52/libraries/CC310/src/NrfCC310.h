@@ -46,6 +46,7 @@ public:
         CC_NOT_STARTED   = -2,  // begin() not called
         CC_BAD_PARAM     = -3,
         CC_INTERNAL      = -4,
+        CC_AUTH_FAILED   = -5,  // signature/tag verification failed
     };
 
     // Initialize CC310 (HFCLK request, peripheral enable, RNG init).

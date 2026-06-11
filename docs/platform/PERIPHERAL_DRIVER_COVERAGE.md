@@ -76,12 +76,13 @@ These are **not** missing drivers — they're intentional design choices:
   different mode. This is an Arduino-API-level feature (`Wire` slave
   callbacks), not a separate raw peripheral; tracked as an API extension,
   not a driver gap.
-- **CRYPTOCELL (CC310)** — a binary-blob accelerator, intentionally a
-  separate library with its own vendoring roadmap. Full CC310 support (CRYS
-  runtime + Oberon GCM) lives in
-  **[NiusCrypto](https://github.com/dunknowcoding/ArduinoNRF-Crypto)**; the
-  in-package `libraries/CC310/` shim keeps the legacy API surface. The on-chip
-  ECB/CCM/AAR above cover hardware AES *without* the blob.
+- **CRYPTOCELL (CC310)** — hardware accelerator via the separate
+  **[NiusCrypto](https://github.com/dunknowcoding/ArduinoNRF-Crypto)** library
+  (CRYS runtime: SHA-256, HMAC, AES-CBC/CTR, ECDSA/ECDH P-256, TRNG on
+  CryptoCell; Oberon for AES-GCM). The in-package `libraries/CC310/` shim
+  forwards `#include <NrfCC310.h>` to NiusCrypto (`depends=NiusCrypto`); smoke
+  test covers TRNG, hash, HMAC, AES-CTR, ECDSA, and ECDH. Board1 verified.
+  The on-chip ECB/CCM/AAR above cover hardware AES *without* the Nordic blob.
 - **DAC** — does not exist on the nRF52840.
 
 ## Protocol stacks (libraries, not drivers)

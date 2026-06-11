@@ -19,6 +19,8 @@ const char* statusName(NrfCC310::Status s) {
       return "BAD_PARAM";
     case NrfCC310::CC_INTERNAL:
       return "INTERNAL";
+    case NrfCC310::CC_AUTH_FAILED:
+      return "AUTH_FAILED";
     default:
       return "(unknown)";
   }
@@ -136,6 +138,24 @@ void setup() {
         const auto vrc = NrfCC310::ecdsaP256Verify(pub, hash, sig);
         pass &= reportOk("ecdsaP256Verify", vrc);
       }
+    }
+  }
+
+  uint8_t aPriv[32], aPub[64], bPriv[32], bPub[64], sAB[32], sBA[32];
+  const auto e1 = NrfCC310::ecdsaP256GenerateKey(aPriv, aPub);
+  pass &= reportOk("ecdh party A keygen", e1);
+  const auto e2 = NrfCC310::ecdsaP256GenerateKey(bPriv, bPub);
+  pass &= reportOk("ecdh party B keygen", e2);
+  if (e1 == NrfCC310::CC_OK && e2 == NrfCC310::CC_OK) {
+    const auto e3 = NrfCC310::ecdhP256ComputeShared(aPriv, bPub, sAB);
+    pass &= reportOk("ecdhP256ComputeShared A", e3);
+    const auto e4 = NrfCC310::ecdhP256ComputeShared(bPriv, aPub, sBA);
+    pass &= reportOk("ecdhP256ComputeShared B", e4);
+    if (e3 == NrfCC310::CC_OK && e4 == NrfCC310::CC_OK) {
+      const bool ecdhOk = equal(sAB, sBA, 32);
+      Serial.print(F("    shared secret match: "));
+      Serial.println(ecdhOk ? F("PASS") : F("FAIL"));
+      pass &= ecdhOk;
     }
   }
 

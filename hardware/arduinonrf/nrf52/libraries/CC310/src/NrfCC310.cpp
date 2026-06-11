@@ -21,8 +21,9 @@ NrfCC310::Status mapStatus(ncrypto::CryptoStatus s) {
     case CS::BadParam:
       return NrfCC310::CC_BAD_PARAM;
     case CS::InternalError:
-    case CS::AuthFailed:
       return NrfCC310::CC_INTERNAL;
+    case CS::AuthFailed:
+      return NrfCC310::CC_AUTH_FAILED;
     case CS::Unsupported:
     case CS::HardwareMissing:
     default:
