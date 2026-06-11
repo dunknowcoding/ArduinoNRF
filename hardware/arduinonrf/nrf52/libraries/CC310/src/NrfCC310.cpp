@@ -69,6 +69,16 @@ NrfCC310::Status NrfCC310::sha256(const uint8_t* in, size_t inLen, uint8_t out[3
   return mapStatus(Crypto.sha256(in, inLen, out));
 }
 
+NrfCC310::Status NrfCC310::hmacSha256(const uint8_t* key, size_t keyLen,
+                                      const uint8_t* msg, size_t msgLen,
+                                      uint8_t out[32]) {
+  CC310_GUARD();
+  if (out == nullptr) return CC_BAD_PARAM;
+  if (key == nullptr && keyLen != 0) return CC_BAD_PARAM;
+  if (msg == nullptr && msgLen != 0) return CC_BAD_PARAM;
+  return mapStatus(Crypto.hmacSha256(key, keyLen, msg, msgLen, out));
+}
+
 NrfCC310::Status NrfCC310::aes128CbcEncrypt(const uint8_t key[16], const uint8_t iv[16],
                                             const uint8_t* in, uint8_t* out,
                                             size_t lenMultipleOf16) {
@@ -85,6 +95,15 @@ NrfCC310::Status NrfCC310::aes128CbcDecrypt(const uint8_t key[16], const uint8_t
   return mapStatus(Crypto.aesCbcDecrypt(key, iv, in, out, lenMultipleOf16));
 }
 
+NrfCC310::Status NrfCC310::aes128Ctr(const uint8_t key[16], const uint8_t iv[16],
+                                     const uint8_t* in, uint8_t* out, size_t len) {
+  CC310_GUARD();
+  if (key == nullptr || iv == nullptr || in == nullptr || out == nullptr) {
+    return CC_BAD_PARAM;
+  }
+  return mapStatus(Crypto.aesCtr(key, iv, in, out, len));
+}
+
 NrfCC310::Status NrfCC310::aes128GcmEncrypt(const uint8_t key[16], const uint8_t iv[12],
                                             const uint8_t* aad, size_t aadLen,
                                             const uint8_t* in, uint8_t* out, size_t inLen,
@@ -99,6 +118,13 @@ NrfCC310::Status NrfCC310::aes128GcmDecrypt(const uint8_t key[16], const uint8_t
                                            const uint8_t tag[16]) {
   CC310_GUARD();
   return mapStatus(Crypto.aesGcmDecrypt(key, iv, aad, aadLen, in, out, inLen, tag));
+}
+
+NrfCC310::Status NrfCC310::ecdsaP256GenerateKey(uint8_t privateKey[32],
+                                                uint8_t publicKey[64]) {
+  CC310_GUARD();
+  if (privateKey == nullptr || publicKey == nullptr) return CC_BAD_PARAM;
+  return mapStatus(Crypto.ecdsaGenerateKey(privateKey, publicKey));
 }
 
 NrfCC310::Status NrfCC310::ecdsaP256Sign(const uint8_t privateKey[32],

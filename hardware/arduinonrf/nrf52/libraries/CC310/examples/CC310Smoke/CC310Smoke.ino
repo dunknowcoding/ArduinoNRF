@@ -1,8 +1,8 @@
 // CC310Smoke.ino - sanity-check the CC310 compatibility shim.
 //
 // With NiusCrypto installed and Nordic binaries vendored (see
-// NiusCrypto's docs/VENDORING.md), begin() succeeds and randomBytes /
-// SHA-256("abc") pass. Without NiusCrypto the sketch fails to compile
+// NiusCrypto's docs/VENDORING.md), begin() succeeds and every forwarded
+// primitive below passes. Without NiusCrypto the sketch fails to compile
 // (same pattern as libraries/Thread/ → NiusThread).
 
 #include <NrfCC310.h>
@@ -31,21 +31,29 @@ static bool equal(const uint8_t* a, const uint8_t* b, size_t n) {
   return true;
 }
 
+static bool reportOk(const char* label, NrfCC310::Status rc) {
+  Serial.print(F("  "));
+  Serial.print(label);
+  Serial.print(F(": "));
+  Serial.println(statusName(rc));
+  return rc == NrfCC310::CC_OK;
+}
+
 void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 3000UL) {}
 
+  bool pass = true;
   Serial.println(F("=== CC310 shim smoke test ==="));
   const auto rc = NrfCC310::begin();
-  Serial.print(F("  begin: "));
-  Serial.println(statusName(rc));
+  pass &= reportOk("begin", rc);
   Serial.print(F("  isAvailable: "));
   Serial.println(NrfCC310::isAvailable() ? F("true") : F("false"));
+  pass &= NrfCC310::isAvailable();
 
   uint8_t rnd[16] = {0};
   const auto rrc = NrfCC310::randomBytes(rnd, sizeof(rnd));
-  Serial.print(F("  randomBytes: "));
-  Serial.println(statusName(rrc));
+  pass &= reportOk("randomBytes", rrc);
   if (rrc == NrfCC310::CC_OK) {
     Serial.print(F("    sample: "));
     for (size_t i = 0; i < sizeof(rnd); ++i) {
@@ -62,18 +70,77 @@ void setup() {
       0xB4, 0x10, 0xFF, 0x61, 0xF2, 0x00, 0x15, 0xAD};
   uint8_t digest[32];
   const auto src = NrfCC310::sha256(kAbc, sizeof(kAbc), digest);
-  Serial.print(F("  sha256(\"abc\"): "));
-  Serial.println(statusName(src));
+  pass &= reportOk("sha256(\"abc\")", src);
   if (src == NrfCC310::CC_OK) {
+    const bool shaOk = equal(digest, kShaAbc, 32);
     Serial.print(F("    match NIST: "));
-    Serial.println(equal(digest, kShaAbc, 32) ? F("PASS") : F("FAIL"));
+    Serial.println(shaOk ? F("PASS") : F("FAIL"));
+    pass &= shaOk;
+  }
+
+  static const uint8_t kHmacKey[4] = {'J', 'e', 'f', 'e'};
+  static const uint8_t kHmacMsg[28] = {'w', 'h', 'a', 't', ' ', 'd', 'o',
+                                       ' ', 'y', 'a', ' ', 'w', 'a', 'n',
+                                       't', ' ', 'f', 'o', 'r', ' ', 'n',
+                                       'o', 't', 'h', 'i', 'n', 'g', '?'};
+  static const uint8_t kHmacMac[32] = {
+      0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e, 0x6a, 0x04, 0x24,
+      0x26, 0x08, 0x95, 0x75, 0xc7, 0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27,
+      0x39, 0x83, 0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43};
+  uint8_t mac[32];
+  const auto hrc = NrfCC310::hmacSha256(kHmacKey, sizeof(kHmacKey), kHmacMsg,
+                                        sizeof(kHmacMsg), mac);
+  pass &= reportOk("hmacSha256 (RFC 4231 #2)", hrc);
+  if (hrc == NrfCC310::CC_OK) {
+    const bool hmacOk = equal(mac, kHmacMac, 32);
+    Serial.print(F("    match RFC 4231: "));
+    Serial.println(hmacOk ? F("PASS") : F("FAIL"));
+    pass &= hmacOk;
+  }
+
+  static const uint8_t kAesKey[16] = {0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2,
+                                      0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf,
+                                      0x4f, 0x3c};
+  static const uint8_t kCtrIv[16] = {0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6,
+                                     0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd,
+                                     0xfe, 0xff};
+  static const uint8_t kCtrPt[32] = {
+      0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e,
+      0x11, 0x73, 0x93, 0x17, 0x2a, 0xae, 0x2d, 0x8a, 0x57, 0x1e, 0x03,
+      0xac, 0x9c, 0x9e, 0xb7, 0x6f, 0xac, 0x45, 0xaf, 0x8e, 0x51};
+  static const uint8_t kCtrCt[32] = {
+      0x87, 0x4d, 0x61, 0x91, 0xb6, 0x20, 0xe3, 0x26, 0x1b, 0xef, 0x68,
+      0x64, 0x99, 0x0d, 0xb6, 0xce, 0x98, 0x06, 0xf6, 0x6b, 0x79, 0x70,
+      0xfd, 0xff, 0x86, 0x17, 0x18, 0x7b, 0xb9, 0xff, 0xfd, 0xff};
+  uint8_t ctrOut[32];
+  const auto ctrc = NrfCC310::aes128Ctr(kAesKey, kCtrIv, kCtrPt, ctrOut, 32);
+  pass &= reportOk("aes128Ctr (NIST F.5.1)", ctrc);
+  if (ctrc == NrfCC310::CC_OK) {
+    const bool ctrOk = equal(ctrOut, kCtrCt, 32);
+    Serial.print(F("    match NIST: "));
+    Serial.println(ctrOk ? F("PASS") : F("FAIL"));
+    pass &= ctrOk;
+  }
+
+  uint8_t priv[32], pub[64], sig[64];
+  const auto krc = NrfCC310::ecdsaP256GenerateKey(priv, pub);
+  pass &= reportOk("ecdsaP256GenerateKey", krc);
+  if (krc == NrfCC310::CC_OK) {
+    uint8_t hash[32];
+    const auto hrc2 = NrfCC310::sha256(kAbc, sizeof(kAbc), hash);
+    pass &= reportOk("sha256 for ecdsa", hrc2);
+    if (hrc2 == NrfCC310::CC_OK) {
+      const auto src2 = NrfCC310::ecdsaP256Sign(priv, hash, sig);
+      pass &= reportOk("ecdsaP256Sign", src2);
+      if (src2 == NrfCC310::CC_OK) {
+        const auto vrc = NrfCC310::ecdsaP256Verify(pub, hash, sig);
+        pass &= reportOk("ecdsaP256Verify", vrc);
+      }
+    }
   }
 
   Serial.print(F("RESULT: "));
-  Serial.println((rc == NrfCC310::CC_OK && rrc == NrfCC310::CC_OK &&
-                  src == NrfCC310::CC_OK && equal(digest, kShaAbc, 32))
-                     ? F("OK")
-                     : F("CHECK"));
+  Serial.println(pass ? F("OK") : F("CHECK"));
   Serial.flush();
 }
 

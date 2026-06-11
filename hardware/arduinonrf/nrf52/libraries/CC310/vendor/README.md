@@ -1,47 +1,41 @@
-# Vendoring the Nordic CryptoCell 310 library
+# CC310 compatibility shim — vendoring notes
 
-The CC310 hardware accelerator on the nRF52840 is driven by a closed-source
-binary library from Nordic. **Working CC310 support lives in the separate
-[NiusCrypto](https://github.com/dunknowcoding/ArduinoNRF-Crypto) library** —
-CRYS runtime on the CryptoCell for SHA/AES/ECC/TRNG, Oberon for AES-GCM, with
-Nordic binaries fetched locally (see NiusCrypto's `docs/VENDORING.md`).
+Working CC310 hardware crypto lives in the separate
+**[NiusCrypto](https://github.com/dunknowcoding/ArduinoNRF-Crypto)** library.
+Install NiusCrypto, run its vendoring scripts once per machine, then build
+sketches that `#include <NrfCC310.h>` or `<NiusCrypto.h>`.
 
-The in-package `libraries/CC310/` here is a **compatibility shim**: it keeps
-`#include <NrfCC310.h>` compiling for legacy sketches. Install NiusCrypto for
-the real implementation; without it every operation returns
-`CC310_NOT_VENDORED`.
+The in-package `libraries/CC310/` entry is a **compatibility shim** only: it
+forwards to NiusCrypto (`depends=NiusCrypto`). Without NiusCrypto the sketch
+fails to compile — same pattern as `libraries/Thread/` → NiusThread.
 
-## Legacy in-package vendoring (shim only)
+## What NiusCrypto vendors (not in this repo)
 
-If you are extending this shim rather than using NiusCrypto, the binary still
-lands under this directory. Download the **nRF5 SDK 17.x** from
-<https://www.nordicsemi.com/Products/Development-software/nRF5-SDK> (free
-registration required). After unpacking, the files you need are under
-`external/nrf_cc310/`:
+| Archive | Provides | How to obtain |
+|---------|----------|---------------|
+| `libnrf_cc310.a` | CRYS runtime on CryptoCell 310: SHA-256, HMAC-SHA-256, AES-CBC/CTR, ECDSA/ECDH P-256, TRNG | `python vendor/tools/import_cc310_sdk.py` (local nRF5 SDK 17.x) |
+| `liboberon.a` | AES-128-GCM only (CRYS has no GCM) | `python vendor/tools/fetch_cc310.py` |
 
-| Source path inside nRF5 SDK                                                   | Destination here                |
-|-------------------------------------------------------------------------------|---------------------------------|
-| `external/nrf_cc310/lib/cortex-m4/hard-float/no-interrupts/libcc_310_*.a`     | `vendor/lib/libcc_310.a`        |
-| `external/nrf_cc310/include/*.h`                                              | `vendor/include/`               |
-| `external/nrf_cc310_bl/lib/cortex-m4/hard-float/no-interrupts/libcc_310_bl_*.a` | `vendor/lib/libcc_310_bl.a` (optional, boot-loader subset) |
+Both land under NiusCrypto's git-ignored `src/cortex-m4/` and `src/cc310/`.
+Use the **soft-float / no-interrupts** variants — ArduinoNRF compiles
+Cortex-M4 with the soft-float ABI.
 
-The **no-interrupts** flavor is the right one for bare-metal Arduino - the
-freertos variant assumes Nordic's RTOS abstractions, which we don't have.
+One-shot setup from the NiusCrypto repo root:
 
-The exact filename varies by SDK version (`libcc_310_0.9.13.a`,
-`libcc_310_0.9.16.a`, ...). Rename it to `libcc_310.a` after copying so the
-build recipe finds it.
+```sh
+python vendor/tools/setup_vendored.py [path-to-nRF5-SDK]
+```
 
-## After dropping the files
+See NiusCrypto's [docs/VENDORING.md](https://github.com/dunknowcoding/ArduinoNRF-Crypto/blob/main/docs/VENDORING.md).
 
-The `extra.libcc310.flags` placeholder in `boards.txt` adds
-`-L vendor/lib -lcc_310 -I vendor/include` to the link line. The library's
-src/NrfCC310.cpp probes for the presence of the linked symbols and switches
-from stub mode to real-hardware mode automatically.
+## Legacy in-package binary (deprecated)
+
+Earlier drafts linked Nordic's older `libcc_310.a` directly from this folder.
+That path is **deprecated**; do not copy binaries here. The shim no longer
+probes for `libcc_310.a` — it requires NiusCrypto.
 
 ## License note
 
-The Nordic CryptoCell 310 library is distributed under Nordic's binary
-license (5-clause-BSD-style, but not OSI-approved). Read the LICENSE that
-ships with the SDK before redistributing. This repository does NOT bundle
-the binary - users must accept Nordic's terms and download themselves.
+Nordic's CryptoCell binaries are distributed under Nordic's 5-clause license.
+This repository does **not** bundle them. Each developer must accept Nordic's
+terms and import/fetch locally via NiusCrypto's scripts.

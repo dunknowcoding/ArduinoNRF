@@ -27,7 +27,7 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | CC2530 runtime UART PING | **PASS** | `CC2530Radio.begin(11)` reports firmware `v0.1` and repeated `ping -> PONG` after the NiusZigbee UART resync fix. |
 | CC2530 two-node raw 802.15.4 link | **PASS** | `CC2530_Link` on board1 and board2 produced `TX "hello N" ok` and reciprocal `RX (... dBm): hello N` frames on channel 11. |
 | NiusCrypto CC310 self-test (board1) | **PASS** | `examples/CryptoSelfTest` with vendored CRYS+Oberon: 10/10 KAT vectors, `backend: CC310`, UF2 flash. See [ArduinoNRF-Crypto docs/VALIDATION.md](https://github.com/dunknowcoding/ArduinoNRF-Crypto/blob/main/docs/VALIDATION.md). |
-| CC310 shim smoke (board1) | **PASS** | `libraries/CC310/examples/CC310Smoke` forwards to NiusCrypto; `sha256("abc")` NIST match + TRNG sample. |
+| CC310 shim smoke (board1) | **PASS** | `CC310Smoke`: TRNG, SHA-256, HMAC, AES-CTR, ECDSA via shim → NiusCrypto; `RESULT: OK`. |
 
 ## ⚠️ Known limitations
 

@@ -11,19 +11,15 @@
 // SCOPE
 //   This is a COMPATIBILITY SHIM. Working CC310 hardware crypto lives in the
 //   separate NiusCrypto library (https://github.com/dunknowcoding/ArduinoNRF-Crypto).
-//   The shim keeps `#include <NrfCC310.h>` compiling; without NiusCrypto (or,
-//   for legacy in-package use, Nordic's `libcc_310.a` binary — see vendor/README.md)
-//   every operation returns NOT_VENDORED and isAvailable() returns false. The API
-//   surface is fixed so sketches written against it compile clean both ways.
+//   The shim keeps `#include <NrfCC310.h>` compiling; without NiusCrypto the
+//   sketch fails to compile — see vendor/README.md.
 //
-// CRYPTOCELL 310 CAPABILITIES
-//   * Symmetric: AES-128 (ECB / CBC / CTR / CCM / GCM), ChaCha20-Poly1305
-//   * Hash: SHA-1, SHA-2 (224/256/384/512), HMAC over any of those
-//   * Asymmetric: RSA up to 4096-bit, ECDSA / ECDH on P-192/224/256/384/521
-//     + secp192k1/256k1 + Curve25519 / Ed25519
-//   * RNG: hardware TRNG (NIST SP 800-22 compliant) plus PRNG seeded from
-//     it. Faster than software RNG, never blocks more than a few us.
-//   * Key derivation: HKDF, PBKDF2
+// IMPLEMENTED (via NiusCrypto when binaries are vendored)
+//   TRNG, SHA-256, HMAC-SHA-256, AES-128 CBC/CTR/GCM, ECDSA/ECDH P-256.
+//
+// NOT EXPOSED (CryptoCell hardware can do more; future NiusCrypto roadmap)
+//   SHA-1/224/384/512, ChaCha20-Poly1305, AES-CCM, RSA, Curve25519/Ed25519,
+//   HKDF, PBKDF2, additional curves.
 //
 // IMPORTANT - CC310 is NOT ARM TrustZone
 //   CryptoCell 310 is a separate crypto co-processor on the AHB bus. It is
@@ -46,7 +42,7 @@ public:
     // textually replace our enumerator names before the C++ compiler sees them.
     enum Status : int8_t {
         CC_OK            = 0,
-        CC_NOT_VENDORED  = -1,  // libcc_310.a not linked - see vendor/README.md
+        CC_NOT_VENDORED  = -1,  // NiusCrypto missing or CC310 backend unavailable
         CC_NOT_STARTED   = -2,  // begin() not called
         CC_BAD_PARAM     = -3,
         CC_INTERNAL      = -4,
@@ -66,6 +62,9 @@ public:
     // ---- Hash -----------------------------------------------------------
 
     static Status sha256(const uint8_t *in, size_t inLen, uint8_t out[32]);
+    static Status hmacSha256(const uint8_t *key, size_t keyLen,
+                             const uint8_t *msg, size_t msgLen,
+                             uint8_t out[32]);
 
     // ---- AES-128 --------------------------------------------------------
 
@@ -79,6 +78,11 @@ public:
                                     const uint8_t *in,
                                     uint8_t *out,
                                     size_t lenMultipleOf16);
+    static Status aes128Ctr(const uint8_t key[16],
+                            const uint8_t iv[16],
+                            const uint8_t *in,
+                            uint8_t *out,
+                            size_t len);
 
     // ---- Authenticated AES ----------------------------------------------
 
@@ -95,6 +99,8 @@ public:
 
     // ---- ECDSA P-256 sign / verify -------------------------------------
 
+    static Status ecdsaP256GenerateKey(uint8_t privateKey[32],
+                                       uint8_t publicKey[64]);
     static Status ecdsaP256Sign(const uint8_t privateKey[32],
                                  const uint8_t hash[32],
                                  uint8_t signature[64]);
