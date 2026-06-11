@@ -1,0 +1,40 @@
+#######################################
+# Syntax coloring map for CC310 shim
+#######################################
+
+#######################################
+# Datatypes / classes (KEYWORD1)
+#######################################
+
+NrfCC310	KEYWORD1
+
+#######################################
+# Methods and functions (KEYWORD2)
+#######################################
+
+begin	KEYWORD2
+end	KEYWORD2
+isAvailable	KEYWORD2
+randomBytes	KEYWORD2
+sha256	KEYWORD2
+hmacSha256	KEYWORD2
+aes128CbcEncrypt	KEYWORD2
+aes128CbcDecrypt	KEYWORD2
+aes128Ctr	KEYWORD2
+aes128GcmEncrypt	KEYWORD2
+aes128GcmDecrypt	KEYWORD2
+ecdsaP256GenerateKey	KEYWORD2
+ecdsaP256Sign	KEYWORD2
+ecdsaP256Verify	KEYWORD2
+ecdhP256ComputeShared	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+CC_OK	LITERAL1
+CC_NOT_VENDORED	LITERAL1
+CC_NOT_STARTED	LITERAL1
+CC_BAD_PARAM	LITERAL1
+CC_INTERNAL	LITERAL1
+CC_AUTH_FAILED	LITERAL1
