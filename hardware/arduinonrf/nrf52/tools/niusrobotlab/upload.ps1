@@ -1241,6 +1241,26 @@ function Resolve-AutoBootloader {
     $probedNames = ($script:NrfBootloaderCandidates | ForEach-Object { ('{0}:{1}' -f $_.Vid, $_.Pid) }) -join ', '
 
     for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
+        $pnpInventory = @(Get-PnpDeviceInventory)
+
+        function Test-PnpVidPidInSnapshot {
+            param(
+                [object[]]$Inventory,
+                [string]$VidLetters,
+                [string]$PidLetters
+            )
+
+            $needle = ('VID_{0}&PID_{1}' -f $VidLetters, $PidLetters).ToUpperInvariant()
+            foreach ($device in @($Inventory)) {
+                $instanceId = ([string]$device.InstanceId).ToUpperInvariant()
+                $hwId = ([string](($device.HardwareID -join ';'))).ToUpperInvariant()
+                if ($instanceId.Contains($needle) -or $hwId.Contains($needle)) {
+                    return $true
+                }
+            }
+            return $false
+        }
+
         # 1) Ask dfu-util what it sees. Cheap and authoritative for Nordic DFU.
         $dfuOutput = ''
         try {
@@ -1253,7 +1273,7 @@ function Resolve-AutoBootloader {
         foreach ($candidate in $script:NrfBootloaderCandidates) {
             $needle = ('{0}:{1}' -f $candidate.Vid, $candidate.Pid)
             $hitDfu = ($dfuLower -ne '' -and $dfuLower -match [Regex]::Escape($needle))
-            $hitPnp = (Find-PnpVidPid -VidLetters $candidate.Vid -PidLetters $candidate.Pid) -ne $null
+            $hitPnp = Test-PnpVidPidInSnapshot -Inventory $pnpInventory -VidLetters $candidate.Vid -PidLetters $candidate.Pid
             if ($hitDfu -or $hitPnp) {
                 $expectedLabel = if ($candidate.ContainsKey('VolumeLabel')) { $candidate.VolumeLabel } else { '' }
                 $expectedModel = if ($candidate.ContainsKey('Model')) { $candidate.Model } else { '' }
@@ -3504,7 +3524,7 @@ try {
                 }
             }
         } else {
-            Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
+            Write-NiusDetail '[nius] 1200 bps touch skipped; using already-detected bootloader state.' -ForegroundColor DarkGray
         }
 
         # Wait for the board to enter bootloader after the 1200 bps touch.
