@@ -21,6 +21,11 @@ bidirectional **UDP multicast** (`ff03::1`) delivers application data both
 ways. MLE advertisements were also cross-checked over the air with a CC2530
 sniffer during bring-up.
 
+**Real commissioning is verified too** (NiusThread 0.1.2): a factory-fresh
+board joins with only a passphrase — discovery, EC-JPAKE DTLS with the PSKd,
+KEK-secured Joiner Entrust, credentials stored to flash, attach as child. See
+the *CommissionerNode* / *JoinerNode* examples.
+
 ### Quick use
 
 1. Install the **ArduinoNRF board package** and the **NiusThread** library.
@@ -58,8 +63,12 @@ RX  from fd00:db8:0:0:535d:5645:501c:5ef2  "hello #62 from 0xE400"
 - **Settings persist in flash**: the dataset, key sequence and frame counters
   live in two 4 KB pages directly below the bootloader (default `0xF2000`,
   override `NIUSTHREAD_SETTINGS_FLASH_BASE`), so nodes re-attach by themselves
-  after a reboot. Still future work: CSL (sleepy children),
-  commissioner/joiner and border-router roles.
+  after a reboot.
+- **Channel choice matters:** pick a channel clear of WiFi and neighboring
+  802.15.4 networks. The bundled examples use channel 25; channel 11 overlaps
+  WiFi channel 1 and is a popular Zigbee default — on a noisy bench the long
+  commissioning frames are the first casualties.
+- Still future work: CSL (sleepy-child long polling) and border-router roles.
 - `Thread.process()` must run every `loop()` pass — the whole stack (alarms,
   radio events, tasklets) is polled from thread context.
 
