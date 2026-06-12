@@ -312,6 +312,15 @@ inline uint32_t epoutAmountOffset(uint8_t endpoint) {
     return EPOUT_AMOUNT_BASE + (static_cast<uint32_t>(endpoint) * USBD_ENDPOINT_CLUSTER_STRIDE);
 }
 
+// SIZE.EPOUT[n] (0x4A0 + n*4): reading gives the byte count of the packet
+// sitting in the endpoint's internal buffer; WRITING any value is the
+// documented "buffer consumed" handshake that lets the endpoint ACK the next
+// host OUT. Skipping this write is what made this clone re-present stale
+// FIFO content as phantom packets after every real one.
+inline uint32_t sizeEpoutOffset(uint8_t endpoint) {
+    return 0x4A0UL + (static_cast<uint32_t>(endpoint) * 4UL);
+}
+
 inline uint32_t epinPtrOffset(uint8_t endpoint) {
     return EPIN_PTR_BASE + (static_cast<uint32_t>(endpoint) * USBD_ENDPOINT_CLUSTER_STRIDE);
 }
@@ -1694,7 +1703,7 @@ void NrfUsbdDriver::armCdcDataOut() {
         reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
         reg32(USBD_BASE, epoutPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(buffer);
         reg32(USBD_BASE, epoutMaxcntOffset(endpoint)) = DATA_EP_MAX_PACKET;
-        triggerEndpointStartTask(taskStartEpoutOffset(endpoint));
+        triggerEndpointStartTask(taskStartEpoutOffset(endpoint)); // initial arm
         for (uint32_t spin = 0UL; spin < USBD_DRAIN_OUT_SPINS; ++spin) {
             if (reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) != 0UL) {
                 reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
@@ -1703,6 +1712,7 @@ void NrfUsbdDriver::armCdcDataOut() {
         }
         reg32(USBD_BASE, EPDATASTATUS) =
             1UL << (EPDATASTATUS_OUT_BASE_BIT + endpoint - 1U); // discard/ack
+        reg32(USBD_BASE, sizeEpoutOffset(endpoint)) = 0UL; // buffer-consumed handshake
     }
 }
 
@@ -1721,17 +1731,16 @@ void NrfUsbdDriver::fetchOutPacket(uint8_t endpoint, bool userPort, uint32_t sta
     for (uint32_t spin = 0UL; spin < USBD_DRAIN_OUT_SPINS; ++spin) {
         if (reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) != 0UL) {
             reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
-            const uint32_t amount = reg32(USBD_BASE, epoutAmountOffset(endpoint));
+            // Real packet length: SIZE.EPOUT[n] (read BEFORE the consume
+            // handshake write below clears it). EPOUT[n].AMOUNT lies on this
+            // clone - it echoes MAXCNT (64) for every packet, which used to
+            // deliver every short host packet padded with stale buffer bytes
+            // (the long-standing "phantom replay" junk).
+            const uint32_t amount = reg32(USBD_BASE, sizeEpoutOffset(endpoint));
             reg32(USBD_BASE, EPDATASTATUS) = statusBit; // consume/ACK (W1C)
-            if (amount != 0UL) {
-                // KNOWN CLONE QUIRK: occasionally the OUT data bit re-latches
-                // with no new host packet and this fetch replays tail bytes of
-                // an OLD packet (plus a constant FIFO-residue blob). Content
-                // fingerprinting cannot tell those replays from genuine
-                // repeats of the same command, so the bytes are delivered
-                // as-is; line-oriented consumers should drop non-printable
-                // noise (see the NiusThread ThreadCli example).
-                serviceDataOut(userPort);
+            reg32(USBD_BASE, sizeEpoutOffset(endpoint)) = 0UL; // buffer-consumed handshake
+            if (amount != 0UL && amount <= DATA_EP_MAX_PACKET) {
+                serviceDataOut(userPort, amount);
             }
             return;
         }
@@ -1766,10 +1775,13 @@ void NrfUsbdDriver::drainServiceDataOut() {
     }
 }
 
-void NrfUsbdDriver::serviceDataOut(bool userPort) {
-    const uint8_t endpoint = userPort ? USER_DATA_EP : SERVICE_DATA_EP;
+void NrfUsbdDriver::serviceDataOut(bool userPort, uint32_t received) {
     uint8_t *buffer = userPort ? &userEndpointOutBuffer_[0] : &endpointOutBuffer_[0];
-    const uint32_t received = reg32(USBD_BASE, epoutAmountOffset(endpoint));
+    // NOTE: the caller passes the packet length read from SIZE.EPOUT[n]. The
+    // EPOUT[n].AMOUNT register is NOT usable for this on the verified clone:
+    // it reports MAXCNT (64) regardless of the real packet size, which made
+    // every short host packet arrive padded with stale buffer bytes (the
+    // long-standing "phantom replay" junk).
     for (uint32_t index = 0; index < received && index < DATA_EP_MAX_PACKET; ++index) {
         if (userPort) {
             userRingPushRx(buffer[index]);

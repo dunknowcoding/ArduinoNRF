@@ -144,7 +144,7 @@ private:
     void startCdcEndpoints();
     void queueDataOut(bool userPort);
     void fetchOutPacket(uint8_t endpoint, bool userPort, uint32_t statusBit);
-    void serviceDataOut(bool userPort);
+    void serviceDataOut(bool userPort, uint32_t received);
     void serviceDataIn(bool userPort);
     void serviceNotificationIn(bool userPort);
     void serviceDynamicEndpoints();
@@ -182,6 +182,7 @@ private:
     volatile bool rts_ = false;
     volatile bool cdcActive_ = false;
     volatile bool cdcOutArmed_ = false; // OUT endpoints armed since last config
+
     volatile bool dataInFlight_ = false;
     volatile bool notificationInFlight_ = false;
     volatile bool notificationPending_ = false;
