@@ -954,9 +954,148 @@ function Assert-Uf2BuildLayoutMatchesBootloader {
     Throw-NiusUploadFailure (New-UploadFailure -Kind 'layout' -ExitCode 1 -Output (@(
                 ('The selected Arduino IDE bootloader option compiled this sketch for app start {0}, but the mounted UF2 bootloader reports app start {1}.' -f $expected, $actual),
                 ('UF2 drive={0}; label="{1}"; model="{2}"; board-id="{3}"; SoftDevice="{4}".' -f $Uf2Summary.Drive, $Uf2Summary.Label, $Uf2Summary.Model, $Uf2Summary.BoardId, $softDevice),
-                'Select the matching Bootloader / DFU layout before compiling. For board1/no-SoftDevice nice!nano-style firmware, use an option that says "no SoftDevice / MBR only (0x1000)".',
+                'Select the matching Bootloader / DFU layout before compiling. For no-SoftDevice / nice!nano-style clone firmware, use an option that says "no SoftDevice / MBR only (0x1000)".',
                 'ZH: Compiled app start does not match the UF2 bootloader flash layout. Select the matching 0x1000/0x26000/0x27000 Bootloader / DFU option, then compile and upload again.'
             ) -join [Environment]::NewLine) -Exe $toolPath)
+}
+
+function Invoke-NiusPreUploadLayoutGuard {
+    param(
+        [string]$ExpectedAppStart,
+        [string]$Context,
+        [string]$ExpectedLabel = '',
+        [string]$ExpectedModel = '',
+        [string]$ExpectedBoardId = '',
+        [string]$PreferredCompositeStableId = ''
+    )
+
+    if ($env:NIUS_DISABLE_LAYOUT_GUARD -eq '1') {
+        return
+    }
+
+    $uf2Summary = $null
+    try {
+        $uf2Summary = Get-Uf2ProbeSummary -ExpectedLabel $ExpectedLabel -ExpectedModel $ExpectedModel -ExpectedBoardId $ExpectedBoardId -PreferredCompositeStableId $PreferredCompositeStableId
+    }
+    catch {
+        return
+    }
+
+    if ($uf2Summary) {
+        Assert-Uf2BuildLayoutMatchesBootloader -Uf2Summary $uf2Summary -ExpectedAppStart $ExpectedAppStart -Context $Context
+    }
+}
+
+function Invoke-NiusRecoverBoardToBootloader {
+    param(
+        [string]$PortName,
+        [string]$ExpectedLabel = '',
+        [string]$ExpectedModel = '',
+        [string]$ExpectedBoardId = '',
+        [string]$PreferredCompositeStableId = '',
+        [int]$Uf2WaitMs = 18000
+    )
+
+    $recovered = $false
+    $detail = 'no recovery path attempted'
+
+    if (-not [string]::IsNullOrWhiteSpace($PortName)) {
+        $st = Get-SerialPortUsableState -PortName $PortName
+        if ($st.Openable) {
+            Write-NiusDetail ('[nius] misflash recovery: 1200 bps touch on {0} to re-enter bootloader...' -f $PortName) -ForegroundColor Yellow
+            $null = Touch-SerialPort1200 -PortName $PortName
+            Start-Sleep -Milliseconds 800
+            $null = Touch-SerialPort1200 -PortName $PortName
+            $detail = '1200 bps touch sent on service COM'
+        }
+    }
+
+    $uf2Deadline = (Get-Date).AddMilliseconds($Uf2WaitMs)
+    while ((Get-Date) -lt $uf2Deadline) {
+        try {
+            $uf2 = Get-Uf2ProbeSummary -ExpectedLabel $ExpectedLabel -ExpectedModel $ExpectedModel -ExpectedBoardId $ExpectedBoardId -PreferredCompositeStableId $PreferredCompositeStableId
+            if ($uf2) {
+                $recovered = $true
+                $detail = ('UF2 drive mounted at {0}' -f $uf2.Drive)
+                Write-NiusBootloaderReady -Drive $uf2.Drive -Note 'Misflash recovery: board is back in UF2/DFU - fix Bootloader / DFU menu, recompile, upload again.'
+                break
+            }
+        }
+        catch {
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($PortName)) {
+            $st = Get-SerialPortUsableState -PortName $PortName
+            if ($st.Openable) {
+                $recovered = $true
+                $detail = ('service COM {0} is openable again' -f $PortName)
+                break
+            }
+        }
+
+        Start-Sleep -Milliseconds 400
+    }
+
+    return [pscustomobject]@{
+        Recovered = $recovered
+        Detail = $detail
+    }
+}
+
+function Invoke-NiusMisflashGuardAfterSamePidUpload {
+    param(
+        [string]$PortName,
+        [string]$ExpectedAppStart,
+        [string]$ExpectedLabel = '',
+        [string]$ExpectedModel = '',
+        [string]$ExpectedBoardId = '',
+        [string]$PreferredCompositeStableId = '',
+        [int]$TimeoutMs = 12000
+    )
+
+    if ($env:NIUS_DISABLE_MISFLASH_GUARD -eq '1') {
+        return [pscustomobject]@{ Success = $true; Summary = 'misflash guard disabled' }
+    }
+
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        if (-not [string]::IsNullOrWhiteSpace($PortName)) {
+            $st = Get-SerialPortUsableState -PortName $PortName
+            if ($st.Openable) {
+                return [pscustomobject]@{
+                    Success = $true
+                    Summary = ('post-upload service COM {0} is openable' -f $PortName)
+                }
+            }
+        }
+
+        Start-Sleep -Milliseconds 400
+    }
+
+    Write-NiusDetail '[nius] misflash guard: USB serial did not return after upload; attempting bootloader recovery...' -ForegroundColor Yellow
+    $recovery = Invoke-NiusRecoverBoardToBootloader `
+        -PortName $PortName `
+        -ExpectedLabel $ExpectedLabel `
+        -ExpectedModel $ExpectedModel `
+        -ExpectedBoardId $ExpectedBoardId `
+        -PreferredCompositeStableId $PreferredCompositeStableId
+
+    $compiled = Normalize-NiusHexAddress -Value $ExpectedAppStart
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $lines.Add('Upload finished, but the board USB serial never came back in application mode.')
+    if (-not [string]::IsNullOrWhiteSpace($compiled)) {
+        $lines.Add(('This sketch was compiled for app start {0}. A mismatch with the mounted bootloader (wrong Bootloader / DFU menu) often causes USB to disappear after flash.' -f $compiled))
+    }
+    $lines.Add('Select the matching Bootloader / DFU layout (no-SoftDevice clones: no SoftDevice / MBR only 0x1000), recompile, then upload again.')
+    if ($recovery.Recovered) {
+        $lines.Add(('Recovery: {0}. The board should be in UF2/DFU again - fix the menu option before the next upload.' -f $recovery.Detail))
+    }
+    else {
+        $lines.Add(('Recovery failed ({0}). Double-tap RESET, re-plug USB, or use SWD/J-Link, then enter UF2/DFU manually.' -f $recovery.Detail))
+    }
+    $lines.Add('ZH: Upload finished but USB serial never returned - usually wrong Bootloader / DFU app start. For no-SoftDevice clones use 0x1000, recompile, upload again.')
+
+    Throw-NiusUploadFailure (New-UploadFailure -Kind 'misflash' -ExitCode 1 -Output ($lines.ToArray() -join [Environment]::NewLine) -Exe $toolPath)
 }
 
 function Find-PnpVidPid {
@@ -2222,7 +2361,16 @@ function Get-FailureHints {
             return @(
                 'Arduino compiles the sketch before upload; upload.ps1 cannot relocate an already-linked image.',
                 'Re-select the Bootloader / DFU option whose app start matches the mounted bootloader, then compile and upload again.',
-                'For a UF2 drive that reports `SoftDevice: not found`, use a no-SoftDevice / MBR only (0x1000) option.'
+                'For a UF2 drive that reports `SoftDevice: not found`, use a no-SoftDevice / MBR only (0x1000) option.',
+                'The board was left in UF2/DFU; no firmware was written when this guard fired before transfer.'
+            )
+        }
+        'misflash' {
+            return @(
+                'The transfer completed, but USB did not re-enumerate in application mode - typical when app start in Tools does not match the bootloader flash layout.',
+                'For ProMicro-class clones with `SoftDevice: not found`, use Bootloader / DFU -> no SoftDevice / MBR only (0x1000).',
+                'Double-tap RESET or re-plug USB to enter UF2, fix the menu, recompile, upload again. Use SWD/J-Link if the port stays missing.',
+                'ZH: USB serial missing after upload usually means wrong Bootloader / DFU app start; fix the menu, recompile, upload again.'
             )
         }
         default {
@@ -2386,7 +2534,15 @@ function Get-FailureSummary {
     }
 
     if ($Kind -eq 'dfu-wait') {
-        $uf2 = Get-Uf2ProbeSummary
+        $uf2 = $null
+        if (-not [string]::IsNullOrWhiteSpace($script:NiusUploadCompositeStableId)) {
+            try {
+                $uf2 = Get-Uf2ProbeSummary -PreferredCompositeStableId $script:NiusUploadCompositeStableId
+            }
+            catch {
+                $uf2 = $null
+            }
+        }
         if ($uf2) {
             return ('Board entered UF2 bootloader instead of Nordic DFU: expected {0}:{1}, but detected UF2 volume {2} labeled "{3}" with model "{4}" and board-id "{5}".' -f $UsbVid, $UsbPid, $uf2.Drive, $uf2.Label, $uf2.Model, $uf2.BoardId)
         }
@@ -2443,6 +2599,12 @@ function Get-FailureSummary {
 
     if ($Kind -eq 'post-verify') {
         return ('Firmware transfer completed, but the board never left the Adafruit UF2 bootloader. Snapshot: {0}' -f $Output)
+    }
+
+    if ($Kind -eq 'layout' -or $Kind -eq 'misflash') {
+        if (-not [string]::IsNullOrWhiteSpace($Output)) {
+            return (($Output -split "[\r\n]+" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 2) -join ' ')
+        }
     }
 
     return ('Command failed with exit code {0}: {1}' -f $formattedExitCode, $Exe)
@@ -3154,6 +3316,7 @@ function Wait-SamePidAdafruitBootloaderTransition {
     throw ('No same-PID bootloader transition observed after touch ({0}); snapshot: {1}' -f $lastIssue, $summary)
 }
 
+$script:NiusUploadCompositeStableId = ''
 $toolPath = if ($Mode -eq 'jlink') {
     Resolve-NiusJLinkExe -Preferred $Tool
 }
@@ -3322,12 +3485,23 @@ try {
             }
         }
     }
+    if (-not [string]::IsNullOrWhiteSpace($adafruitControlPort) -and $adafruitControlPort.Trim().ToUpperInvariant() -eq $Port.Trim().ToUpperInvariant()) {
+        $boardPortResolution = Resolve-AdafruitSerialControlPortWithBoardIdentity -SelectedPort $Port -BoardName $Board
+        if ($boardPortResolution -and -not [string]::IsNullOrWhiteSpace($boardPortResolution.Port) -and
+            $boardPortResolution.Port.Trim().ToUpperInvariant() -ne $Port.Trim().ToUpperInvariant()) {
+            $adafruitControlPort = $boardPortResolution.Port
+            if ($env:NIUS_ALLOW_USER_CDC_UPLOAD_PORT -eq '1') {
+                Write-NiusDetail ('[nius] serial DFU control port remap (board identity): selected {0}, using {1} ({2})' -f $Port, $adafruitControlPort, $boardPortResolution.Reason)
+            }
+        }
+    }
     $runtimeSharesUploadIdentity = $false
     $adafruitControlPortParentPrefix = ''
     $adafruitControlPortCompositeStableId = ''
     if ($Mode -eq 'dfu') {
         $adafruitControlPortParentPrefix = Get-SerialPortUsbInterfaceParentInstancePrefix -PortName $adafruitControlPort
         $adafruitControlPortCompositeStableId = Get-SerialPortUsbParentCompositeStableId -PortName $adafruitControlPort
+        $script:NiusUploadCompositeStableId = $adafruitControlPortCompositeStableId
         if (-not [string]::IsNullOrWhiteSpace($adafruitControlPort) -and
             [string]::IsNullOrWhiteSpace($adafruitControlPortParentPrefix) -and
             [string]::IsNullOrWhiteSpace($adafruitControlPortCompositeStableId)) {
@@ -3421,11 +3595,27 @@ try {
             if (-not $resolved.Resolved -and $UseTouch1200 -eq 'true') {
                 Stop-NiusLingeringAdafruitNrfutil -Phase touch
                 Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
-                $touchAttempt = Touch-SerialPort1200 -PortName $adafruitControlPort
-                if (-not $touchAttempt.Triggered) {
+                $samePidTouchHints = (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid)) -and
+                    (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid))
+                $touchTransition = Invoke-Touch1200Transition `
+                    -PortName $adafruitControlPort `
+                    -BootloaderVid $(if ($samePidTouchHints) { $effectiveRuntimeUsbVid } else { '' }) `
+                    -BootloaderPid $(if ($samePidTouchHints) { $effectiveRuntimeUsbPid } else { '' }) `
+                    -RuntimeVid $(if ($samePidTouchHints) { $effectiveRuntimeUsbVid } else { '' }) `
+                    -RuntimePid $(if ($samePidTouchHints) { $effectiveRuntimeUsbPid } else { '' }) `
+                    -InterfaceParentPrefix $adafruitControlPortParentPrefix `
+                    -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
+                    -ExpectedLabel $Uf2VolumeLabel `
+                    -ExpectedModel $Uf2Model `
+                    -ExpectedBoardId $Uf2BoardId
+                if (-not $touchTransition.Triggered) {
+                    Write-NiusDetail ('[warn] 1200 bps touch on {0} did not confirm a host-visible transition; probing scoped bootloader anyway (same-PID clones may keep the COM name).' -f $adafruitControlPort) -ForegroundColor DarkYellow
+                }
+                Start-Sleep -Milliseconds (Get-NiusPostTouchSleepMilliseconds)
+                $resolved = Resolve-AutoBootloader -DfuToolPath $toolPath -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId -Attempts 6 -DelayMs 500
+                if (-not $resolved.Resolved -and -not $touchTransition.Triggered) {
                     Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output ('Unable to trigger 1200 bps touch on {0}; the service/user CDC port may be missing or busy.' -f $adafruitControlPort) -Exe $toolPath)
                 }
-                $resolved = Resolve-AutoBootloader -DfuToolPath $toolPath -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId
             }
             if (-not $resolved.Resolved) {
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output ('Auto-detect probed for known nRF52 bootloaders ({0}); none visible on host. Check that the board is plugged in, that the user firmware honors 1200 bps touch, and that no other process is holding the COM port open.' -f $resolved.ProbedCandidates) -Exe $toolPath)
@@ -3440,7 +3630,7 @@ try {
                             ('Auto-detect found a bootloader layout at app start {0}, but the selected Arduino IDE option compiled this sketch for {1}.' -f $resolvedAppStart, $compiledAppStart),
                             ('Detected: {0}:{1}; {2}' -f $resolved.Vid, $resolved.Pid, $resolved.Note),
                             'Arduino compiles before upload, so upload.ps1 cannot move an already-linked image to a different app start.',
-                            'Select a Bootloader / DFU option with the matching layout and compile again. For board1/no-SoftDevice nice!nano-style firmware, choose a no SoftDevice / MBR only (0x1000) option.',
+                            'Select a Bootloader / DFU option with the matching layout and compile again. For no-SoftDevice / nice!nano-style clone firmware, choose a no SoftDevice / MBR only (0x1000) option.',
                             'ZH: Auto-detect found a bootloader app start that differs from this compile option. Select the matching 0x1000/0x26000/0x27000 Bootloader / DFU menu, then compile and upload again.'
                         ) -join [Environment]::NewLine) -Exe $toolPath)
             }
@@ -3573,7 +3763,7 @@ try {
                 Throw-NiusUploadFailure (New-UploadFailure -Kind 'uf2-wait' -ExitCode 1 -Output (@(
                             ('1200 bps touch on {0} did not confirm that the selected board entered UF2 bootloader.' -f $adafruitControlPort),
                             'Refusing to use an unscoped UF2 drive already mounted on the host, because another board may be in DFU mode.',
-                            'Select the target board current SERVICE/DFU port, or retry after only the target board is mounted as UF2.'
+                            'Select the target board current SERVICE/DFU port in Arduino IDE Tools->Port, or retry after only the target board is mounted as UF2.'
                         ) -join ' ') -Exe $toolPath)
             }
         }
@@ -3635,6 +3825,13 @@ try {
             }
 
             if ([string]::IsNullOrWhiteSpace($successfulAdafruitTransport)) {
+                Invoke-NiusPreUploadLayoutGuard `
+                    -ExpectedAppStart $Uf2AppStart `
+                    -Context 'Serial DFU pre-flash' `
+                    -ExpectedLabel $Uf2VolumeLabel `
+                    -ExpectedModel $Uf2Model `
+                    -ExpectedBoardId $Uf2BoardId `
+                    -PreferredCompositeStableId $adafruitControlPortCompositeStableId
                 # The byte-progress bar (driven from inside Invoke-AdafruitDfuDeploy)
                 # owns the visible 0..100 range; no coarse 50% pre-stage here.
                 Write-NiusDetail '[nius] Starting Adafruit serial DFU transfer...' -ForegroundColor DarkGray
@@ -3771,12 +3968,19 @@ try {
             # already confirmed success at the protocol level; if the host
             # also wants a "board is now in user mode" confirmation it can
             # set NIUS_FORCE_POST_VERIFY=1 to opt back in.
+            Write-Stage -Percent 94 -Label 'Verifying'
+            $null = Invoke-NiusMisflashGuardAfterSamePidUpload `
+                -PortName $adafruitControlPort `
+                -ExpectedAppStart $Uf2AppStart `
+                -ExpectedLabel $Uf2VolumeLabel `
+                -ExpectedModel $Uf2Model `
+                -ExpectedBoardId $Uf2BoardId `
+                -PreferredCompositeStableId $adafruitControlPortCompositeStableId
             if ($runtimeSharesUploadIdentity -and $env:NIUS_FORCE_POST_VERIFY -ne '1') {
-                Write-NiusDetail ('[nius] Same-PID runtime/bootloader ({0}); skipping PnP post-verify (set NIUS_FORCE_POST_VERIFY=1 to override)' -f $UsbPid)
+                Write-NiusDetail ('[nius] Same-PID runtime/bootloader ({0}); serial transfer + USB guard OK (set NIUS_DISABLE_MISFLASH_GUARD=1 to skip guard, NIUS_FORCE_POST_VERIFY=1 for full PnP post-verify)' -f $UsbPid)
                 Write-NiusUploadComplete
                 exit 0
             }
-            Write-Stage -Percent 94 -Label 'Verifying'
             $postUploadState = Wait-ForAdafruitRuntimeTransition -BootloaderVid $UsbVid -BootloaderPid $UsbPid -RuntimeVid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Vid } else { '' }) -RuntimePid $(if ($expectedRuntimeIdentity) { $expectedRuntimeIdentity.Pid } else { '' }) -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId
             if (-not $postUploadState.Success) {
                 if (-not $wildcardAttempted -and $normalizedSdReq -ne '0XFFFE') {

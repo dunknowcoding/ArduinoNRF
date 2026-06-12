@@ -49,8 +49,15 @@ choices because it has no native USB upload path in this package.
   `SoftDevice` field to infer the mounted layout (`0x1000`, `0x26000`, or
   `0x27000`). If that layout conflicts with the app start used by the selected
   Arduino IDE `Bootloader / DFU` option, upload fails before copying firmware.
-  This is intentional: Arduino compiles before upload, so the wrapper cannot
-  safely relocate an already-linked image.
+  This applies to **UF2 deploy** and **serial DFU** (pre-flash guard when the
+  UF2 drive is mounted). This is intentional: Arduino compiles before upload, so
+  the wrapper cannot safely relocate an already-linked image.
+- After **same-PID** serial DFU (typical ProMicro clone), a **misflash guard**
+  waits for the service COM to become openable again. If USB never returns
+  (common when app start was wrong), the wrapper attempts 1200 bps touch /
+  UF2 recovery and fails with an IDE-visible `misflash` message. Disable with
+  `NIUS_DISABLE_MISFLASH_GUARD=1`; pre-flash layout checks with
+  `NIUS_DISABLE_LAYOUT_GUARD=1`.
 - `Upload Method → Enter UF2 drive only (no upload)` performs the touch/bootloader wait, reports the matched drive, and exits before copying firmware.
 - If the selected upload COM is stale after a mode change, the wrapper fails with a clear "re-select the current SERVICE/DFU port" message instead of falling through to another board.
 - The wrapper treats same-PID runtime/bootloader cases as a separate class, rather than assuming a visible `0x239A:0x00B3` COM is already a bootloader port. On these boards it does NOT block the DFU on a PnP-level "transition observed" signal (because runtime and bootloader share `0x00B3`) — it surfaces a `[warn] ... Port never detached after touch` informational line and proceeds with a direct DFU attempt, which now succeeds because the firmware-side touch fix lands the chip in the bootloader before the warn fires.
