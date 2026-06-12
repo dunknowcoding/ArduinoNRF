@@ -70,6 +70,12 @@ NrfCC310::Status NrfCC310::sha256(const uint8_t* in, size_t inLen, uint8_t out[3
   return mapStatus(Crypto.sha256(in, inLen, out));
 }
 
+NrfCC310::Status NrfCC310::sha512(const uint8_t* in, size_t inLen, uint8_t out[64]) {
+  CC310_GUARD();
+  if (in == nullptr || out == nullptr) return CC_BAD_PARAM;
+  return mapStatus(Crypto.sha512(in, inLen, out));
+}
+
 NrfCC310::Status NrfCC310::hmacSha256(const uint8_t* key, size_t keyLen,
                                       const uint8_t* msg, size_t msgLen,
                                       uint8_t out[32]) {

@@ -15,10 +15,10 @@
 //   sketch fails to compile — see vendor/README.md.
 //
 // IMPLEMENTED (via NiusCrypto when binaries are vendored)
-//   TRNG, SHA-256, HMAC-SHA-256, AES-128 CBC/CTR/GCM, ECDSA/ECDH P-256.
+//   TRNG, SHA-256/512, HMAC-SHA-256, AES-128 CBC/CTR/GCM, ECDSA/ECDH P-256.
 //
 // NOT EXPOSED (CryptoCell hardware can do more; future NiusCrypto roadmap)
-//   SHA-1/224/384/512, ChaCha20-Poly1305, AES-CCM, RSA, Curve25519/Ed25519,
+//   SHA-1/224/384, ChaCha20-Poly1305, AES-CCM, RSA, Curve25519/Ed25519,
 //   HKDF, PBKDF2, additional curves.
 //
 // IMPORTANT - CC310 is NOT ARM TrustZone
@@ -63,6 +63,7 @@ public:
     // ---- Hash -----------------------------------------------------------
 
     static Status sha256(const uint8_t *in, size_t inLen, uint8_t out[32]);
+    static Status sha512(const uint8_t *in, size_t inLen, uint8_t out[64]);
     static Status hmacSha256(const uint8_t *key, size_t keyLen,
                              const uint8_t *msg, size_t msgLen,
                              uint8_t out[32]);
