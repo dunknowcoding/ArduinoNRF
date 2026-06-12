@@ -17,6 +17,7 @@ end	KEYWORD2
 isAvailable	KEYWORD2
 randomBytes	KEYWORD2
 sha256	KEYWORD2
+sha512	KEYWORD2
 hmacSha256	KEYWORD2
 aes128CbcEncrypt	KEYWORD2
 aes128CbcDecrypt	KEYWORD2
