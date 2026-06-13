@@ -1,6 +1,6 @@
 # Upload Behavior
 
-Date: 2026-06-09
+Date: 2026-06-11
 
 This document records the current upload truth exposed by the package. It does not claim that every clone board is fully verified.
 
@@ -49,15 +49,37 @@ choices because it has no native USB upload path in this package.
   `SoftDevice` field to infer the mounted layout (`0x1000`, `0x26000`, or
   `0x27000`). If that layout conflicts with the app start used by the selected
   Arduino IDE `Bootloader / DFU` option, upload fails before copying firmware.
-  This applies to **UF2 deploy** and **serial DFU** (pre-flash guard when the
-  UF2 drive is mounted). This is intentional: Arduino compiles before upload, so
-  the wrapper cannot safely relocate an already-linked image.
-- After **same-PID** serial DFU (typical ProMicro clone), a **misflash guard**
-  waits for the service COM to become openable again. If USB never returns
-  (common when app start was wrong), the wrapper attempts 1200 bps touch /
-  UF2 recovery and fails with an IDE-visible `misflash` message. Disable with
-  `NIUS_DISABLE_MISFLASH_GUARD=1`; pre-flash layout checks with
-  `NIUS_DISABLE_LAYOUT_GUARD=1`.
+  This applies to **UF2 deploy**, **serial DFU**, and the **UF2→serial fallback**
+  path. Serial DFU now **requires** a scoped UF2 volume with `INFO_UF2.TXT` on
+  the selected board before transfer; the wrapper polls up to ~12s (and may
+  re-touch 1200 bps once) and fails with `layout` if layout evidence is missing
+  or mismatched. **No firmware is written** when the pre-flash guard fires; the
+  board stays in UF2/DFU. This is intentional: Arduino compiles before upload,
+  so the wrapper cannot safely relocate an already-linked image.
+- **Layout guard** (`layout` failure): compares the IDE `Bootloader / DFU` app
+  start (`0x1000` / `0x26000` / `0x27000`) against `INFO_UF2.TXT` on the
+  selected board's UF2 drive (matched by stable USB identity, not drive letter).
+  Disable with `NIUS_DISABLE_LAYOUT_GUARD=1` (not recommended).
+- **Misflash guard** (`misflash` failure): after **same-PID** serial DFU, waits
+  for the service COM to return in application mode. If USB never comes back
+  (typical when app start was wrong), the wrapper attempts 1200 bps touch / UF2
+  recovery and fails with an IDE-visible message. Disable with
+  `NIUS_DISABLE_MISFLASH_GUARD=1`.
+- **Manual UF2 drag in DFU mode is not guarded.** Copying a `.uf2` from Explorer
+  bypasses `upload.ps1`. You must match **bootloader layout**, not just the
+  version string in `INFO_UF2.TXT` (for example `0.6.0` exists in both S140
+  `@0x26000` and no-SoftDevice `@0x1000` variants). Sketch UF2 must match the
+  mounted layout. Adafruit **update-*** bootloader packages (family
+  `0xd663823c`) rewrite the bootloader and reboot into application mode; they
+  are not sketch images. After a layout switch, also flash a matching app or USB
+  may disappear. See [../bootloaders/README.md](../bootloaders/README.md).
+- **USB silent / COM missing after a bad or partial flash:** the host cannot
+  1200-touch a port that is gone. Recovery is manual: **double-tap RESET** to
+  re-enter UF2 (on boards **without** a reset button, short **RST to GND twice**
+  quickly, like a double-tap), then fix the `Bootloader / DFU` menu and upload
+  again; or recover over **SWD** (`Tools → Programmer → SEGGER J-Link (SWD)` or
+  CMSIS-DAP, then **Burn Bootloader** / sketch upload). See
+  [../bootloaders/README.md](../bootloaders/README.md).
 - `Upload Method → Enter UF2 drive only (no upload)` performs the touch/bootloader wait, reports the matched drive, and exits before copying firmware.
 - If the selected upload COM is stale after a mode change, the wrapper fails with a clear "re-select the current SERVICE/DFU port" message instead of falling through to another board.
 - The wrapper treats same-PID runtime/bootloader cases as a separate class, rather than assuming a visible `0x239A:0x00B3` COM is already a bootloader port. On these boards it does NOT block the DFU on a PnP-level "transition observed" signal (because runtime and bootloader share `0x00B3`) — it surfaces a `[warn] ... Port never detached after touch` informational line and proceeds with a direct DFU attempt, which now succeeds because the firmware-side touch fix lands the chip in the bootloader before the warn fires.
