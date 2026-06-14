@@ -3539,6 +3539,56 @@ try {
     }
     # --------------------------------------------------------------------------
 
+    # --- Host-wide DFU serialization -----------------------------------------
+    # The per-port mutex above only stops a duplicate upload to the SAME port.
+    # Two uploads to DIFFERENT boards on the same host still collide because the
+    # lingering-process sweep (Stop-NiusLingeringAdafruitNrfutil) does a global
+    # `taskkill /IM adafruit-nrfutil.exe` by image name: when board B and board C
+    # upload at once, whichever reaches its DFU deploy second kills the OTHER
+    # board's in-flight adafruit-nrfutil, leaving that board stranded mid-DFU at
+    # 0% (it then needs a manual power-cycle to recover). The 1200 bps touches
+    # also trigger overlapping USB re-enumeration that disturbs a peer transfer.
+    # This host-wide mutex serializes the whole USB-sensitive upload across
+    # boards: a second board's upload WAITS for the first to finish instead of
+    # racing (and cross-killing) it. With only one nrfutil ever live, the global
+    # taskkill can only hit genuinely-stale processes. Disable with
+    # NIUS_DISABLE_UPLOAD_LOCK=1; tune the wait via
+    # NIUS_UPLOAD_HOST_LOCK_WAIT_MS (default 300000 = 5 min, long enough to queue
+    # behind a real other-board upload; on timeout we proceed rather than fail).
+    $script:NiusHostUploadMutex = $null
+    $script:NiusHostUploadMutexHeld = $false
+    if ($env:NIUS_DISABLE_UPLOAD_LOCK -ne '1') {
+        $hostWaitMs = 300000
+        $hw = $env:NIUS_UPLOAD_HOST_LOCK_WAIT_MS
+        if (-not [string]::IsNullOrWhiteSpace($hw)) {
+            $hp = -1
+            if ([int]::TryParse($hw, [ref]$hp) -and $hp -ge 0) { $hostWaitMs = $hp }
+        }
+        try {
+            $script:NiusHostUploadMutex = New-Object System.Threading.Mutex($false, 'Global\NiusUpload_HostDfu')
+        }
+        catch {
+            $script:NiusHostUploadMutex = $null
+        }
+        if ($script:NiusHostUploadMutex) {
+            $waitStart = Get-Date
+            try {
+                $script:NiusHostUploadMutexHeld = $script:NiusHostUploadMutex.WaitOne($hostWaitMs)
+            }
+            catch [System.Threading.AbandonedMutexException] {
+                # Previous owner exited without releasing (crash / kill); we own it.
+                $script:NiusHostUploadMutexHeld = $true
+            }
+            if (-not $script:NiusHostUploadMutexHeld) {
+                Write-NiusDetail '[nius] host upload lock wait timed out; proceeding (another board upload may still be active).' -ForegroundColor DarkYellow
+            }
+            elseif (((Get-Date) - $waitStart).TotalMilliseconds -ge 250) {
+                Write-NiusDetail '[nius] waited for another board''s upload to finish (host-wide DFU serialization).' -ForegroundColor DarkGray
+            }
+        }
+    }
+    # --------------------------------------------------------------------------
+
     # --- Yield request to a running USB-CDC GDB-stub bridge -------------------
     # Upload-during-debug: a debug session's bridge holds the service COM, so our
     # 1200-touch can't reach the board. Drop a request file; the bridge releases
@@ -4308,5 +4358,16 @@ finally {
     }
     if ($mutexVar -and $script:NiusUploadMutex) {
         try { $script:NiusUploadMutex.Dispose() } catch {}
+    }
+    # Release the host-wide DFU serialization mutex so the next board's upload
+    # (which may be blocked in WaitOne) can proceed. As above, the OS releases
+    # it automatically on exit/crash, so a queued upload never wedges forever.
+    $hostHeldVar = Get-Variable -Name NiusHostUploadMutexHeld -Scope Script -ErrorAction SilentlyContinue
+    $hostVar = Get-Variable -Name NiusHostUploadMutex -Scope Script -ErrorAction SilentlyContinue
+    if ($hostHeldVar -and $hostVar -and $script:NiusHostUploadMutexHeld -and $script:NiusHostUploadMutex) {
+        try { $script:NiusHostUploadMutex.ReleaseMutex() } catch {}
+    }
+    if ($hostVar -and $script:NiusHostUploadMutex) {
+        try { $script:NiusHostUploadMutex.Dispose() } catch {}
     }
 }
