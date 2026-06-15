@@ -4,6 +4,7 @@
 #include <NrfBoard.h>
 #include <NrfSystem.h>
 #include <NrfUsbd.h>
+#include <NrfSoftDevice.h>
 #include <SPI.h>
 
 namespace {
@@ -342,4 +343,19 @@ bool NordicHardwareClass::runSelfTest(NordicSelfTestReport &report) const {
     report.rngOk = random32() != 0UL;
 
     return report.lfclkOk && report.hfclkOk && report.deviceIdOk && report.temperatureOk && report.rngOk && report.qspiOk && report.usbOk;
+}
+
+NordicSoftDeviceInfo NordicHardwareClass::softDeviceInfo() const {
+    NordicSoftDeviceInfo info;
+    info.present = NrfSoftDevice::isPresent();
+    info.enabled = (NrfSoftDevice::status() == NrfSoftDevice::Status::Enabled);
+    info.baseAddress = NrfSoftDevice::baseAddress();
+    info.appStartAddress = NrfSoftDevice::appStartAddress();
+    info.firmwareId = NrfSoftDevice::firmwareId();
+    info.versionRaw = NrfSoftDevice::versionRaw();
+    return info;
+}
+
+bool NordicHardwareClass::softDevicePresent() const {
+    return NrfSoftDevice::isPresent();
 }

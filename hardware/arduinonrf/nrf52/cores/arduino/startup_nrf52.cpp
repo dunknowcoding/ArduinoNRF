@@ -19,6 +19,11 @@ void NFCT_IRQHandler(void);
 void GPIOTE_IRQHandler(void);
 void WDT_IRQHandler(void);
 void USBD_IRQHandler(void);
+// Bare-metal SoftDevice/MBR presence detection (NrfSoftDevice.cpp).  Stamps a
+// persistent diag SRAM marker so a J-Link/SWD read confirms the core correctly
+// detected whether a SoftDevice is in flash.  Freestanding-safe: literal
+// addresses only, so it is valid to call before the C/C++ runtime is up.
+void nrfSoftDeviceBootDetect(void);
 }
 
 using IsrVector = void (*)(void);
@@ -236,6 +241,13 @@ extern "C" void Reset_Handler(void) {
     __asm volatile("dsb 0xF" ::: "memory");
     __asm volatile("isb 0xF" ::: "memory");
     sanitizeInterruptState();
+
+    // Record whether an MBR + SoftDevice image is present in flash.  The core
+    // never enables it (all wireless stacks own the radio bare-metal), so this
+    // is purely awareness: a dormant SoftDevice keeps every peripheral free for
+    // the application.  The marker lands in a persistent diag SRAM slot so it
+    // can be read back over SWD on a board with no serial console.
+    nrfSoftDeviceBootDetect();
 
     uint32_t *source = &_sidata;
     uint32_t *destination = &_sdata;
