@@ -77,6 +77,20 @@ The host-side pipeline (`upload.ps1`) is hardened against the messy real world:
 
 See **[docs/uploads/hands_free_upload.md](docs/uploads/hands_free_upload.md)** and **[docs/platform/UPLOAD_BEHAVIOR.md](docs/platform/UPLOAD_BEHAVIOR.md)**.
 
+### Bootloader layout cheat sheet (`INFO_UF2.TXT` → IDE menu)
+
+When the board is in UF2/DFU mode, open **`INFO_UF2.TXT`** on **that board's** drive (do not rely on a fixed drive letter if several clones are plugged in). Use the **`SoftDevice`** line to pick **Tools → Bootloader / DFU** — not the `UF2 Bootloader X.Y.Z` version line alone (the same version string appears on more than one layout).
+
+| `INFO_UF2.TXT` **`SoftDevice`** | Typical **`UF2 Bootloader`** lines seen online *(cross-check only)* | App start | **Tools → Bootloader / DFU** *(ProMicro / nice!nano family)* |
+|---|---|---:|---|
+| `S140 version 6.1.1` or other **S140 6.x** | `0.6.0`, `0.7.0`, `0.8.0`, `0.11.0`, … | `0x26000` | **Auto-detect upload, SoftDevice S140 v6 layout (0x26000)** — or explicit **UF2 mass storage, SoftDevice S140 v6 layout (0x26000)** / **Serial DFU, SoftDevice S140 v6 layout (0x26000)** |
+| **`not found`** | `0.6.0`, `0.7.0`, … *(no-SoftDevice / MBR-only builds)* | `0x1000` | **Auto-detect upload, no SoftDevice / MBR only (0x1000)** — or explicit **UF2 mass storage, no SoftDevice / MBR only (0x1000)** / **Serial DFU, no SoftDevice / MBR only (0x1000)** |
+| **S140 7.x** / legacy S140 strings | varies | `0x27000` | **UF2 mass storage, SoftDevice S140 v7 / legacy layout (0x27000)** — or **Serial DFU, SoftDevice S140 v7 / legacy layout (0x27000)** *(no ProMicro auto-detect default for this layout)* |
+
+> 💡 **Example:** `SoftDevice: not found` + `UF2 Bootloader 0.6.0` → choose a **`(0x1000)`** entry, not `(0x26000)`.  
+> 💡 **Manual UF2 drag-and-drop** bypasses layout guards — use this table before copying.  
+> 📀 Full notes (Burn Bootloader images, update packages, recovery): **[docs/bootloaders/README.md](docs/bootloaders/README.md)**.
+
 ## 🐞 Single-cable debugging
 
 A small GDB stub compiled into the firmware uses the Cortex-M **DebugMonitor** exception plus the **FPB** (hardware breakpoints) and **DWT** (watchpoints). A host bridge proxies Arduino IDE 2's `cortex-debug` over the maintenance USB-CDC port, so you get a full debug experience **without any external probe**:
@@ -195,6 +209,7 @@ Everything beyond this README lives under **[docs/](docs/)** — start at **[doc
 
 - 🧪 **[docs/VALIDATION.md](docs/VALIDATION.md)** — what's been tested on real hardware, and how to reproduce it
 - 🔼 **[docs/uploads/hands_free_upload.md](docs/uploads/hands_free_upload.md)** — hands-free upload, plus the double-reset and SWD-probe fallbacks
+- 📀 **[docs/bootloaders/README.md](docs/bootloaders/README.md)** — `INFO_UF2.TXT` version/layout reference and manual UF2 recovery
 - 🐞 **[docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md](docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md)** — single-cable debug setup
 - 🧩 **[docs/boards/](docs/boards/)** — per-board reference
 - 📦 **[GitHub Releases](https://github.com/dunknowcoding/ArduinoNRF/releases)** — release notes

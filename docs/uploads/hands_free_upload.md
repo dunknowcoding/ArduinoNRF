@@ -35,6 +35,14 @@ A hardened PowerShell pipeline drives the touch and DFU. Beyond the basics it pr
 - Stable-ID UF2 matching so two boards with the same volume label (for example two `NICENANO` drives) do not conflict.
 - **Upload Method → Enter UF2 drive only (no upload)**, which leaves the selected board mounted as a UF2 drive and stops before copying firmware.
 - A pre-touch PnP-snapshot cache (~3 s saved on the wall-clock).
+- A **layout guard** on Windows: before UF2 or serial-DFU transfer, the wrapper
+  reads `INFO_UF2.TXT` on the selected board's UF2 drive and rejects uploads when
+  the compiled app start does not match the mounted bootloader layout.
+- A **misflash guard** after same-PID serial DFU when USB serial never returns.
+
+Manual UF2 drag-and-drop is **not** guarded; see
+**[docs/platform/UPLOAD_BEHAVIOR.md](../platform/UPLOAD_BEHAVIOR.md)** and
+**[docs/bootloaders/README.md](../bootloaders/README.md)**.
 
 Driven by `tools.niusdfu.upload.pattern.windows` in `platform.txt`.
 

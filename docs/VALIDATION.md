@@ -18,7 +18,7 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | UF2 upload from DFU mode | **PASS** | `bootloader=auto` and explicit `bootloader=promicro` both match the selected board's UF2 drive and complete `Upload complete`. |
 | Explicit serial DFU from DFU mode | **PASS** | `bootloader=promicroserial` enters `Starting Adafruit serial DFU transfer` and completes even while another UF2 drive is mounted. |
 | UF2 drive-only helper | **PASS** | `uploadmode=uf2boot` leaves the selected board mounted as UF2 and exits with `Upload skipped`. |
-| UF2 layout guard | **PASS** | A mounted `NICENANO` drive reporting `SoftDevice: not found` was rejected when the sketch was compiled for `0x26000`; recompiling/selecting the no-SoftDevice `0x1000` layout allowed the UF2 path to proceed. |
+| UF2 layout guard | **PASS** | A mounted `NICENANO` drive reporting `SoftDevice: not found` was rejected when the sketch was compiled for `0x26000` on both UF2 and explicit serial-DFU IDE Upload; recompiling/selecting the no-SoftDevice `0x1000` layout allowed upload to proceed. |
 | Multi-board UF2 disambiguation | **PASS** | Two `NICENANO` volumes were mounted simultaneously; board1 matched `J:\` by stable ID and board2 matched `K:\`. Stale COM selection is rejected. |
 | SEGGER J-Link SWD upload | **PASS** | `Upload Method -> SWD programmer (SEGGER J-Link)` uses SEGGER `JLink.exe`; board1 flashed a smoke sketch over SWD in ~1.3-2.3 s. |
 | Upload Using Programmer, J-Link | **PASS** | `Tools -> Programmer -> SEGGER J-Link (SWD)` plus `Upload Using Programmer` flashed the same smoke sketch through the SEGGER path. |
@@ -31,13 +31,16 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 
 ## ⚠️ Known limitations
 
-- **Raw `adafruit-nrfutil dfu serial`** is less robust than `arduino-cli upload` on this clone because it lacks the package's port identity checks, retries, and stale-COM guard.
+- **Raw `adafruit-nrfutil dfu serial`** is less robust than `arduino-cli upload` on this clone because it lacks the package's port identity checks, retries, stale-COM guard, and **layout guard**.
+- **Manual UF2 drag-and-drop** bypasses `upload.ps1`. Match bootloader **layout** (`INFO_UF2.TXT` `SoftDevice` field), not just the version string, before copying sketch or update packages.
 - A no-SoftDevice nice!nano-compatible bootloader reports `SoftDevice: not found`
   in `INFO_UF2.TXT`; use a no-SoftDevice menu (`bootloader=autonosd`,
   `bootloader=promicronosduf2`, or `bootloader=promicroserialnosd`, app start
   `0x1000`) for sketches on that bootloader. Uploading a SoftDevice layout can
-  appear to succeed while the application does not run; the Windows UF2 path now
-  fails fast when the mounted UF2 layout conflicts with the compiled app start.
+  appear to succeed while the application does not run; Windows IDE Upload now
+  fails fast when the mounted UF2 layout conflicts with the compiled app start
+  (UF2 and serial DFU). If USB/COM disappears after a **manual** mismatched copy,
+  double-tap RESET (or RST–GND twice on buttonless boards) or recover over SWD.
 
 ## ⏱️ Upload timing (measured)
 

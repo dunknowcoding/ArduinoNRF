@@ -89,9 +89,19 @@ at `0x26000` may upload successfully but will not run.
 
 `upload.ps1` reads the UF2 `SoftDevice` field when a UF2 volume is visible and
 fails fast if the mounted bootloader layout conflicts with the Arduino IDE
-option used for compilation. Because Arduino compiles before upload, the wrapper
-cannot repair a mismatched app start after the fact; choose the matching
-`Bootloader / DFU` entry and compile again.
+option used for compilation. On Windows this applies to **UF2 upload**, **serial
+DFU**, and the **UF2→serial fallback**; serial DFU polls for the selected
+board's UF2 drive and refuses transfer when layout evidence is missing or
+mismatched. Because Arduino compiles before upload, the wrapper cannot repair a
+mismatched app start after the fact; choose the matching `Bootloader / DFU`
+entry and compile again.
+
+**Manual UF2 copy** (Explorer drag-and-drop in DFU mode) does **not** run these
+guards. Read `INFO_UF2.TXT` and match layout before copying. The same bootloader
+version line (for example `0.6.0`) can denote different app starts. If USB/COM
+disappears after a bad manual flash, double-tap RESET (RST–GND twice if there is
+no button) or recover over SWD. See [platform/UPLOAD_BEHAVIOR.md](platform/UPLOAD_BEHAVIOR.md)
+and [bootloaders/README.md](bootloaders/README.md).
 
 Do not add an independent `Flash Partition` menu unless there is a strong need
 for expert-only combinations. In this core the layout is intentionally coupled
