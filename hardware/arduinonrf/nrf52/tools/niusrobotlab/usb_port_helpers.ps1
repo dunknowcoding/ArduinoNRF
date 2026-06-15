@@ -1,14 +1,30 @@
 $script:NiusSerialInventoryCache = $null
 function Get-SerialPortInventory {
-    # Win32_SerialPort is a ~1-3 s WMI query. The pre-touch port-resolution
-    # helpers call this several times in a row on a stable (not-yet-touched)
-    # port set, so cache the result and reuse it. All hot detach/settle loops
-    # use the instant [SerialPort]::GetPortNames() instead, never this, so the
-    # cache can't go stale under them. Clear-SerialPortInventoryCache is called
-    # right before the 1200 bps touch so any later call re-queries fresh.
+    # NOTE: do NOT use `Get-CimInstance Win32_SerialPort` here. That class is
+    # served by the Windows Serial WMI provider, which probes every COM device;
+    # on hosts with Bluetooth / modem / virtual COM ports it BLOCKS for 60-90 s
+    # PER CALL (measured 90 s on this bench), and it is hit several times per
+    # upload -> minutes of dead time. Every caller in this module reads only two
+    # fields per port:
+    #     .DeviceID    -> the COM name           (e.g. "COM3")
+    #     .PNPDeviceID -> the USB instance id     (e.g. "USB\VID_239A&PID_00B4\..")
+    # Both come instantly from Win32_PnPEntity (Get-PnpDeviceInventory: armed-CIM
+    # ~1.4 s, or -PresentOnly ~2.5 s post-touch). Derive them from there and
+    # never touch the Serial provider. Same cached/-Fresh shape callers expect;
+    # Clear-SerialPortInventoryCache before the touch forces a fresh re-derive.
     param([switch]$Fresh)
     if ($Fresh -or $null -eq $script:NiusSerialInventoryCache) {
-        $script:NiusSerialInventoryCache = @(Get-CimInstance Win32_SerialPort -ErrorAction SilentlyContinue)
+        $rows = New-Object System.Collections.Generic.List[object]
+        foreach ($d in @(Get-PnpDeviceInventory)) {
+            $com = Extract-ComPortFromPnpFriendlyName -FriendlyName ([string]$d.FriendlyName)
+            if ([string]::IsNullOrWhiteSpace($com)) { continue }
+            $rows.Add([pscustomobject]@{
+                    DeviceID    = $com
+                    PNPDeviceID = [string]$d.InstanceId
+                    Name        = [string]$d.FriendlyName
+                })
+        }
+        $script:NiusSerialInventoryCache = $rows.ToArray()
     }
     return $script:NiusSerialInventoryCache
 }
@@ -141,16 +157,30 @@ function Get-UsbInterfaceParentDeviceInstanceId {
         return $null
     }
 
+    # Get-PnpDeviceProperty is ~2.3 s PER call on a host with many USB devices,
+    # and this parent lookup is hit once per interface on every enumeration pass
+    # (multiple boards x several poll loops = tens of calls = the bulk of a slow
+    # upload). The InstanceId -> parent mapping is immutable for a given device
+    # instance, so memoize it: the first lookup pays the cost, the rest are free.
+    $key = $PnpInstanceId.Trim().ToUpperInvariant()
+    # StrictMode-safe: reading an unset $script: var throws, so probe with Test-Path first.
+    if (-not (Test-Path 'variable:script:NiusUsbParentCache')) { $script:NiusUsbParentCache = @{} }
+    if ($script:NiusUsbParentCache.ContainsKey($key)) {
+        return $script:NiusUsbParentCache[$key]
+    }
+
+    $result = $null
     try {
         $parent = Get-PnpDeviceProperty -InstanceId $PnpInstanceId -KeyName 'DEVPKEY_Device_Parent' -ErrorAction Stop | Select-Object -First 1
         if ($parent -and $parent.PSObject.Properties['Data']) {
-            return [string]$parent.Data
+            $result = [string]$parent.Data
         }
     }
     catch {
     }
 
-    return $null
+    $script:NiusUsbParentCache[$key] = $result
+    return $result
 }
 
 function Get-UsbDeviceCompositeStableId {

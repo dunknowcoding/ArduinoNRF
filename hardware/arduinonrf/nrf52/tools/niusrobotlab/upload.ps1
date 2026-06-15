@@ -1377,6 +1377,19 @@ function Get-Uf2MassStorageProblemReports {
     $preferredPrefix = ([string]$InterfaceParentPrefix).Trim().ToUpperInvariant()
     $reports = New-Object 'System.Collections.Generic.List[string]'
 
+    # Problem code + bound driver for every device in ONE CIM query (~1 s) instead
+    # of four Get-PnpDeviceProperty calls per matching device (~2.3 s each on a
+    # busy host). ConfigManagerErrorCode is the problem code (0 = OK).
+    $cimByInstance = @{}
+    try {
+        foreach ($e in @(Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction Stop)) {
+            $did = ([string]$e.DeviceID).Trim().ToUpperInvariant()
+            if ($did -and -not $cimByInstance.ContainsKey($did)) { $cimByInstance[$did] = $e }
+        }
+    }
+    catch {
+    }
+
     foreach ($device in @(Get-PnpDeviceInventory)) {
         $instanceId = ([string]$device.InstanceId).Trim()
         $upperInstanceId = $instanceId.ToUpperInvariant()
@@ -1394,14 +1407,11 @@ function Get-Uf2MassStorageProblemReports {
             continue
         }
 
-        $problemCode = $null
-        $problemStatus = $null
-        $service = ''
-        $driverInf = ''
-        try { $problemCode = (Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_ProblemCode' -ErrorAction Stop | Select-Object -First 1).Data } catch {}
-        try { $problemStatus = (Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_ProblemStatus' -ErrorAction Stop | Select-Object -First 1).Data } catch {}
-        try { $service = [string](Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_Service' -ErrorAction Stop | Select-Object -First 1).Data } catch {}
-        try { $driverInf = [string](Get-PnpDeviceProperty -InstanceId $instanceId -KeyName 'DEVPKEY_Device_DriverInfPath' -ErrorAction Stop | Select-Object -First 1).Data } catch {}
+        $cimEntity = $cimByInstance[$upperInstanceId]
+        $problemCode = if ($cimEntity) { $cimEntity.ConfigManagerErrorCode } else { $null }
+        $service = if ($cimEntity) { [string]$cimEntity.Service } else { '' }
+        $problemStatus = 'n/a'   # diagnostic-only; not needed for the decision
+        $driverInf = 'n/a'       # (kept fast - no per-property PnP query)
 
         $hasProblem = $false
         if ($null -ne $problemCode) {
