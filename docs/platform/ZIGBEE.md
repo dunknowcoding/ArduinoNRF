@@ -146,6 +146,34 @@ the bootloader vectors at `0x00000000` were unchanged after flashing, the Zephyr
 application vector table was present at `0x00001000`, and Windows enumerated
 the device as Zephyr USB CDC `VID_2FE3&PID_0001`, `COM27`.
 
+### NCP host validation path
+
+Nordic's official host side for this firmware is the ZBOSS NCP Host package.
+For `ncs-zigbee v1.3.0`, the matching package is `ncp_host_v3.6.0.zip` from the
+same GitHub release. ArduinoNRF provides a small helper to download, extract,
+and check this package under `.ncs-zigbee-work/`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -Download -Extract
+```
+
+The included `application/simple_gw/simple_gw` executable is a 64-bit Linux ELF.
+It is not a native Windows executable. The expected Windows development path is
+to run it through Ubuntu/WSL or on a Linux host, with the board's Windows COM
+port mapped to the equivalent Linux serial device, for example `COM27` ->
+`/dev/ttyS27`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -RunSimpleGw
+```
+
+If the wrapper reports `Ubuntu: not available`, install or enable an Ubuntu WSL
+distribution before attempting host protocol validation.
+
 ## Existing working path: external CC2530
 
 Use this when you want an Arduino sketch to keep running on the nRF52840 while

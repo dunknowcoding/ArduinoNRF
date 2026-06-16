@@ -28,6 +28,8 @@ That directory is ignored by Git. Delete it whenever you want a clean workspace.
 - `flash_zigbee.ps1`: flashes an already-built sidecar `.hex` through J-Link.
   It refuses bootloader/recover style actions and rejects HEX files that write
   outside the selected bootloader layout's protected application window.
+- `ncp_host.ps1`: prepares Nordic's official ZBOSS NCP Host package and checks
+  the Windows-to-WSL path for running the Linux `simple_gw` host application.
 - `pins.json`: records the intended official stack versions and local policy.
 
 The current build target is a reference build against Nordic's supported Zephyr
@@ -77,3 +79,25 @@ board1 was flashed successfully with this image over J-Link. Post-flash
 readback confirmed the bootloader vectors at `0x00000000` were unchanged, and
 Windows enumerated the running Zephyr NCP USB firmware as `VID_2FE3&PID_0001`
 on `COM27`.
+
+## Official NCP Host package
+
+The Nordic NCP Host side is distributed as a Linux package. Prepare it under the
+ignored workspace with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -Download -Extract
+```
+
+The package is downloaded from the `ncs-zigbee v1.3.0` release as
+`ncp_host_v3.6.0.zip`. The included `simple_gw` binary is a 64-bit Linux ELF and
+requires Ubuntu/WSL or a Linux host. Once Ubuntu is available, the wrapper maps
+`COM27` to `/dev/ttyS27` by default and can start the official gateway:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -RunSimpleGw
+```
