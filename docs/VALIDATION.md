@@ -27,7 +27,8 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | CC2530 runtime UART PING | **PASS** | `CC2530Radio.begin(11)` reports firmware `v0.1` and repeated `ping -> PONG` after the NiusZigbee UART resync fix. |
 | CC2530 two-node raw 802.15.4 link | **PASS** | `CC2530_Link` on board1 and board2 produced `TX "hello N" ok` and reciprocal `RX (... dBm): hello N` frames on channel 11. |
 | board1 J-Link read-only identify | **PASS** | SEGGER J-Link connected to board1 at 3.3 V, detected Cortex-M4 / nRF52840 (`FICR 0x10000100 = 0x00052840`). No erase, recover, bootloader flash, or application write was run. |
-| Official Zigbee no-SoftDevice NCP USB build | **PASS, NOT FLASHED** | `-ImageLayout no-softdevice` produced `.ncs-zigbee-work/b/an/pm40/ncp-nosd/zephyr/zephyr.hex`; HEX range `0x1000..0x7190F`; partitions preserve `0x0000..0x0FFF` and `0xE9000..0xFFFFF`. |
+| Official Zigbee no-SoftDevice NCP USB build | **PASS** | `-ImageLayout no-softdevice` produced `.ncs-zigbee-work/b/an/pm40/ncp-nosd/zephyr/zephyr.hex`; HEX range `0x1000..0x7190F`; partitions preserve `0x0000..0x0FFF` and `0xE9000..0xFFFFF`. |
+| Official Zigbee no-SoftDevice NCP USB flash (board1) | **PASS** | Flashed board1 with J-Link using `flash_zigbee.ps1`; no `recover`, `eraseall`, or bootloader flashing. Readback confirmed `0x00000000` bootloader vectors unchanged and app vectors present at `0x00001000`. Windows enumerated Zephyr USB CDC as `VID_2FE3&PID_0001`, `COM27`. |
 | NiusCrypto CC310 self-test (board1) | **PASS** | `examples/CryptoSelfTest` with vendored CRYS+Oberon: 10/10 KAT vectors, `backend: CC310`, UF2 flash. See [ArduinoNRF-Crypto docs/VALIDATION.md](https://github.com/dunknowcoding/ArduinoNRF-Crypto/blob/main/docs/VALIDATION.md). |
 | CC310 shim smoke (board1) | **PASS** | `CC310Smoke`: TRNG, SHA-256, HMAC, AES-CTR, ECDSA via shim → NiusCrypto; `RESULT: OK`. |
 
@@ -153,8 +154,43 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 ```
 
 Result: **PASS**. The generated `zephyr.hex` range is `0x1000..0x7190F`, inside
-the protected `0x1000..0xE8FFF` application window. Hardware flash status:
-**NOT RUN**.
+the protected `0x1000..0xE8FFF` application window.
+
+### Official Zigbee no-SoftDevice board1 flash
+
+Validated on physical **board1** with SEGGER J-Link:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\flash_zigbee.ps1 `
+  -Board promicro_nrf52840 -BootloaderLayout no-softdevice `
+  -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex
+```
+
+Result: **PASS**. J-Link reported Program & Verify OK. The script did not run
+`recover`, `eraseall`, or any bootloader flashing command.
+
+Post-flash readback:
+
+```text
+0x00000000: 20000400 00000A81 00000715 00000A61
+0x00001000: 20015E80 000092FD 0005ED71 000092E9 ...
+```
+
+The `0x00000000` bootloader vectors match the pre-flash read-only identify step,
+and the Zephyr application vector table is present at `0x00001000`.
+
+Windows USB enumeration:
+
+```text
+USB\VID_2FE3&PID_0001\EDBBE67D3759AAEA
+USB\VID_2FE3&PID_0001&MI_00\...\0000
+USB Serial Device (COM27)
+```
+
+This confirms the official Zigbee NCP USB firmware is running far enough to
+enumerate as a Zephyr USB CDC device on board1. Higher-level NCP host protocol
+validation remains the next step.
 
 ### First flash (manual bootloader entry, once)
 

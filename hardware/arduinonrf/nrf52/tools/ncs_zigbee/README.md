@@ -72,3 +72,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -Board promicro_nrf52840 -BootloaderLayout no-softdevice `
   -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex -DryRun
 ```
+
+board1 was flashed successfully with this image over J-Link. Post-flash
+readback confirmed the bootloader vectors at `0x00000000` were unchanged, and
+Windows enumerated the running Zephyr NCP USB firmware as `VID_2FE3&PID_0001`
+on `COM27`.

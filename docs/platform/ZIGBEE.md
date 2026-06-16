@@ -141,6 +141,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex -DryRun
 ```
 
+board1 hardware validation has also passed with the same HEX and J-Link path:
+the bootloader vectors at `0x00000000` were unchanged after flashing, the Zephyr
+application vector table was present at `0x00001000`, and Windows enumerated
+the device as Zephyr USB CDC `VID_2FE3&PID_0001`, `COM27`.
+
 ## Existing working path: external CC2530
 
 Use this when you want an Arduino sketch to keep running on the nRF52840 while
