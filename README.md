@@ -7,7 +7,7 @@
 [![platform](https://img.shields.io/badge/platform-Arduino-00979D)](https://www.arduino.cc/)
 [![mcu](https://img.shields.io/badge/MCU-nRF52840%20%2F%20nRF52833-0a7bbb)](https://www.nordicsemi.com/)
 [![boards](https://img.shields.io/badge/boards-10-success)](#-supported-boards)
-[![version](https://img.shields.io/badge/version-0.3.5-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.3.5)
+[![version](https://img.shields.io/badge/version-0.3.6-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.3.6)
 [![upload](https://img.shields.io/badge/upload-no%20button%2C%20one%20cable-brightgreen)](#-hands-free-uploads)
 [![debug](https://img.shields.io/badge/debug-USB%20CDC%20GDB%20stub-orange)](#-single-cable-debugging)
 [![ble](https://img.shields.io/badge/BLE-NimBLE%20GATT%20verified-blueviolet)](#-bluetooth-low-energy-nimble)
