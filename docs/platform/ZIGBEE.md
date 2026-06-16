@@ -172,7 +172,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 ```
 
 If the wrapper reports `Ubuntu: not available`, install or enable an Ubuntu WSL
-distribution before attempting host protocol validation.
+distribution before attempting host protocol validation. On Windows, first run
+the status command without `-RunSimpleGw`; if it reports
+`Windows optional component: missing or pending reboot`, enable WSL from an
+elevated PowerShell and reboot:
+
+```powershell
+wsl --install --no-distribution
+```
+
+Then install Ubuntu 22.04 for this workflow, preferably under `G:\` on lab
+machines:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -InstallUbuntu -WslDistro Ubuntu `
+  -UbuntuLocation G:\WSL\ArduinoNRF-Ubuntu
+```
 
 ## Existing working path: external CC2530
 

@@ -93,8 +93,35 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 
 The package is downloaded from the `ncs-zigbee v1.3.0` release as
 `ncp_host_v3.6.0.zip`. The included `simple_gw` binary is a 64-bit Linux ELF and
-requires Ubuntu/WSL or a Linux host. Once Ubuntu is available, the wrapper maps
-`COM27` to `/dev/ttyS27` by default and can start the official gateway:
+requires Ubuntu/WSL or a Linux host.
+
+On Windows, first check the host status:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27
+```
+
+If it reports `Windows optional component: missing or pending reboot`, run this
+once from an elevated PowerShell and reboot Windows:
+
+```powershell
+wsl --install --no-distribution
+```
+
+After reboot, install Ubuntu 22.04 for this workflow. The default command keeps
+the distribution under `G:\WSL\ArduinoNRF-Ubuntu` when WSL supports `--location`:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -InstallUbuntu -WslDistro Ubuntu `
+  -UbuntuLocation G:\WSL\ArduinoNRF-Ubuntu
+```
+
+Once Ubuntu is available, the wrapper maps `COM27` to `/dev/ttyS27` by default
+and can start the official gateway:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `

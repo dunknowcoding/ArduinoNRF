@@ -10,8 +10,14 @@ param(
 
     [string]$WslDistro = 'Ubuntu',
 
+    [string]$UbuntuDistribution = 'Ubuntu-22.04',
+
+    [string]$UbuntuLocation = 'G:\WSL\ArduinoNRF-Ubuntu',
+
     [AllowEmptyString()]
     [string]$WslTty = '',
+
+    [switch]$InstallUbuntu,
 
     [switch]$Download,
 
@@ -57,12 +63,80 @@ function Convert-ComToWslTty {
     return $ComPort
 }
 
+function Convert-WslText {
+    param([object[]]$Lines)
+    $text = ($Lines -join [Environment]::NewLine)
+    return ($text -replace "`0", '').Trim()
+}
+
+function Get-WslStatus {
+    $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $wsl) {
+        return [PSCustomObject]@{
+            Available = $false
+            OptionalComponentMissing = $false
+            ExitCode = 127
+            Message = 'wsl.exe was not found.'
+        }
+    }
+
+    $output = & $wsl.Source --status 2>&1
+    $exitCode = $LASTEXITCODE
+    $message = Convert-WslText -Lines $output
+    return [PSCustomObject]@{
+        Available = ($exitCode -eq 0)
+        OptionalComponentMissing = ($message -match 'OPTIONAL_COMPONENT_REQUIRED')
+        ExitCode = $exitCode
+        Message = $message
+    }
+}
+
 function Test-WslDistro {
     param([string]$Distro)
     $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $wsl) { return $false }
     & $wsl.Source -d $Distro -e sh -lc 'uname -s' *> $null
     return ($LASTEXITCODE -eq 0)
+}
+
+function Install-UbuntuWsl {
+    param([string]$Distro, [string]$Distribution, [string]$Location)
+    $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $wsl) {
+        throw 'wsl.exe was not found. Install Windows Subsystem for Linux first.'
+    }
+
+    $status = Get-WslStatus
+    if ($status.OptionalComponentMissing) {
+        Write-Host '[wsl] Windows optional component is missing; running: wsl --install --no-distribution'
+        & $wsl.Source --install --no-distribution
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        $status = Get-WslStatus
+        if ($status.OptionalComponentMissing) {
+            throw @"
+WSL is installed, but the Windows optional component is still not active.
+Open an elevated PowerShell and run:
+
+  wsl --install --no-distribution
+
+Then reboot Windows and rerun this command:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 -InstallUbuntu -WslDistro $Distro -UbuntuLocation "$Location"
+"@
+        }
+    }
+
+    if (Test-WslDistro -Distro $Distro) {
+        Write-Host ('[wsl]     {0}: already available' -f $Distro)
+        return
+    }
+
+    $parent = Split-Path -Parent ([System.IO.Path]::GetFullPath($Location))
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    Write-Host ('[wsl] installing {0} as {1} at {2}' -f $Distribution, $Distro, $Location)
+    & $wsl.Source --install $Distribution --name $Distro --location $Location --no-launch --web-download
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 function Invoke-Download {
@@ -103,7 +177,13 @@ Write-Host ("  source    : {0}" -f $sourcePath)
 Write-Host ("  port      : {0}" -f $Port)
 Write-Host ("  wsl tty   : {0}" -f $tty)
 Write-Host ("  distro    : {0}" -f $WslDistro)
+Write-Host ("  ubuntu    : {0}" -f $UbuntuDistribution)
+Write-Host ("  location  : {0}" -f $UbuntuLocation)
 Write-Host ''
+
+if ($InstallUbuntu) {
+    Install-UbuntuWsl -Distro $WslDistro -Distribution $UbuntuDistribution -Location $UbuntuLocation
+}
 
 if ($Download -or $Extract -or $RunSimpleGw) {
     if ((-not (Test-Path -LiteralPath $zipPath -PathType Leaf)) -or $Force) {
@@ -133,13 +213,23 @@ if ($Extract -or $RunSimpleGw) {
     }
 }
 
-$wslOk = Test-WslDistro -Distro $WslDistro
+$wslStatus = Get-WslStatus
+$wslOk = if ($wslStatus.Available) { Test-WslDistro -Distro $WslDistro } else { $false }
+if ($wslStatus.OptionalComponentMissing) {
+    Write-Host '[wsl]     Windows optional component: missing or pending reboot'
+    Write-Host '[wsl]     Run elevated: wsl --install --no-distribution, then reboot.'
+} elseif (-not $wslStatus.Available) {
+    Write-Host ('[wsl]     status: unavailable (exit {0})' -f $wslStatus.ExitCode)
+    if (-not [string]::IsNullOrWhiteSpace($wslStatus.Message)) {
+        Write-Host ('[wsl]     {0}' -f $wslStatus.Message)
+    }
+}
 Write-Host ('[wsl]     {0}: {1}' -f $WslDistro, $(if ($wslOk) { 'available' } else { 'not available' }))
 Write-Host ('[simple]  {0}: {1}' -f $simpleGwPath, $(if (Test-Path -LiteralPath $simpleGwPath -PathType Leaf) { 'present' } else { 'missing' }))
 
 if ($RunSimpleGw) {
     if (-not $wslOk) {
-        throw ('WSL distro {0} is not available. Install Ubuntu first, then rerun this command.' -f $WslDistro)
+        throw ('WSL distro {0} is not available. Install/enable Ubuntu first, then rerun this command. Use -InstallUbuntu to install it to the configured location when WSL is enabled.' -f $WslDistro)
     }
     if (-not (Test-Path -LiteralPath $simpleGwPath -PathType Leaf)) {
         throw ('simple_gw was not found. Rerun with -Download -Extract first: {0}' -f $simpleGwPath)
@@ -155,5 +245,5 @@ if ($RunSimpleGw) {
 }
 
 Write-Host ''
-Write-Host 'Status only. Use -Download -Extract to prepare the official host package, and -RunSimpleGw after Ubuntu/WSL is available.'
+Write-Host 'Status only. Use -Download -Extract to prepare the official host package, -InstallUbuntu to prepare Ubuntu/WSL, and -RunSimpleGw after Ubuntu/WSL is available.'
 exit 0
