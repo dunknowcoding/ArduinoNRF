@@ -26,6 +26,8 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | CC2530 flash via built-in CCDebugger | **PASS** | Two CC2530 modules wired to board1/board2 were detected as `0xA5xx`; the SDCC transceiver firmware was erased, programmed, and read-back verified. |
 | CC2530 runtime UART PING | **PASS** | `CC2530Radio.begin(11)` reports firmware `v0.1` and repeated `ping -> PONG` after the NiusZigbee UART resync fix. |
 | CC2530 two-node raw 802.15.4 link | **PASS** | `CC2530_Link` on board1 and board2 produced `TX "hello N" ok` and reciprocal `RX (... dBm): hello N` frames on channel 11. |
+| board1 J-Link read-only identify | **PASS** | SEGGER J-Link connected to board1 at 3.3 V, detected Cortex-M4 / nRF52840 (`FICR 0x10000100 = 0x00052840`). No erase, recover, bootloader flash, or application write was run. |
+| Official Zigbee no-SoftDevice NCP USB build | **PASS, NOT FLASHED** | `-ImageLayout no-softdevice` produced `.ncs-zigbee-work/b/an/pm40/ncp-nosd/zephyr/zephyr.hex`; HEX range `0x1000..0x7190F`; partitions preserve `0x0000..0x0FFF` and `0xE9000..0xFFFFF`. |
 | NiusCrypto CC310 self-test (board1) | **PASS** | `examples/CryptoSelfTest` with vendored CRYS+Oberon: 10/10 KAT vectors, `backend: CC310`, UF2 flash. See [ArduinoNRF-Crypto docs/VALIDATION.md](https://github.com/dunknowcoding/ArduinoNRF-Crypto/blob/main/docs/VALIDATION.md). |
 | CC310 shim smoke (board1) | **PASS** | `CC310Smoke`: TRNG, SHA-256, HMAC, AES-CTR, ECDSA via shim → NiusCrypto; `RESULT: OK`. |
 
@@ -107,6 +109,52 @@ Key artifacts:
 Flash status: **NOT RUN** on board1. The reference `merged.hex` starts at
 `0x0` and would overwrite an Arduino bootloader. `flash_zigbee.ps1` now rejects
 such files by default for `no-softdevice` and `softdevice-s140-v6` layouts.
+
+### Official Zigbee no-SoftDevice NCP USB build
+
+Validated for board1's no-SoftDevice ProMicro/nice!nano-style bootloader:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
+  -Board promicro_nrf52840 -Target ncp_usb -ImageLayout no-softdevice `
+  -Pristine always
+```
+
+Result: **PASS** for build-only bootloader-preserving firmware. The wrapper uses
+`--no-sysbuild`, disables MCUboot, sets `CONFIG_FLASH_LOAD_OFFSET=0x1000`, and
+passes a static Partition Manager layout for the ArduinoNRF no-SoftDevice app
+window.
+
+Protected layout:
+
+```text
+0x0000..0x0FFF  low bootloader / MBR guard
+0x1000..0xDFFFF application
+0xE0000..0xE7FFF ZBOSS NVRAM
+0xE8000..0xE8FFF ZBOSS product config
+0xE9000..0xFFFFF top UF2 bootloader guard
+```
+
+Key artifacts:
+
+```text
+.ncs-zigbee-work/b/an/pm40/ncp-nosd/zephyr/zephyr.hex
+.ncs-zigbee-work/b/an/pm40/ncp-nosd/zephyr/zephyr.bin
+```
+
+Dry-run address guard:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\flash_zigbee.ps1 `
+  -Board promicro_nrf52840 -BootloaderLayout no-softdevice `
+  -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex -DryRun
+```
+
+Result: **PASS**. The generated `zephyr.hex` range is `0x1000..0x7190F`, inside
+the protected `0x1000..0xE8FFF` application window. Hardware flash status:
+**NOT RUN**.
 
 ### First flash (manual bootloader entry, once)
 

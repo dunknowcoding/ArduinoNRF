@@ -57,12 +57,30 @@ function Resolve-JLinkExe {
     throw 'SEGGER JLink.exe was not found. Install SEGGER J-Link Software or set NIUS_JLINK_PATH.'
 }
 
-function Get-AppStart {
+function Get-BootloaderLayoutInfo {
     param([string]$Layout)
     switch ($Layout) {
-        'no-softdevice' { return 0x1000 }
-        'softdevice-s140-v6' { return 0x26000 }
-        'full-image-lab-only' { return 0x0 }
+        'no-softdevice' {
+            return [pscustomobject]@{
+                AppStart = [uint32]0x1000
+                AppEnd = [uint32]0xE9000
+                Description = 'MBR/no-SoftDevice app plus preserved top UF2 bootloader'
+            }
+        }
+        'softdevice-s140-v6' {
+            return [pscustomobject]@{
+                AppStart = [uint32]0x26000
+                AppEnd = [uint32]0xE9000
+                Description = 'S140 v6 app plus preserved top UF2 bootloader'
+            }
+        }
+        'full-image-lab-only' {
+            return [pscustomobject]@{
+                AppStart = [uint32]0x0
+                AppEnd = [uint32]0x100000
+                Description = 'full 1 MB lab image; may overwrite bootloaders'
+            }
+        }
     }
 }
 
@@ -111,10 +129,14 @@ if (-not (Test-Path -LiteralPath $Hex -PathType Leaf)) {
 
 $hexPath = [System.IO.Path]::GetFullPath($Hex)
 $range = Get-IntelHexAddressRange -Path $hexPath
-$appStart = Get-AppStart -Layout $BootloaderLayout
+$layout = Get-BootloaderLayoutInfo -Layout $BootloaderLayout
 
-if (($range.Min -lt $appStart) -and -not $AllowBootloaderOverwrite) {
-    throw ('Refusing to flash: HEX starts at 0x{0:X}, below protected app_start 0x{1:X}. Use a bootloader-preserving image or pass -AllowBootloaderOverwrite only in a disposable lab setup.' -f $range.Min, $appStart)
+if (($range.Min -lt $layout.AppStart) -and -not $AllowBootloaderOverwrite) {
+    throw ('Refusing to flash: HEX starts at 0x{0:X}, below protected app_start 0x{1:X}. Use a bootloader-preserving image or pass -AllowBootloaderOverwrite only in a disposable lab setup.' -f $range.Min, $layout.AppStart)
+}
+
+if (($range.Max -ge $layout.AppEnd) -and -not $AllowBootloaderOverwrite) {
+    throw ('Refusing to flash: HEX ends at 0x{0:X}, at or above protected app_end 0x{1:X}. Use a smaller bootloader-preserving image or pass -AllowBootloaderOverwrite only in a disposable lab setup.' -f $range.Max, $layout.AppEnd)
 }
 
 $jlink = Resolve-JLinkExe -Preferred $JLinkExe
@@ -123,7 +145,8 @@ Write-Host 'ArduinoNRF nCS Zigbee sidecar flash'
 Write-Host ("  board      : {0}" -f $Board)
 Write-Host ("  programmer : {0}" -f $Programmer)
 Write-Host ("  device     : {0}" -f $Device)
-Write-Host ("  layout     : {0} (app_start=0x{1:X})" -f $BootloaderLayout, $appStart)
+Write-Host ("  layout     : {0} ({1})" -f $BootloaderLayout, $layout.Description)
+Write-Host ("  app range  : 0x{0:X}..0x{1:X}" -f $layout.AppStart, ($layout.AppEnd - 1))
 Write-Host ("  hex        : {0}" -f $hexPath)
 Write-Host ("  hex range  : 0x{0:X}..0x{1:X}" -f $range.Min, $range.Max)
 Write-Host ("  jlink      : {0}" -f $jlink)

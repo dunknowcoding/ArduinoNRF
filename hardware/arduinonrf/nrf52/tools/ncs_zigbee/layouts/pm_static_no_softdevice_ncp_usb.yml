@@ -1,0 +1,43 @@
+# ProMicro/nice!nano-style no-SoftDevice NCP USB layout.
+# Keep Arduino UF2 bootloader regions intact:
+# - 0x0000..0x0FFF: MBR / low bootloader guard
+# - 0xE9000..0xFFFFF: top UF2 bootloader guard, matching ArduinoNRF's 950272 byte no-SoftDevice app window
+arduino_bootloader:
+  address: 0x0
+  end_address: 0x1000
+  placement:
+    before:
+    - app
+  region: flash_primary
+  size: 0x1000
+app:
+  address: 0x1000
+  end_address: 0xe0000
+  region: flash_primary
+  size: 0xdf000
+zboss_nvram:
+  address: 0xe0000
+  end_address: 0xe8000
+  placement:
+    after:
+    - app
+    align:
+      start: 0x1000
+  region: flash_primary
+  size: 0x8000
+zboss_product_config:
+  address: 0xe8000
+  end_address: 0xe9000
+  placement:
+    after:
+    - zboss_nvram
+  region: flash_primary
+  size: 0x1000
+uf2_bootloader:
+  address: 0xe9000
+  end_address: 0x100000
+  placement:
+    after:
+    - zboss_product_config
+  region: flash_primary
+  size: 0x17000

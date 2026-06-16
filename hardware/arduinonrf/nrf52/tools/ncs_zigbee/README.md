@@ -27,7 +27,7 @@ That directory is ignored by Git. Delete it whenever you want a clean workspace.
   `C:\ncs\toolchains\*\environment.json` toolchain install.
 - `flash_zigbee.ps1`: flashes an already-built sidecar `.hex` through J-Link.
   It refuses bootloader/recover style actions and rejects HEX files that write
-  below the selected bootloader layout's `app_start`.
+  outside the selected bootloader layout's protected application window.
 - `pins.json`: records the intended official stack versions and local policy.
 
 The current build target is a reference build against Nordic's supported Zephyr
@@ -40,4 +40,35 @@ at address `0x0`.
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
   -Board promicro_nrf52840 -Target ncp_usb -Pristine always
+```
+
+For board1-board3 no-SoftDevice ProMicro/nice!nano-style bootloaders, build the
+bootloader-preserving NCP USB image instead:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
+  -Board promicro_nrf52840 -Target ncp_usb -ImageLayout no-softdevice `
+  -Pristine always
+```
+
+This uses a short build path under `.ncs-zigbee-work\b\an\pm40\ncp-nosd`,
+disables MCUboot/sysbuild for this layout, and verifies the static partitions
+after the build:
+
+```text
+0x0000..0x0FFF  low bootloader / MBR guard
+0x1000..0xDFFFF application
+0xE0000..0xE7FFF ZBOSS NVRAM
+0xE8000..0xE8FFF ZBOSS product config
+0xE9000..0xFFFFF top UF2 bootloader guard
+```
+
+Dry-run the flash guard before touching hardware:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\flash_zigbee.ps1 `
+  -Board promicro_nrf52840 -BootloaderLayout no-softdevice `
+  -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex -DryRun
 ```

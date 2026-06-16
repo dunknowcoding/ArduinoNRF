@@ -5,6 +5,9 @@ param(
     [ValidateSet('ncp_usb', 'shell', 'coordinator')]
     [string]$Target = 'ncp_usb',
 
+    [ValidateSet('reference', 'no-softdevice')]
+    [string]$ImageLayout = 'reference',
+
     [AllowEmptyString()]
     [string]$Workspace = '',
 
@@ -126,8 +129,19 @@ function Set-NcsBuildEnvironment {
     $env:PYTHONIOENCODING = 'utf-8'
 }
 
+function Get-ShortBoardName {
+    param([string]$BoardName)
+    switch ($BoardName) {
+        'promicro_nrf52840' { return 'pm40' }
+        'usb_dongle_nrf52840' { return 'dongle40' }
+        'nicenano_v2' { return 'nnv2' }
+        'xiao_nrf52840' { return 'xiao40' }
+        default { return $BoardName }
+    }
+}
+
 function Get-ZigbeeBuildSpec {
-    param([string]$BoardName, [string]$TargetName, [string]$WorkspaceRoot)
+    param([string]$BoardName, [string]$TargetName, [string]$WorkspaceRoot, [string]$LayoutName)
     $zephyrBoard = switch ($BoardName) {
         'usb_dongle_nrf52840' { 'nrf52840dongle/nrf52840' }
         default { 'nrf52840dk/nrf52840' }
@@ -135,12 +149,33 @@ function Get-ZigbeeBuildSpec {
     switch ($TargetName) {
         'ncp_usb' {
             $suffix = if ($BoardName -eq 'usb_dongle_nrf52840') { 'dongle' } else { 'usb' }
+            $cmakeArgs = @('-DFILE_SUFFIX={0}' -f $suffix)
+            $referenceOnly = $true
+            $sysbuild = $true
+            $buildDir = Join-Path $WorkspaceRoot ('build\arduinonrf\{0}\{1}' -f $BoardName, $TargetName)
+            if ($LayoutName -eq 'no-softdevice') {
+                if ($BoardName -ne 'promicro_nrf52840' -and $BoardName -ne 'nicenano_v2') {
+                    throw ('Image layout {0} is currently validated only for no-SoftDevice ProMicro/nice!nano-style bootloaders.' -f $LayoutName)
+                }
+                $layoutDir = Join-Path $PSScriptRoot 'layouts'
+                $extraConf = Join-Path $layoutDir 'no_softdevice_ncp_usb.conf'
+                $pmStatic = Join-Path $layoutDir 'pm_static_no_softdevice_ncp_usb.yml'
+                $cmakeArgs += @(
+                    ('-DEXTRA_CONF_FILE={0}' -f $extraConf),
+                    ('-DPM_STATIC_YML_FILE={0}' -f $pmStatic)
+                )
+                $referenceOnly = $false
+                $sysbuild = $false
+                $buildDir = Join-Path $WorkspaceRoot ('b\an\{0}\ncp-nosd' -f (Get-ShortBoardName -BoardName $BoardName))
+            }
             return [pscustomobject]@{
                 AppDir = Join-Path $WorkspaceRoot 'ncs-zigbee\samples\ncp'
                 ZephyrBoard = $zephyrBoard
-                Sysbuild = $true
-                CMakeArgs = @('-DFILE_SUFFIX={0}' -f $suffix)
-                ReferenceOnly = $true
+                Sysbuild = $sysbuild
+                ForceNoSysbuild = -not $sysbuild
+                CMakeArgs = $cmakeArgs
+                ReferenceOnly = $referenceOnly
+                BuildDir = $buildDir
             }
         }
         'shell' {
@@ -148,8 +183,10 @@ function Get-ZigbeeBuildSpec {
                 AppDir = Join-Path $WorkspaceRoot 'ncs-zigbee\samples\shell'
                 ZephyrBoard = $zephyrBoard
                 Sysbuild = $false
+                ForceNoSysbuild = $false
                 CMakeArgs = @()
                 ReferenceOnly = $true
+                BuildDir = Join-Path $WorkspaceRoot ('build\arduinonrf\{0}\{1}' -f $BoardName, $TargetName)
             }
         }
         'coordinator' {
@@ -157,8 +194,10 @@ function Get-ZigbeeBuildSpec {
                 AppDir = Join-Path $WorkspaceRoot 'ncs-zigbee\samples\network_coordinator'
                 ZephyrBoard = $zephyrBoard
                 Sysbuild = $false
+                ForceNoSysbuild = $false
                 CMakeArgs = @()
                 ReferenceOnly = $true
+                BuildDir = Join-Path $WorkspaceRoot ('build\arduinonrf\{0}\{1}' -f $BoardName, $TargetName)
             }
         }
     }
@@ -173,6 +212,51 @@ function Write-Check {
     }
 }
 
+function Test-PartitionContains {
+    param(
+        [string[]]$Lines,
+        [string]$PartitionName,
+        [string]$ExpectedAddress,
+        [string]$ExpectedEndAddress
+    )
+    $header = '{0}:' -f $PartitionName
+    $inside = $false
+    $addressOk = $false
+    $endOk = $false
+    foreach ($line in $Lines) {
+        if ($line -match '^\S.*:$') {
+            $inside = ($line.Trim() -eq $header)
+            continue
+        }
+        if (-not $inside) { continue }
+        if ($line.Trim() -eq ('address: {0}' -f $ExpectedAddress)) { $addressOk = $true }
+        if ($line.Trim() -eq ('end_address: {0}' -f $ExpectedEndAddress)) { $endOk = $true }
+    }
+    return ($addressOk -and $endOk)
+}
+
+function Assert-NoSoftDevicePartitionLayout {
+    param([string]$BuildDir)
+    $partitionsPath = Join-Path $BuildDir 'partitions.yml'
+    if (-not (Test-Path -LiteralPath $partitionsPath -PathType Leaf)) {
+        throw ('Expected partitions.yml was not generated: {0}' -f $partitionsPath)
+    }
+    $lines = Get-Content -LiteralPath $partitionsPath
+    if (-not (Test-PartitionContains -Lines $lines -PartitionName 'app' -ExpectedAddress '0x1000' -ExpectedEndAddress '0xe0000')) {
+        throw ('Unsafe no-softdevice partition layout: expected app partition 0x1000..0xE0000 in {0}' -f $partitionsPath)
+    }
+    if (-not (Test-PartitionContains -Lines $lines -PartitionName 'zboss_nvram' -ExpectedAddress '0xe0000' -ExpectedEndAddress '0xe8000')) {
+        throw ('Unsafe no-softdevice partition layout: expected zboss_nvram partition 0xE0000..0xE8000 in {0}' -f $partitionsPath)
+    }
+    if (-not (Test-PartitionContains -Lines $lines -PartitionName 'zboss_product_config' -ExpectedAddress '0xe8000' -ExpectedEndAddress '0xe9000')) {
+        throw ('Unsafe no-softdevice partition layout: expected zboss_product_config partition 0xE8000..0xE9000 in {0}' -f $partitionsPath)
+    }
+    if (-not (Test-PartitionContains -Lines $lines -PartitionName 'uf2_bootloader' -ExpectedAddress '0xe9000' -ExpectedEndAddress '0x100000')) {
+        throw ('Unsafe no-softdevice partition layout: expected uf2_bootloader guard partition 0xE9000..0x100000 in {0}' -f $partitionsPath)
+    }
+    Write-Host ('[layout]   no-softdevice partitions preserve 0x0000..0x0FFF and 0xE9000..0xFFFFF')
+}
+
 $workspacePath = Resolve-Workspace -Value $Workspace
 $toolchainPath = Resolve-ToolchainRoot -Value $ToolchainRoot
 $pythonPath = Resolve-PythonRoot -Value $PythonRoot
@@ -180,11 +264,12 @@ Set-NcsBuildEnvironment -ResolvedToolchainRoot $toolchainPath -ResolvedPythonRoo
 
 $pinsPath = Join-Path $PSScriptRoot 'pins.json'
 $pins = Get-Content -Raw -LiteralPath $pinsPath | ConvertFrom-Json
-$spec = Get-ZigbeeBuildSpec -BoardName $Board -TargetName $Target -WorkspaceRoot $workspacePath
+$spec = Get-ZigbeeBuildSpec -BoardName $Board -TargetName $Target -WorkspaceRoot $workspacePath -LayoutName $ImageLayout
 
 Write-Host 'ArduinoNRF nCS Zigbee R23 sidecar'
 Write-Host ("  board     : {0}" -f $Board)
 Write-Host ("  target    : {0}" -f $Target)
+Write-Host ("  layout    : {0}" -f $ImageLayout)
 Write-Host ("  zephyr    : {0}" -f $spec.ZephyrBoard)
 Write-Host ("  workspace : {0}" -f $workspacePath)
 Write-Host ("  toolchain : {0}" -f $(if ([string]::IsNullOrWhiteSpace($toolchainPath)) { '<not found>' } else { $toolchainPath }))
@@ -238,10 +323,13 @@ if (-not (Test-Path -LiteralPath $spec.AppDir -PathType Container)) {
     throw ('Zigbee application not found: {0}' -f $spec.AppDir)
 }
 
-$buildDir = Join-Path $workspacePath ('build\arduinonrf\{0}\{1}' -f $Board, $Target)
+$buildDir = $spec.BuildDir
 $westArgs = @('build', '-p', $Pristine, '-b', $spec.ZephyrBoard, '-d', $buildDir, $spec.AppDir)
 if ($spec.Sysbuild) {
     $westArgs += @('--sysbuild')
+}
+if ($spec.ForceNoSysbuild) {
+    $westArgs += @('--no-sysbuild')
 }
 if ($VerboseBuild) {
     $westArgs += @('-v')
@@ -254,6 +342,8 @@ if ($spec.CMakeArgs.Count -gt 0) {
 Write-Host ''
 if ($spec.ReferenceOnly) {
     Write-Host 'Reference build: validates the official Nordic Zigbee stack. Do not flash generated full images to Arduino bootloader boards.'
+} else {
+    Write-Host 'Bootloader-preserving build: generated images must still pass flash_zigbee.ps1 address checks before hardware flashing.'
 }
 Write-Host ('+ west {0}' -f ($westArgs -join ' '))
 Push-Location -LiteralPath $workspacePath
@@ -265,6 +355,10 @@ try {
 }
 finally {
     Pop-Location
+}
+
+if ($ImageLayout -eq 'no-softdevice') {
+    Assert-NoSoftDevicePartitionLayout -BuildDir $buildDir
 }
 
 Write-Host ''

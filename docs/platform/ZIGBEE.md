@@ -86,7 +86,35 @@ Generated reference artifacts are placed under:
 
 The generated `merged.hex` is a full sysbuild image that starts at address
 `0x0`. Do not flash it to Arduino bootloader boards. The ProMicro/nice!nano
-bootloader-preserving image and overlay are the next hardware-validation step.
+bootloader-preserving image is built separately with `-ImageLayout no-softdevice`.
+
+### Build a no-SoftDevice bootloader-preserving NCP USB image
+
+For board1-board3 style no-SoftDevice ProMicro/nice!nano bootloaders, build the
+application-only NCP USB image with:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
+  -Board promicro_nrf52840 -Target ncp_usb -ImageLayout no-softdevice `
+  -Pristine always
+```
+
+This layout disables MCUboot/sysbuild for the ProMicro path and uses a static
+Partition Manager layout that preserves:
+
+- `0x0000..0x0FFF`: low bootloader/MBR guard
+- `0x1000..0xDFFFF`: application
+- `0xE0000..0xE7FFF`: ZBOSS NVRAM
+- `0xE8000..0xE8FFF`: ZBOSS product config
+- `0xE9000..0xFFFFF`: top UF2 bootloader guard
+
+The build wrapper verifies these partitions after `west build`. The flashable
+artifact for SWD/J-Link application flashing is:
+
+```text
+.ncs-zigbee-work/b/an/pm40/ncp-nosd/zephyr/zephyr.hex
+```
 
 ### Flash policy
 
@@ -101,7 +129,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 
 It uses J-Link application flashing only. It does not run `recover`, `eraseall`,
 or bootloader flashing commands. By default it reads the HEX address range and
-refuses files that write below the selected layout's `app_start`.
+refuses files that write below the selected layout's `app_start` or at/above
+the selected layout's protected `app_end`.
+
+For board1 no-SoftDevice dry-run validation:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\flash_zigbee.ps1 `
+  -Board promicro_nrf52840 -BootloaderLayout no-softdevice `
+  -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex -DryRun
+```
 
 ## Existing working path: external CC2530
 
