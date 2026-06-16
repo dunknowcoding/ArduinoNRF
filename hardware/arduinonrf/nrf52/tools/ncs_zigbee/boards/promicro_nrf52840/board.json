@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "arduino_board": "promicro_nrf52840",
+  "first_test_alias": "board1",
+  "soc": "nrf52840",
+  "preferred_flash": "jlink",
+  "bootloader_policy": "do-not-reflash",
+  "known_bootloader_layouts": [
+    {
+      "name": "no-softdevice",
+      "app_start": "0x1000",
+      "user_boards": ["board1", "board2", "board3"]
+    },
+    {
+      "name": "softdevice-s140-v6",
+      "app_start": "0x26000",
+      "user_boards": ["board4", "board5"]
+    }
+  ],
+  "notes": [
+    "Use board1 first because it has a J-Link connected.",
+    "Treat SWD flashing as application flashing only; do not run recover or bootloader flashing commands."
+  ]
+}

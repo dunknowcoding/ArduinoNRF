@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "arduino_board": "usb_dongle_nrf52840",
+  "soc": "nrf52840",
+  "preferred_flash": "jlink",
+  "bootloader_policy": "do-not-reflash",
+  "notes": [
+    "Good future target for an always-on Zigbee coordinator dongle.",
+    "Not the first hardware target in the current lab setup."
+  ]
+}

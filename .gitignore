@@ -6,6 +6,7 @@
 .arduino15-install-test/
 .arduino15-install-test-clean/
 .external/
+.ncs-zigbee-work/
 .nius-verify-cache/
 build/
 drivers/
@@ -101,6 +102,10 @@ Thumbs.db
 # run these - kept local, not tracked / not shipped.
 # ============================================================
 tools/
+!hardware/arduinonrf/nrf52/tools/
+hardware/arduinonrf/nrf52/tools/*
+!hardware/arduinonrf/nrf52/tools/ncs_zigbee/
+!hardware/arduinonrf/nrf52/tools/ncs_zigbee/**
 scripts/
 __pycache__/
 *.pyc

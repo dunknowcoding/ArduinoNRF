@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "purpose": "ArduinoNRF official Zigbee R23 sidecar pins",
+  "zigbee_addon": {
+    "name": "ncs-zigbee",
+    "preferred_version": "v1.3.0",
+    "zboss_r23": "4.2.2.4",
+    "source": "https://github.com/nrfconnect/ncs-zigbee"
+  },
+  "ncs": {
+    "version_policy": "resolved-by-zigbee-add-on-west-manifest",
+    "note": "Do not hard-code an nCS version in the Arduino builder. Validate the active west workspace against the add-on manifest."
+  },
+  "workspace": {
+    "default_root": ".ncs-zigbee-work",
+    "downloads_are_gitignored": true
+  },
+  "targets": [
+    "ncp_usb",
+    "shell",
+    "coordinator"
+  ],
+  "first_boards": [
+    "promicro_nrf52840",
+    "usb_dongle_nrf52840",
+    "nicenano_v2",
+    "xiao_nrf52840"
+  ],
+  "hardware_policy": {
+    "preferred_first_board": "board1/promicro_nrf52840",
+    "preferred_first_programmer": "SEGGER J-Link over SWD",
+    "never_reflash_bootloader_by_default": true,
+    "external_cc2530_path_remains_supported": true
+  }
+}

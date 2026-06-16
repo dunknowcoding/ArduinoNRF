@@ -44,7 +44,9 @@ All project documentation lives here. Start with the [project README](../README.
   UART service with `NimBLE::write()` / `NimBLE::onReceive()`. See the BLE
   section of the [project README](../README.md) and the `NimBLESmoke`,
   `BLESend`, and `BLEReceive` examples.
-- **Zigbee / 802.15.4 — working via an external CC2530 module.** Flash the module
+- **Zigbee / 802.15.4.** The future-facing onboard path is Nordic's official
+  nCS Zigbee R23 add-on as a sidecar firmware flow for the nRF52840's own RADIO.
+  The existing Arduino sketch path remains the external CC2530 module: flash it
   with the built-in CC-Debugger ([`libraries/CCDebugger/`](../hardware/arduinonrf/nrf52/libraries/CCDebugger/),
   no external programmer) and drive it with the separate
   **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)**
@@ -61,9 +63,10 @@ All project documentation lives here. Start with the [project README](../README.
   (the in-package [`libraries/CC310/`](../hardware/arduinonrf/nrf52/libraries/CC310/)
   is a compatibility shim). HW-verified on ProMicro. Nordic binaries are fetched
   locally — see NiusCrypto's `docs/VENDORING.md`.
-- **Not yet vendored:** the nRF *own-radio* Zigbee stack (`libraries/Zigbee/` —
-  Zboss not in-tree). It exposes its API but returns `ZIGBEE_NOT_VENDORED` until
-  the runtime is added.
+- **Not yet an Arduino sketch library:** `libraries/Zigbee/` remains an
+  experimental placeholder and returns `ZIGBEE_NOT_VENDORED`. Official onboard
+  Zigbee starts with the nCS sidecar tools in
+  [`tools/ncs_zigbee`](../hardware/arduinonrf/nrf52/tools/ncs_zigbee/).
 
 ## Platform reference (capabilities & truth)
 
@@ -71,6 +74,8 @@ All project documentation lives here. Start with the [project README](../README.
 - [platform/PWM_BEHAVIOR.md](platform/PWM_BEHAVIOR.md) · [platform/PWM_TIMER_BOUNDARIES.md](platform/PWM_TIMER_BOUNDARIES.md) — PWM model & frequency/resolution limits (multi-module summary; full model in [platform/PWM_MULTI_MODULE.md](platform/PWM_MULTI_MODULE.md))
 - [platform/POWER_ADC_NOTES.md](platform/POWER_ADC_NOTES.md) — ADC / battery-sense behavior
 - [platform/BLE_WIFI_BOUNDARIES.md](platform/BLE_WIFI_BOUNDARIES.md) — BLE/WiFi facade boundaries (BLE is now a full NimBLE stack; WiFi remains out of scope on nRF52)
+- [platform/OFFICIAL_STACKS.md](platform/OFFICIAL_STACKS.md) - Nordic official stack policy and version pinning
+- [platform/RADIO_POLICY.md](platform/RADIO_POLICY.md) - onboard RADIO ownership rules
 - [platform/THREAD.md](platform/THREAD.md) — Thread (OpenThread) mesh on the native radio via the NiusThread library
-- [platform/ZIGBEE.md](platform/ZIGBEE.md) — Zigbee / raw 802.15.4 via an external CC2530 module
+- [platform/ZIGBEE.md](platform/ZIGBEE.md) - official nCS Zigbee R23 sidecar plus the external CC2530 path
 - [platform/REFERENCE_COMPARISON.md](platform/REFERENCE_COMPARISON.md) — comparison vs `pdcook/nRFMicro-Arduino-Core`

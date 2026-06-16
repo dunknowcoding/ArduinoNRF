@@ -57,6 +57,28 @@ The package-controllable pipeline (`upload.ps1`) runs in ~14–15 s; the rest is
 
 ## How to reproduce
 
+### Official onboard Zigbee sidecar environment check
+
+Initial target: physical **board1** (`promicro_nrf52840`) with a SEGGER J-Link
+connected over SWD. The first module does not flash anything; it verifies the
+sidecar tool entry point and keeps all SDK/build output in `.ncs-zigbee-work/`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
+  -Board promicro_nrf52840 -Target ncp_usb -CheckOnly
+```
+
+Expected:
+
+- The script reports `promicro_nrf52840` and `ncp_usb`.
+- It checks for `west`, `cmake`, and Python.
+- It creates or reuses `.ncs-zigbee-work/`.
+- It does not download, build, flash, recover, erase, or reflash any bootloader.
+
+Once an official nCS Zigbee R23 workspace and a first `.hex` exist, use
+`flash_zigbee.ps1` with board1/J-Link for application flashing only.
+
 ### First flash (manual bootloader entry, once)
 
 If the board is in an unknown state, enter the bootloader manually once: short `RST` to `GND` twice. A UF2 drive appears and the service COM (e.g. `COM3`) becomes visible. Then upload normally.
