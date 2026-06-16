@@ -29,7 +29,8 @@ On this clone the runtime service CDC and the bootloader share the same VID:PID,
 | board1 J-Link read-only identify | **PASS** | SEGGER J-Link connected to board1 at 3.3 V, detected Cortex-M4 / nRF52840 (`FICR 0x10000100 = 0x00052840`). No erase, recover, bootloader flash, or application write was run. |
 | Official Zigbee no-SoftDevice NCP USB build | **PASS** | `-ImageLayout no-softdevice` produced `.ncs-zigbee-work/b/an/pm40/ncp-nosd/zephyr/zephyr.hex`; HEX range `0x1000..0x7190F`; partitions preserve `0x0000..0x0FFF` and `0xE9000..0xFFFFF`. |
 | Official Zigbee no-SoftDevice NCP USB flash (board1) | **PASS** | Flashed board1 with J-Link using `flash_zigbee.ps1`; no `recover`, `eraseall`, or bootloader flashing. Readback confirmed `0x00000000` bootloader vectors unchanged and app vectors present at `0x00001000`. Windows enumerated Zephyr USB CDC as `VID_2FE3&PID_0001`, `COM27`. |
-| Official ZBOSS NCP Host package prep | **PASS, HOST NOT RUN** | `ncp_host.ps1 -Port COM27 -Download -Extract` downloaded `ncp_host_v3.6.0.zip` from `ncs-zigbee v1.3.0` into `.ncs-zigbee-work/` and found Linux `simple_gw`; WSL 2.7.8 is installed, but the Windows WSL optional component is still missing or pending reboot, so host protocol validation was not run. |
+| Official ZBOSS NCP Host package prep | **PASS** | `ncp_host.ps1 -Port COM27 -Download -Extract` downloaded `ncp_host_v3.6.0.zip` from `ncs-zigbee v1.3.0` into `.ncs-zigbee-work/` and found Linux `simple_gw`. |
+| Official ZBOSS NCP Host transport (board1) | **PARTIAL, NO NCP ACK** | WSL2 + `usbipd-win` can attach board1 briefly but drops the Zephyr CDC ACM device with `connection reset by peer`. WSL1 `ArduinoNRF-Ubuntu1` maps Windows `COM27` to `/dev/ttyS27`; `simple_gw` opens the port and transmits NCP frames, but no ACK is received from the current board1 firmware. |
 | NiusCrypto CC310 self-test (board1) | **PASS** | `examples/CryptoSelfTest` with vendored CRYS+Oberon: 10/10 KAT vectors, `backend: CC310`, UF2 flash. See [ArduinoNRF-Crypto docs/VALIDATION.md](https://github.com/dunknowcoding/ArduinoNRF-Crypto/blob/main/docs/VALIDATION.md). |
 | CC310 shim smoke (board1) | **PASS** | `CC310Smoke`: TRNG, SHA-256, HMAC, AES-CTR, ECDSA via shim → NiusCrypto; `RESULT: OK`. |
 
@@ -212,36 +213,51 @@ The host executable is a 64-bit Linux ELF. It is not a native Windows program.
 Current local status:
 
 - `Microsoft.WSL` was installed/updated with winget to WSL `2.7.8`.
-- `ncp_host.ps1 -Port COM27` reports
-  `Windows optional component: missing or pending reboot`.
+- Ubuntu 22.04 was installed as `Ubuntu` at `G:\WSL\ArduinoNRF-Ubuntu`
+  for WSL2.
+- A WSL1 fallback distro was installed as `ArduinoNRF-Ubuntu1` at
+  `G:\WSL\ArduinoNRF-Ubuntu1`.
 - `simple_gw` is present under `.ncs-zigbee-work/ncp-host/3.6.0/src/`.
-- The host was not run because Ubuntu/WSL is not active yet.
+- `usbipd-win` 5.3.0 was installed.
+- `usbipd list` reports board1's Zephyr NCP USB CDC device as
+  `2fe3:0001`, BUSID `4-3`, Windows `COM27`.
+- WSL2 does not expose the device as `/dev/ttyS27`; USB pass-through can create
+  a Linux CDC ACM device such as `/dev/ttyACM0`, but this host currently drops
+  the Zephyr CDC ACM device shortly after attach with `connection reset by peer`.
+- WSL1 exposes Windows `COM27` as `/dev/ttyS27`; `stty -F /dev/ttyS27 -a`
+  succeeds.
 
-If the status remains unchanged after reboot, enable WSL from an elevated
-PowerShell:
-
-```powershell
-wsl --install --no-distribution
-```
-
-Then install Ubuntu 22.04 for this workflow, keeping it under `G:\`:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File `
-  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -InstallUbuntu -WslDistro Ubuntu `
-  -UbuntuLocation G:\WSL\ArduinoNRF-Ubuntu
-```
-
-After installing or enabling Ubuntu/WSL, run:
+Attach the USB device from an elevated PowerShell:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -RunSimpleGw
+  -Port COM27 -UsbBusId 4-3 -WslDistro Ubuntu `
+  -WslTty /dev/ttyACM0 -AttachUsb
 ```
 
-The wrapper maps `COM27` to `/dev/ttyS27` by default for WSL.
+If USB pass-through is active, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -WslTty /dev/ttyACM0 -RunSimpleGw
+```
+
+Current preferred Windows validation path is WSL1:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -WslDistro ArduinoNRF-Ubuntu1 -WslTty /dev/ttyS27 `
+  -RunSimpleGw -RunSeconds 20
+```
+
+Result: **PARTIAL**. `simple_gw.log` shows `Serial initialized`, `ncp_tr_send`,
+and `Serial TX`, confirming the official host opens `/dev/ttyS27` and sends
+frames. It then reports `missing_ack_cnt` because the current board1 NCP
+firmware does not return the low-level ACK. Next investigation target is the
+board-side NCP USB/line-control/protocol configuration, not WSL path setup.
 
 ### First flash (manual bootloader entry, once)
 

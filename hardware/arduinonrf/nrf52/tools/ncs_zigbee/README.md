@@ -120,11 +120,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -UbuntuLocation G:\WSL\ArduinoNRF-Ubuntu
 ```
 
-Once Ubuntu is available, the wrapper maps `COM27` to `/dev/ttyS27` by default
-and can start the official gateway:
+On WSL2, Windows COM ports are not automatically exposed as `/dev/ttyS*`.
+Install `usbipd-win`, find the board's BUSID, and attach the Zephyr NCP USB
+device to Ubuntu. For board1 in the current lab state, `usbipd list` reports the
+NCP USB device as `2fe3:0001` on BUSID `4-3`:
+
+```powershell
+winget install --id dorssel.usbipd-win --source winget
+
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -UsbBusId 4-3 -WslDistro Ubuntu `
+  -WslTty /dev/ttyACM0 -AttachUsb
+```
+
+`usbipd bind` requires an elevated PowerShell. After USB pass-through is active,
+the wrapper can start the official gateway against the Linux CDC ACM device.
+The WSL2 USB/IP path can be fragile with this Zephyr CDC device; if it attaches
+and then disconnects with `connection reset by peer`, use the WSL1 fallback
+below.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -RunSimpleGw
+  -Port COM27 -WslTty /dev/ttyACM0 -RunSimpleGw
+```
+
+WSL1 fallback for Windows COM ports:
+
+```powershell
+wsl --install Ubuntu-22.04 --name ArduinoNRF-Ubuntu1 `
+  --location G:\WSL\ArduinoNRF-Ubuntu1 --version 1 --no-launch --web-download
+
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -WslDistro ArduinoNRF-Ubuntu1 -WslTty /dev/ttyS27 `
+  -RunSimpleGw
+```
+
+For bounded validation runs, add `-RunSeconds <seconds>`. The helper uses the
+official host invocation form:
+
+```text
+NCP_SLAVE_PTY=<linux-serial-port> ./application/simple_gw/simple_gw
 ```

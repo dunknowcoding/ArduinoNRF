@@ -191,6 +191,46 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -UbuntuLocation G:\WSL\ArduinoNRF-Ubuntu
 ```
 
+On WSL2, attach the Zephyr NCP USB device with `usbipd-win` instead of using the
+legacy `/dev/ttyS27` COM-port mapping. For board1 in the current lab state,
+`usbipd list` reports the NCP USB CDC device as `2fe3:0001` on BUSID `4-3`.
+Run the attach command from an elevated PowerShell:
+
+```powershell
+winget install --id dorssel.usbipd-win --source winget
+
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -UsbBusId 4-3 -WslDistro Ubuntu `
+  -WslTty /dev/ttyACM0 -AttachUsb
+```
+
+After attach, start the official host through the Linux CDC ACM device:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -WslTty /dev/ttyACM0 -RunSimpleGw
+```
+
+If WSL2 USB/IP attaches the Zephyr CDC ACM device and then drops it with
+`connection reset by peer`, use a WSL1 distro for direct Windows COM-port
+mapping instead:
+
+```powershell
+wsl --install Ubuntu-22.04 --name ArduinoNRF-Ubuntu1 `
+  --location G:\WSL\ArduinoNRF-Ubuntu1 --version 1 --no-launch --web-download
+
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
+  -Port COM27 -WslDistro ArduinoNRF-Ubuntu1 -WslTty /dev/ttyS27 `
+  -RunSimpleGw
+```
+
+For a bounded smoke run, add `-RunSeconds 20`. The official host invocation is
+environment-variable based: `NCP_SLAVE_PTY=<linux-serial-port>
+./application/simple_gw/simple_gw`.
+
 ## Existing working path: external CC2530
 
 Use this when you want an Arduino sketch to keep running on the nRF52840 while

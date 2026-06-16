@@ -8,6 +8,9 @@ param(
 
     [string]$Port = 'COM27',
 
+    [AllowEmptyString()]
+    [string]$UsbBusId = '',
+
     [string]$WslDistro = 'Ubuntu',
 
     [string]$UbuntuDistribution = 'Ubuntu-22.04',
@@ -19,11 +22,15 @@ param(
 
     [switch]$InstallUbuntu,
 
+    [switch]$AttachUsb,
+
     [switch]$Download,
 
     [switch]$Extract,
 
     [switch]$RunSimpleGw,
+
+    [int]$RunSeconds = 0,
 
     [switch]$Force
 )
@@ -67,6 +74,22 @@ function Convert-WslText {
     param([object[]]$Lines)
     $text = ($Lines -join [Environment]::NewLine)
     return ($text -replace "`0", '').Trim()
+}
+
+function Test-IsAdministrator {
+    $current = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($current)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-UsbipdCommand {
+    $cmd = Get-Command usbipd.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { return $cmd.Source }
+
+    $fallback = Join-Path $env:ProgramFiles 'usbipd-win\usbipd.exe'
+    if (Test-Path -LiteralPath $fallback -PathType Leaf) { return $fallback }
+
+    return ''
 }
 
 function Get-WslStatus {
@@ -139,6 +162,39 @@ Then reboot Windows and rerun this command:
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+function Invoke-UsbipdAttach {
+    param([string]$BusId, [string]$Distro)
+    if ([string]::IsNullOrWhiteSpace($BusId)) {
+        throw 'AttachUsb requires -UsbBusId. Run "usbipd list" and use the BUSID for the Zephyr NCP USB device.'
+    }
+
+    $usbipd = Get-UsbipdCommand
+    if ([string]::IsNullOrWhiteSpace($usbipd)) {
+        throw 'usbipd-win was not found. Install it with: winget install --id dorssel.usbipd-win --source winget'
+    }
+
+    Write-Host ('[usbipd] list')
+    & $usbipd list
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    if (-not (Test-IsAdministrator)) {
+        throw @"
+usbipd bind requires administrator privileges.
+Open an elevated PowerShell and run:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File "$PSCommandPath" -Port $Port -UsbBusId $BusId -WslDistro $Distro -WslTty /dev/ttyACM0 -AttachUsb
+"@
+    }
+
+    Write-Host ('[usbipd] bind {0}' -f $BusId)
+    & $usbipd bind --busid $BusId --force
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    Write-Host ('[usbipd] attach {0} -> {1}' -f $BusId, $Distro)
+    & $usbipd attach --wsl $Distro --busid $BusId
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 function Invoke-Download {
     param([string]$Url, [string]$Destination)
     $gh = Get-Command gh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -175,14 +231,20 @@ Write-Host ("  workspace : {0}" -f $workspacePath)
 Write-Host ("  package   : {0}" -f $zipPath)
 Write-Host ("  source    : {0}" -f $sourcePath)
 Write-Host ("  port      : {0}" -f $Port)
+Write-Host ("  usb busid : {0}" -f $(if ([string]::IsNullOrWhiteSpace($UsbBusId)) { '(not set)' } else { $UsbBusId }))
 Write-Host ("  wsl tty   : {0}" -f $tty)
 Write-Host ("  distro    : {0}" -f $WslDistro)
+Write-Host ("  run secs  : {0}" -f $(if ($RunSeconds -gt 0) { $RunSeconds } else { 'unlimited' }))
 Write-Host ("  ubuntu    : {0}" -f $UbuntuDistribution)
 Write-Host ("  location  : {0}" -f $UbuntuLocation)
 Write-Host ''
 
 if ($InstallUbuntu) {
     Install-UbuntuWsl -Distro $WslDistro -Distribution $UbuntuDistribution -Location $UbuntuLocation
+}
+
+if ($AttachUsb) {
+    Invoke-UsbipdAttach -BusId $UsbBusId -Distro $WslDistro
 }
 
 if ($Download -or $Extract -or $RunSimpleGw) {
@@ -238,12 +300,13 @@ if ($RunSimpleGw) {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($linuxSourcePath)) {
         throw ('Could not translate source path for WSL: {0}' -f $sourcePath)
     }
-    $cmd = 'cd "{0}" && chmod +x application/simple_gw/simple_gw && NCP_SLAVE_PTY="{1}" ./application/simple_gw/simple_gw' -f $linuxSourcePath.Replace('"', '\"'), $tty.Replace('"', '\"')
+    $runner = if ($RunSeconds -gt 0) { 'timeout {0}s ' -f $RunSeconds } else { '' }
+    $cmd = 'cd "{0}" && chmod +x application/simple_gw/simple_gw && {1}env NCP_SLAVE_PTY="{2}" ./application/simple_gw/simple_gw' -f $linuxSourcePath.Replace('"', '\"'), $runner, $tty.Replace('"', '\"')
     Write-Host ('+ wsl -d {0} -- sh -lc {1}' -f $WslDistro, $cmd)
     & wsl.exe -d $WslDistro -- sh -lc $cmd
     exit $LASTEXITCODE
 }
 
 Write-Host ''
-Write-Host 'Status only. Use -Download -Extract to prepare the official host package, -InstallUbuntu to prepare Ubuntu/WSL, and -RunSimpleGw after Ubuntu/WSL is available.'
+Write-Host 'Status only. Use -Download -Extract to prepare the official host package, -InstallUbuntu to prepare Ubuntu/WSL, -AttachUsb for WSL2 USB pass-through, and -RunSimpleGw after the Linux tty is available.'
 exit 0
