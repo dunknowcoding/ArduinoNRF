@@ -63,6 +63,31 @@ Expected: the script prints the selected board/target, checks for `west`,
 `cmake`, and Python, and creates `.ncs-zigbee-work/` if needed. In check-only
 mode it does not download, build, or flash anything.
 
+### Build the official reference firmware
+
+With an initialized `ncs-zigbee` workspace and Nordic toolchain:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
+  -Board promicro_nrf52840 -Target ncp_usb -Pristine always
+```
+
+For the first smoke test this maps `promicro_nrf52840` to Nordic's supported
+`nrf52840dk/nrf52840` Zephyr board and builds the official Zigbee NCP USB sample
+with `FILE_SUFFIX=usb`. This validates the official nRF52840 Zigbee R23 stack
+without touching connected boards.
+
+Generated reference artifacts are placed under:
+
+```text
+.ncs-zigbee-work/build/arduinonrf/promicro_nrf52840/ncp_usb/
+```
+
+The generated `merged.hex` is a full sysbuild image that starts at address
+`0x0`. Do not flash it to Arduino bootloader boards. The ProMicro/nice!nano
+bootloader-preserving image and overlay are the next hardware-validation step.
+
 ### Flash policy
 
 The sidecar flash wrapper is intentionally narrow:
@@ -70,11 +95,13 @@ The sidecar flash wrapper is intentionally narrow:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\flash_zigbee.ps1 `
-  -Board promicro_nrf52840 -Hex .ncs-zigbee-work\build\promicro_nrf52840\ncp_usb\zephyr\zephyr.hex
+  -Board promicro_nrf52840 -BootloaderLayout no-softdevice `
+  -Hex path\to\bootloader-preserving-sidecar.hex
 ```
 
 It uses J-Link application flashing only. It does not run `recover`, `eraseall`,
-or bootloader flashing commands.
+or bootloader flashing commands. By default it reads the HEX address range and
+refuses files that write below the selected layout's `app_start`.
 
 ## Existing working path: external CC2530
 

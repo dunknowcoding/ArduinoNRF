@@ -13,6 +13,11 @@ param(
 
     [string]$Device = 'nRF52840_xxAA',
 
+    [ValidateSet('no-softdevice', 'softdevice-s140-v6', 'full-image-lab-only')]
+    [string]$BootloaderLayout = 'no-softdevice',
+
+    [switch]$AllowBootloaderOverwrite,
+
     [switch]$DryRun
 )
 
@@ -52,18 +57,75 @@ function Resolve-JLinkExe {
     throw 'SEGGER JLink.exe was not found. Install SEGGER J-Link Software or set NIUS_JLINK_PATH.'
 }
 
+function Get-AppStart {
+    param([string]$Layout)
+    switch ($Layout) {
+        'no-softdevice' { return 0x1000 }
+        'softdevice-s140-v6' { return 0x26000 }
+        'full-image-lab-only' { return 0x0 }
+    }
+}
+
+function Get-IntelHexAddressRange {
+    param([string]$Path)
+    $upperLinear = [uint32]0
+    $upperSegment = [uint32]0
+    $min = $null
+    $max = $null
+
+    foreach ($line in [System.IO.File]::ReadLines($Path)) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        if (-not $line.StartsWith(':')) {
+            throw ('Invalid Intel HEX line in {0}' -f $Path)
+        }
+        $count = [Convert]::ToInt32($line.Substring(1, 2), 16)
+        $offset = [Convert]::ToUInt32($line.Substring(3, 4), 16)
+        $recordType = [Convert]::ToInt32($line.Substring(7, 2), 16)
+
+        if ($recordType -eq 0) {
+            if ($count -eq 0) { continue }
+            $base = $upperLinear + $upperSegment + $offset
+            $end = $base + [uint32]$count - 1
+            if ($null -eq $min -or $base -lt $min) { $min = $base }
+            if ($null -eq $max -or $end -gt $max) { $max = $end }
+        } elseif ($recordType -eq 2) {
+            $upperSegment = [Convert]::ToUInt32($line.Substring(9, 4), 16) -shl 4
+            $upperLinear = [uint32]0
+        } elseif ($recordType -eq 4) {
+            $upperLinear = [Convert]::ToUInt32($line.Substring(9, 4), 16) -shl 16
+            $upperSegment = [uint32]0
+        } elseif ($recordType -eq 1) {
+            break
+        }
+    }
+
+    if ($null -eq $min -or $null -eq $max) {
+        throw ('No data records found in Intel HEX file: {0}' -f $Path)
+    }
+    return [pscustomobject]@{ Min = [uint32]$min; Max = [uint32]$max }
+}
+
 if (-not (Test-Path -LiteralPath $Hex -PathType Leaf)) {
     throw ('Hex file not found: {0}' -f $Hex)
 }
 
 $hexPath = [System.IO.Path]::GetFullPath($Hex)
+$range = Get-IntelHexAddressRange -Path $hexPath
+$appStart = Get-AppStart -Layout $BootloaderLayout
+
+if (($range.Min -lt $appStart) -and -not $AllowBootloaderOverwrite) {
+    throw ('Refusing to flash: HEX starts at 0x{0:X}, below protected app_start 0x{1:X}. Use a bootloader-preserving image or pass -AllowBootloaderOverwrite only in a disposable lab setup.' -f $range.Min, $appStart)
+}
+
 $jlink = Resolve-JLinkExe -Preferred $JLinkExe
 
 Write-Host 'ArduinoNRF nCS Zigbee sidecar flash'
 Write-Host ("  board      : {0}" -f $Board)
 Write-Host ("  programmer : {0}" -f $Programmer)
 Write-Host ("  device     : {0}" -f $Device)
+Write-Host ("  layout     : {0} (app_start=0x{1:X})" -f $BootloaderLayout, $appStart)
 Write-Host ("  hex        : {0}" -f $hexPath)
+Write-Host ("  hex range  : 0x{0:X}..0x{1:X}" -f $range.Min, $range.Max)
 Write-Host ("  jlink      : {0}" -f $jlink)
 Write-Host ''
 Write-Host 'Policy: application flash only. This script does not run recover, eraseall, or bootloader flashing.'

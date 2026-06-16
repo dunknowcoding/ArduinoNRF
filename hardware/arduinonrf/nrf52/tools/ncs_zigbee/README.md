@@ -21,11 +21,23 @@ That directory is ignored by Git. Delete it whenever you want a clean workspace.
 
 ## Tools
 
-- `build_zigbee.ps1`: checks the environment and, when an nCS workspace exists,
-  delegates to `west build`.
+- `build_zigbee.ps1`: checks the environment and builds Nordic official
+  `ncs-zigbee` samples through `west build`. On Windows it auto-detects the
+  `IronEngineWorld` conda environment when present and the latest
+  `C:\ncs\toolchains\*\environment.json` toolchain install.
 - `flash_zigbee.ps1`: flashes an already-built sidecar `.hex` through J-Link.
-  It refuses bootloader/recover style actions.
+  It refuses bootloader/recover style actions and rejects HEX files that write
+  below the selected bootloader layout's `app_start`.
 - `pins.json`: records the intended official stack versions and local policy.
 
-The first implementation phase is intentionally conservative: build and flash
-official sidecar firmware, then document the observed hardware behavior.
+The current build target is a reference build against Nordic's supported Zephyr
+boards, for example mapping `promicro_nrf52840` to `nrf52840dk/nrf52840` for the
+first `ncp_usb` stack smoke test. Do not flash `merged.hex` from this reference
+build to Arduino bootloader boards; it contains a full sysbuild image starting
+at address `0x0`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
+  -Board promicro_nrf52840 -Target ncp_usb -Pristine always
+```

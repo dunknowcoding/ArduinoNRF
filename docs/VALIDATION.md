@@ -60,8 +60,9 @@ The package-controllable pipeline (`upload.ps1`) runs in ~14–15 s; the rest is
 ### Official onboard Zigbee sidecar environment check
 
 Initial target: physical **board1** (`promicro_nrf52840`) with a SEGGER J-Link
-connected over SWD. The first module does not flash anything; it verifies the
-sidecar tool entry point and keeps all SDK/build output in `.ncs-zigbee-work/`.
+connected over SWD. The first modules do not flash anything; they verify the
+sidecar tool entry point, install/build against Nordic's official stack, and
+keep all SDK/build output in `.ncs-zigbee-work/`.
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
@@ -72,12 +73,40 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 Expected:
 
 - The script reports `promicro_nrf52840` and `ncp_usb`.
-- It checks for `west`, `cmake`, and Python.
+- It checks for `west`, `cmake`, Python, and `ZEPHYR_SDK_INSTALL_DIR`.
 - It creates or reuses `.ncs-zigbee-work/`.
 - It does not download, build, flash, recover, erase, or reflash any bootloader.
 
-Once an official nCS Zigbee R23 workspace and a first `.hex` exist, use
-`flash_zigbee.ps1` with board1/J-Link for application flashing only.
+### Official Zigbee R23 reference build
+
+Validated on Windows with:
+
+- `ncs-zigbee` add-on `v1.3.0`.
+- Manifest-resolved nRF Connect SDK `v2.9.2`.
+- `west` from the `IronEngineWorld` conda environment.
+- Nordic toolchain at `C:\ncs\toolchains\b620d30767`.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  hardware\arduinonrf\nrf52\tools\ncs_zigbee\build_zigbee.ps1 `
+  -Board promicro_nrf52840 -Target ncp_usb -Pristine always
+```
+
+Result: **PASS** for build-only reference firmware. The wrapper maps the
+ArduinoNRF board alias to `nrf52840dk/nrf52840` and builds Nordic's official
+Zigbee NCP USB sample with sysbuild and `FILE_SUFFIX=usb`.
+
+Key artifacts:
+
+```text
+.ncs-zigbee-work/build/arduinonrf/promicro_nrf52840/ncp_usb/merged.hex
+.ncs-zigbee-work/build/arduinonrf/promicro_nrf52840/ncp_usb/dfu_application.zip
+.ncs-zigbee-work/build/arduinonrf/promicro_nrf52840/ncp_usb/ncp/zephyr/zephyr.signed.hex
+```
+
+Flash status: **NOT RUN** on board1. The reference `merged.hex` starts at
+`0x0` and would overwrite an Arduino bootloader. `flash_zigbee.ps1` now rejects
+such files by default for `no-softdevice` and `softdevice-s140-v6` layouts.
 
 ### First flash (manual bootloader entry, once)
 
