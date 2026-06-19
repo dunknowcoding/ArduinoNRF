@@ -1,5 +1,12 @@
 #pragma once
-
+//
+// NrfUsbd - device core of TaichiUSB, the ArduinoNRF self-developed USB device
+// stack for the nRF52840 (a clean-room stack, NOT TinyUSB; see TaichiUsb.h for
+// the stack identity, version, and the build-flag guard). This header declares
+// the low-level USBD device driver (EasyDMA endpoints, errata-wrapped ENABLE,
+// VBUS/OUTPUTRDY sequencing, suspend/resume, the 1200-bps-touch upload handoff)
+// that the user CDC (NrfUsbSerial) and maintenance CDC (NrfServiceSerial) sit on.
+//
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

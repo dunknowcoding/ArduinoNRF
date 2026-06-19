@@ -1,4 +1,5 @@
 #include "NrfUsbd.h"
+#include "TaichiUsb.h"  // TaichiUSB identity + build-flag guard (see header)
 
 #include <cstring>
 
