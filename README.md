@@ -46,6 +46,8 @@ https://raw.githubusercontent.com/dunknowcoding/ArduinoNRF/main/package_arduinon
 
 Then open **Boards Manager**, search **ArduinoNRF**, and install. (CLI: `arduino-cli core install arduinonrf:nrf52 --additional-urls <url above>`.)
 
+ArduinoNRF is also listed on the [Arduino unofficial third-party boards wiki](https://github.com/arduino/Arduino/wiki/Unofficial-list-of-3rd-party-boards-support-urls).
+
 ### 2. Pick your board
 
 **Tools → Board → ArduinoNRF nRF52** → e.g. *AliExpress ProMicro nRF52840*. Select the board's COM port under **Tools → Port**.
