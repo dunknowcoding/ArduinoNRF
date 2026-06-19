@@ -885,8 +885,10 @@ function Resolve-NiusLayoutGuardUf2Summary {
             [string]$ExpectedBoardId,
             [string]$PreferredCompositeStableId = '',
             [bool]$ExpectUf2 = $false,
-            [int]$Attempts = 20,
-            [int]$DelayMs = 500
+            # Poll every 150 ms (was 500) so the bootloader/UF2 is detected sooner
+            # after the touch; Attempts scaled to keep the ~10 s timeout unchanged.
+            [int]$Attempts = 67,
+            [int]$DelayMs = 150
         )
 
         for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
@@ -931,8 +933,9 @@ function Resolve-NiusLayoutGuardUf2Summary {
             [string]$ExpectedModel = '',
             [string]$ExpectedBoardId = '',
             [string]$PreferredCompositeStableId = '',
-            [int]$Attempts = 40,
-            [int]$DelayMs = 500
+            # Poll every 150 ms (was 500); Attempts scaled to keep the ~20 s timeout.
+            [int]$Attempts = 134,
+            [int]$DelayMs = 150
         )
 
         for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
@@ -1497,8 +1500,11 @@ function Wait-ForAdafruitRuntimeTransition {
         [string]$RuntimePid = '',
         [string]$InterfaceParentPrefix = '',
         [string]$PreferredCompositeStableId = '',
-        [int]$Attempts = 240,
-        [int]$DelayMs = 500
+        # Poll every 150 ms (was 500); Attempts scaled to keep the ~120 s timeout.
+        # This also shrinks the 2-stable-detection confirm from ~1 s to ~300 ms, so
+        # the post-flash "rebooted into new firmware" step finishes sooner.
+        [int]$Attempts = 800,
+        [int]$DelayMs = 150
     )
 
     $stableRuntimeDetections = 0
