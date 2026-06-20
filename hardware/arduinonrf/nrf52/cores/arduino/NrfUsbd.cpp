@@ -836,8 +836,15 @@ void NrfUsbdDriver::poll() {
                 detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
                 detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
             }
-        } else if (!nrfSystemProfile().prefersUsbUpload || !configured_ ||
+        } else if (!configured_ ||
                    (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
+            // NOTE: the 1200-bps-touch reboot is honored regardless of the build's
+            // default upload mode (it used to be gated on prefersUsbUpload). The
+            // touch is the universal DFU *recovery* path; disabling it on a
+            // jlink/openocd-profile build means one wrong-profile flash can leave a
+            // board with no host-side way back into the bootloader. It still only
+            // fires on a configured port seeing 1200 baud + a DTR drop on the
+            // service CDC, which never happens for normal data.
             serviceTouchPending_ = false;
             serviceTouchResetMillis_ = 0UL;
         } else if (!resetArmed) {
@@ -903,8 +910,15 @@ void NrfUsbdDriver::irqHandler() {
                 detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
                 detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
             }
-        } else if (!nrfSystemProfile().prefersUsbUpload || !configured_ ||
+        } else if (!configured_ ||
                    (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
+            // NOTE: the 1200-bps-touch reboot is honored regardless of the build's
+            // default upload mode (it used to be gated on prefersUsbUpload). The
+            // touch is the universal DFU *recovery* path; disabling it on a
+            // jlink/openocd-profile build means one wrong-profile flash can leave a
+            // board with no host-side way back into the bootloader. It still only
+            // fires on a configured port seeing 1200 baud + a DTR drop on the
+            // service CDC, which never happens for normal data.
             serviceTouchPending_ = false;
             serviceTouchResetMillis_ = 0UL;
         } else if (!resetArmed) {
@@ -946,8 +960,10 @@ void NrfUsbdDriver::serviceHaltedTouch() {
     // updated from EP0 control-OUT (completeControlOutTransfer), which still
     // completes while halted — that is how re-enumeration finishes — so this
     // signal is observable even though millis() is frozen.
+    // Honor the touch even while halted in the GDB stub debugger, on any profile -
+    // a debug build must still be DFU-recoverable over USB.
     const bool touchSignal = enabled_ && configured_ &&
-        nrfSystemProfile().prefersUsbUpload && lineCoding_.baudRate == 1200UL;
+        lineCoding_.baudRate == 1200UL;
     if (!touchSignal) {
         haltTouchTicks_ = 0UL;
         return;
@@ -1933,7 +1949,7 @@ void NrfUsbdDriver::completeControlOutTransfer() {
                     serviceSaw1200Millis_ = millis();
                     const bool resetArmed = configuredMillis_ != 0UL &&
                         (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-                    if (!dtr_ && nrfSystemProfile().prefersUsbUpload) {
+                    if (!dtr_) {  // touch always armed (any profile, incl. debug)
                         markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_TOUCH_PENDING);
                         serviceTouchPending_ = true;
                         serviceTouchResetMillis_ = resetArmed ? millis() : 0UL;
@@ -2207,7 +2223,7 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                     const bool recent1200 = lineCoding_.baudRate == 1200UL ||
                         (serviceSaw1200Millis_ != 0UL &&
                          (millis() - serviceSaw1200Millis_) < 400UL);
-                    if (!userCdc && recent1200 && nrfSystemProfile().prefersUsbUpload) {
+                    if (!userCdc && recent1200) {  // touch always armed (any profile)
                         if (!dtr) {
                             // Host dropped DTR at 1200 baud: arm the touch and start the 40 ms
                             // confirm timer (see USBD_TOUCH_RESET_CONFIRM_MS). The poll/IRQ gate
