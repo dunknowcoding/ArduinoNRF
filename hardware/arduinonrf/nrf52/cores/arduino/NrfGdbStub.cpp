@@ -1,5 +1,8 @@
-// USB GDB Remote Protocol stub: I/O is wired to the maintenance/service CDC only
-// (nrfUsbd driver path). User Sketch Serial uses the separate user CDC when enabled.
+// USB GDB Remote Protocol stub - the DEBUG submodule of TaichiUSB (see
+// TaichiUsb.h). I/O is wired to the maintenance/service CDC only (the nrfUsbd
+// device-core path), using TaichiUSB's stub-halted service hooks so debug keeps
+// flowing while the target is halted. User Sketch Serial uses the separate user
+// CDC when enabled.
 #include "NrfGdbStub.h"
 
 #include <string.h>

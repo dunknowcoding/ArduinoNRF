@@ -1,7 +1,13 @@
 #pragma once
 
-// Firmware-side GDB stub over USB CDC. Transport is bound to the service/maintenance
-// CDC interface; do not multiplex application Serial printf on the same interface.
+// NrfGdbStub - the DEBUG submodule of TaichiUSB (the ArduinoNRF self-developed
+// USB device stack; see TaichiUsb.h). This firmware-side GDB Remote Serial
+// Protocol stub rides TaichiUSB's maintenance/service CDC interface and depends
+// on the stub-halted hooks the device core exposes for it (NrfUsbdDriver::
+// setStubHalted / serviceHaltedTouch / drainServiceDataOut / armCdcDataOut /
+// kickServiceDataIn) so single-cable debugging keeps working while the target is
+// halted in DebugMon. Transport is bound to the service CDC only; do not
+// multiplex application Serial printf on the same interface.
 
 #include <stdbool.h>
 #include <stddef.h>

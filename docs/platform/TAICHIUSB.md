@@ -24,6 +24,27 @@ single-cable USB GDB stub.
 | `cores/arduino/NrfUsbd.{h,cpp}` | Device core: endpoints (EasyDMA), control transfers, suspend/resume, ISR |
 | `cores/arduino/NrfUsbSerial.cpp` | User CDC (`Serial`) |
 | `cores/arduino/NrfServiceSerial.cpp` | Maintenance/upload CDC + 1200-touch |
+| `cores/arduino/NrfGdbStub.{h,cpp}` | **Debug submodule**: single-cable GDB stub over the service CDC |
+
+## Debug submodule: the USB GDB stub
+
+The single-cable GDB stub (`NrfGdbStub`) is a **submodule of TaichiUSB**, not a
+separate stack: its Remote-Serial-Protocol transport is bound to TaichiUSB's
+maintenance/service CDC, and it leans on a small set of stub-halted hooks the
+device core exposes specifically for it:
+
+- `NrfUsbdDriver::setStubHalted()` — tells the driver it is being pumped from the
+  halted DebugMon loop (so the 1200-touch uses a poll-counter, not frozen
+  `millis()`, and an upload to a halted board can't brick flash).
+- `serviceHaltedTouch()` / `kickServiceDataIn()` / `drainServiceDataOut()` /
+  `armCdcDataOut()` — let the stub move GDB packets over the service CDC while the
+  application (and SysTick) are stopped, since this silicon does not raise
+  `EVENTS_EPDATA` reliably for received OUT packets.
+
+So debugging rides the *same* enumeration-from-ISR USB core as `Serial` and the
+uploader; there is no second USB implementation. Application `Serial` (user CDC)
+stays separate — don't multiplex sketch `printf` onto the service CDC during a
+debug session.
 
 ## Build-flag guard (important)
 
