@@ -249,6 +249,27 @@ size_t HardwareSerial::write(uint8_t value) {
     return 1;
 }
 
+size_t HardwareSerial::write(const uint8_t *buffer, size_t size) {
+    if (buffer == nullptr || size == 0U) {
+        return 0U;
+    }
+    // Fast path for the user CDC (the throughput-critical port): push the whole
+    // buffer in one block so the IN endpoint is armed once, not once per byte.
+    if (usbBacked_ && !nrfSerialUsbUsesServicePortOnly()) {
+        enabled_ = true;
+        return nrfUsbSerialBackend().write(buffer, size);
+    }
+    // Service-CDC-only USB and the UARTE path keep the simple per-byte behavior.
+    size_t n = 0U;
+    while (n < size) {
+        if (write(buffer[n]) != 1U) {
+            break;
+        }
+        ++n;
+    }
+    return n;
+}
+
 int HardwareSerial::availableForWrite() {
     if (!enabled_ && !usbBacked_) {
         return 0;

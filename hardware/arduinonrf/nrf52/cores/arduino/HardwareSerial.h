@@ -14,6 +14,7 @@ public:
     int peek(void) override;
     void flush(void) override;
     size_t write(uint8_t value) override;
+    size_t write(const uint8_t *buffer, size_t size) override;  // block write (USB CDC fast path)
     int availableForWrite() override;
     using Print::write;
     explicit operator bool() const;

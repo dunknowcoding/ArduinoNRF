@@ -79,6 +79,12 @@ public:
     int userPeek() const;
     int userRead();
     size_t userWrite(uint8_t value);
+    // Block write: push a whole buffer to the user-CDC TX ring lock-free (the ring
+    // is single-producer/single-consumer) and arm the IN endpoint ONCE, instead of
+    // taking a UsbdIrqLock around serviceDataIn() per byte. Cutting the per-byte
+    // lock churn stops the foreground from starving the EPDATA ISR that arms the
+    // next packet, which is what capped CDC TX throughput. @return bytes accepted.
+    size_t userWrite(const uint8_t *data, size_t length);
     void userFlush();
     void injectRx(const uint8_t *data, size_t length);
     void setLineCoding(const NrfUsbLineCoding &lineCoding);

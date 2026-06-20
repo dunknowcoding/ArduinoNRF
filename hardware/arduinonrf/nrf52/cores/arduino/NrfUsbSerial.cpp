@@ -56,6 +56,10 @@ size_t NrfUsbSerialBackend::write(uint8_t value) {
     return nrfUsbdDriver().userWrite(value);
 }
 
+size_t NrfUsbSerialBackend::write(const uint8_t *data, size_t length) {
+    return nrfUsbdDriver().userWrite(data, length);
+}
+
 bool NrfUsbSerialBackend::connected() const {
     return nrfUsbdDriver().userConnected();
 }

@@ -46,6 +46,27 @@ uploader; there is no second USB implementation. Application `Serial` (user CDC)
 stays separate — don't multiplex sketch `printf` onto the service CDC during a
 debug session.
 
+## CDC throughput (block write)
+
+`Serial.write(buffer, size)` takes the **block-write fast path**: the whole buffer
+is pushed to the user-CDC TX ring lock-free (the ring is single-producer /
+single-consumer) and the IN endpoint is armed **once**. The earlier path armed it
+*per byte*, taking a `UsbdIrqLock` (which masks the USBD interrupt) around
+`serviceDataIn()` 64 times for a 64-byte write — and that foreground lock churn
+starved the EPDATA ISR that arms the next packet, leaving a NAK gap per packet.
+
+Measured device->host CDC throughput on a ProMicro nRF52840 (pyserial reader):
+
+| TX path | KB/s |
+| --- | --- |
+| per-byte arm (before) | ~23 |
+| block write (after) | ~304 |
+
+~13x faster, with the byte stream verified intact (no corruption; drop-on-full
+semantics are unchanged, just far rarer now that the ring drains ~13x faster).
+For sustained bulk transfers, use a host reader that issues large back-to-back
+reads - slow per-byte host tools (e.g. some serial monitors) cap well below this.
+
 ## Build-flag guard (important)
 
 On this core the per-board **`build.extra_flags` is an aggregate** that carries

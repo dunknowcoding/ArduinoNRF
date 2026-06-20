@@ -14,6 +14,7 @@ public:
     int peek() const;
     void flush();
     size_t write(uint8_t value);
+    size_t write(const uint8_t *data, size_t length);  // block write (see NrfUsbd)
     bool connected() const;
     void setConnected(bool connected);
     void setLineCoding(unsigned long baudRate);

@@ -1418,6 +1418,23 @@ size_t NrfUsbdDriver::userWrite(uint8_t value) {
     return 1U;
 }
 
+size_t NrfUsbdDriver::userWrite(const uint8_t *data, size_t length) {
+    if (!userPortEnabled() || data == nullptr) {
+        return 0U;
+    }
+    // SPSC ring: the foreground is the sole producer, the ISR drains (consumer),
+    // so userRingPushTx() is safe lock-free here (same as the per-byte path).
+    size_t written = 0U;
+    while (written < length && userRingPushTx(data[written])) {
+        ++written;
+    }
+    if (written > 0U && configured_ && !suspended_) {
+        UsbdIrqLock lock;
+        serviceDataIn(true);  // arm once for the whole block (was once per byte)
+    }
+    return written;
+}
+
 void NrfUsbdDriver::userFlush() {
     if (!userPortEnabled() || !enabled_ || !configured_ || suspended_) {
         return;
