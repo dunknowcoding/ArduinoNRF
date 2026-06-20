@@ -31,6 +31,7 @@ The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, 
 | 🧩 | **10 board definitions, one package** | ProMicro (*verified on hardware*), nice!nano v2, SuperMini, nRFMicro, XIAO, nRF52833/nRF52840 dev boards and more — installed from one Board Manager URL. |
 | 📋 | **Truth-oriented metadata** | ADC, PWM, BLE and bus capabilities are documented as *verified*, not aspirational. No silent overclaiming. |
 | 🛡️ | **Robust upload pipeline** | Double-click-safe, coexists with a live debug session, rejects the wrong COM with a clear message, and caches slow port scans for speed. |
+| 🥋 | **TaichiUSB — own USB stack** | A clean-room nRF52840 USB device stack (**not TinyUSB**): enumeration runs from the USBD ISR, so the COM port survives whatever your `setup()`/`loop()` does. |
 
 ---
 
@@ -199,6 +200,7 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **Zigbee / 802.15.4** | 🚧 **Official onboard Zigbee is now a sidecar target.** The nRF52840 own-radio path tracks Nordic's nCS Zigbee R23 add-on through `hardware/arduinonrf/nrf52/tools/ncs_zigbee/`; first hardware target is board1 / ProMicro over J-Link, with no bootloader reflashing. ✅ **Working Arduino-sketch path remains the external CC2530 module.** Flash it with the built-in **[`libraries/CCDebugger/`](hardware/arduinonrf/nrf52/libraries/CCDebugger/)**, then drive it over UART with **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)**. `libraries/Zigbee/` is still an experimental placeholder (`ZIGBEE_NOT_VENDORED`). Guide: **[docs/platform/ZIGBEE.md](docs/platform/ZIGBEE.md)**. |
 | **Thread (OpenThread)** | ✅ **Working IPv6 mesh on the nRF52840's own radio** via the separate **[NiusThread](https://github.com/dunknowcoding/ArduinoNRF-Thread)** library: full OpenThread FTD (vendored, with mbedtls) on a bare-metal 802.15.4 RADIO driver — no SoftDevice, no nrfx, no external module. HW-verified two-node mesh (Leader + Child → Router) with bidirectional UDP multicast. The in-package [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is now a thin shim that keeps `#include <Thread.h>` working. Guide: **[docs/platform/THREAD.md](docs/platform/THREAD.md)**. |
 | **EEPROM** | ✅ Emulated (see EEPROM examples) |
+| **USB device stack** | ✅ **TaichiUSB** — self-developed clean-room nRF52840 USBD stack (dual CDC + DFU + PluggableUSB), ISR-driven enumeration so the port survives a blocking sketch; **not TinyUSB**. See [docs/platform/TAICHIUSB.md](docs/platform/TAICHIUSB.md). |
 | **Upload** | ✅ Hands-free UF2 or serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |
 
@@ -213,6 +215,7 @@ Everything beyond this README lives under **[docs/](docs/)** — start at **[doc
 - 🧪 **[docs/VALIDATION.md](docs/VALIDATION.md)** — what's been tested on real hardware, and how to reproduce it
 - 🔼 **[docs/uploads/hands_free_upload.md](docs/uploads/hands_free_upload.md)** — hands-free upload, plus the double-reset and SWD-probe fallbacks
 - 📀 **[docs/bootloaders/README.md](docs/bootloaders/README.md)** — `INFO_UF2.TXT` version/layout reference and manual UF2 recovery
+- 🥋 **[docs/platform/TAICHIUSB.md](docs/platform/TAICHIUSB.md)** — the self-developed (clean-room, not TinyUSB) nRF52840 USB device stack
 - 🐞 **[docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md](docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md)** — single-cable debug setup
 - 🧩 **[docs/boards/](docs/boards/)** — per-board reference
 - 📦 **[GitHub Releases](https://github.com/dunknowcoding/ArduinoNRF/releases)** — release notes
