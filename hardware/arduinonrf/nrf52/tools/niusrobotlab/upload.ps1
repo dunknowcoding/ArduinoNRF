@@ -2307,6 +2307,12 @@ function Invoke-CommandChecked {
     if ($FailureKind -eq 'adafruit-dfu' -and -not [string]::IsNullOrWhiteSpace($output)) {
         $textSignaledFailure = ($output -match '(?ims)(^Failed to upgrade target\.|Traceback\s*\(|NordicSemiException|No data received on serial port|Not able to proceed|\berror:\s*)')
     }
+    elseif ($FailureKind -eq 'jlink' -and -not [string]::IsNullOrWhiteSpace($output)) {
+        # SEGGER J-Link Commander can exit 0 after script-level target failures.
+        # Treat fatal attach/programming text as a failed upload so a bootloader
+        # burn never reports success when SWD never reached the nRF52.
+        $textSignaledFailure = ($output -match '(?ims)(Could not connect to the target device|Failed to attach to CPU|Cannot connect to target|Error while identifying target|No device found on SWD|Target connection not established)')
+    }
 
     if ($process.ExitCode -ne 0 -or $textSignaledFailure) {
         $reportedExitCode = if ($process.ExitCode -ne 0) { $process.ExitCode } else { 1 }
