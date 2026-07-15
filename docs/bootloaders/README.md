@@ -121,6 +121,41 @@ the existing bootloader still works, USB DFU bootloader updates can be done with
 the vendor DFU package, but IDE Burn Bootloader is the recovery path and requires
 SWD.
 
+### When SWD recover fails with a clone J-Link (`J-Link (unknown)`)
+
+If Burn Bootloader / `recover` fails on an nRF52840 whose debug access is locked
+(**APPROTECT**), first check what probe you have. Symptom of the trap:
+
+- The probe enumerates and reports `VTref` ≈ 3.3 V (the board **is** powered), but
+  every attach ends in `Could not connect to the target device` after the
+  "Reset via Reset pin & Connect" fallback.
+- `JLink.exe` prints `Firmware: J-Link ARM-OB STM32 compiled Aug 22 2012` (or
+  similar old OB build) and SEGGER software labels it `J-Link (unknown)`,
+  serial `123456` — i.e. a **clone J-Link OB**.
+
+**Cause:** the clone's firmware requires a successful, core-halting
+`Connect(device)` before it will service *any* raw SWD/CoreSight transfer. With
+APPROTECT enabled the halting connect faults on the walled-off AHB-AP, so the
+clone can never write **DP SELECT** to reach the **CTRL-AP** and run the nRF52
+`ERASEALL` recovery. A genuine SEGGER J-Link does that recovery inside its DLL;
+the clone cannot, and neither can J-Link Commander `recover`/`Erase`,
+pyOCD-over-J-Link, nor STM32CubeProgrammer's bundled `JLink_x64.dll`.
+
+**Fix — use a CMSIS-DAP probe instead** (its raw SWD access does not need a prior
+halting connect), then run the CTRL-AP mass-erase that clears APPROTECT:
+
+```bash
+# OpenOCD (the Burn Bootloader CMSIS-DAP path already uses this target):
+openocd -f interface/cmsis-dap.cfg -f target/nrf52.cfg -c "init; nrf52_recover; exit"
+# or pyOCD:
+pyocd erase -t nrf52840 --mass    # CTRL-AP ERASEALL over CMSIS-DAP
+```
+
+After the erase, APPROTECT is cleared and the debug port opens; re-run **Burn
+Bootloader** (or flash `nice_nano_bootloader-0.6.0_s140_6.1.1.hex` directly) and
+select the S140 `0x26000` layout. A genuine SEGGER J-Link is the other fix; a
+clone J-Link OB cannot recover a locked nRF52840.
+
 ### In-field UF2 bootloader update (no SoftDevice / nice!nano)
 
 Bundled under `hardware/arduinonrf/nrf52/bootloaders/nice_nano/`:
