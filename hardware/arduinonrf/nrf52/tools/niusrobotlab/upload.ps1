@@ -2072,6 +2072,29 @@ function Invoke-CommandChecked {
             }
         }
     }
+    elseif ($FailureKind -eq 'jlink') {
+        # SEGGER J-Link Commander has been observed to keep its process alive
+        # after a failed nRF52 flash transaction while Arduino IDE stays at the
+        # last progress line. Treat that as a failed upload instead of letting a
+        # bootloader/app write appear to hang forever. Set to 0 only for manual
+        # lab debugging where an operator is watching JLink.exe directly.
+        $configuredTimeoutMs = 120000
+        $override = $env:NIUS_JLINK_PROCESS_TIMEOUT_MS
+        if (-not [string]::IsNullOrWhiteSpace($override)) {
+            $parsedTimeout = -1
+            if ([int]::TryParse($override, [ref]$parsedTimeout)) {
+                if ($parsedTimeout -eq 0) {
+                    $configuredTimeoutMs = 0
+                }
+                elseif ($parsedTimeout -gt 0) {
+                    $configuredTimeoutMs = $parsedTimeout
+                }
+            }
+        }
+        if ($configuredTimeoutMs -gt 0) {
+            $deadline = (Get-Date).AddMilliseconds($configuredTimeoutMs)
+        }
+    }
 
     # Serial DFU idle watchdog: ignore DEBUG/INFO log prefixes when refreshing the idle clock,
     # otherwise verbose backends spam lines every few hundred ms and the host spinner stays at ~90% forever.
@@ -2360,6 +2383,60 @@ function Invoke-JLinkDeploy {
     }
 }
 
+function Assert-NiusBootloaderHexApprotectPolicy {
+    param([string]$HexPath)
+
+    # nRF52 UICR.APPROTECT is at 0x10001208. For the nRF52840 boards supported
+    # here, an erased low byte (0xFF) means debug access remains open. Values
+    # such as 0x00 enable APPROTECT; 0x5A is not the nRF52840 disable value and
+    # has been observed to close SWD access on board recovery. Leaving the word
+    # unmentioned is also acceptable because it preserves the target's current
+    # debug policy.
+    $targetAddress = 0x10001208
+    $base = 0
+    $seenApprotect = $false
+    $approtectByte = $null
+
+    foreach ($line in [System.IO.File]::ReadLines($HexPath)) {
+        $trimmed = $line.Trim()
+        if ($trimmed.Length -lt 11 -or -not $trimmed.StartsWith(':')) { continue }
+        try {
+            $count = [Convert]::ToInt32($trimmed.Substring(1, 2), 16)
+            $offset = [Convert]::ToInt32($trimmed.Substring(3, 4), 16)
+            $recordType = [Convert]::ToInt32($trimmed.Substring(7, 2), 16)
+            if ($recordType -eq 4 -and $count -eq 2) {
+                $base = ([Convert]::ToInt32($trimmed.Substring(9, 4), 16) -shl 16)
+                continue
+            }
+            if ($recordType -ne 0 -or $count -le 0) { continue }
+            $absolute = $base + $offset
+            if ($targetAddress -lt $absolute -or $targetAddress -ge ($absolute + $count)) { continue }
+            $byteIndex = $targetAddress - $absolute
+            $approtectByte = [Convert]::ToInt32($trimmed.Substring(9 + ($byteIndex * 2), 2), 16)
+            $seenApprotect = $true
+            break
+        }
+        catch {
+            continue
+        }
+    }
+
+    if ($seenApprotect -and $approtectByte -ne 0xFF) {
+        Throw-NiusUploadFailure (New-UploadFailure -Kind 'jlink' -ExitCode 1 -Output (@(
+                    ('Refusing to flash bootloader HEX: it writes nRF52 UICR.APPROTECT (0x10001208) low byte 0x{0:X2}.' -f $approtectByte),
+                    'For this nRF52 bootloader path the image must leave APPROTECT erased/unprogrammed, or write 0xFF, so J-Link recovery remains possible.',
+                    'ZH: Bootloader HEX writes a non-erased APPROTECT value; blocked to keep J-Link recovery possible.'
+                ) -join [Environment]::NewLine) -Exe $toolPath)
+    }
+
+    if ($seenApprotect -and $approtectByte -eq 0xFF) {
+        Write-NiusDetail '[nius] Bootloader HEX leaves nRF52 APPROTECT disabled/erased (UICR.APPROTECT=0xFF).' -ForegroundColor DarkGray
+    }
+    elseif (-not $seenApprotect) {
+        Write-NiusDetail '[nius] Bootloader HEX does not program nRF52 APPROTECT; existing target/debug-access policy is not changed by the image.' -ForegroundColor DarkGray
+    }
+}
+
 function Invoke-NiusBootloaderDeploy {
     param(
         [string]$OpenOcdExe,
@@ -2371,6 +2448,7 @@ function Invoke-NiusBootloaderDeploy {
     )
 
     Assert-InputArtifact -Path $BootloaderHexPath -Label 'bootloader hex'
+    Assert-NiusBootloaderHexApprotectPolicy -HexPath $BootloaderHexPath
 
     $isJLink = ($Protocol -match '(?i)jlink')
     if ($isJLink) {

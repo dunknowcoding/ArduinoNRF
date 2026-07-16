@@ -56,22 +56,22 @@ before any manual `.uf2` copy.
 |---|---|
 | `SoftDevice: S140 version 6.1.1` and `UF2 Bootloader 0.6.0` | **Auto-detect upload, SoftDevice S140 v6 layout (0x26000)** |
 | `SoftDevice: not found` and `UF2 Bootloader 0.6.0` | **Auto-detect upload, no SoftDevice / MBR only (0x1000)** |
-| `SoftDevice: S140 version 6.1.1` and `UF2 Bootloader 0.11.0` | still **… S140 v6 layout (0x26000)** — version went up, layout did not |
-| `SoftDevice: not found` and `UF2 Bootloader 0.11.0` | still **… no SoftDevice / MBR only (0x1000)** |
+| `SoftDevice: S140 version 6.1.1` and `UF2 Bootloader 0.11.0` | still **S140 v6 layout (0x26000)**; version went up, layout did not |
+| `SoftDevice: not found` and `UF2 Bootloader 0.11.0` | still **no SoftDevice / MBR only (0x1000)** |
 
 **Not covered by this table**
 
 | Item | Notes |
 |---|---|
 | Adafruit **`update-*` bootloader UF2** (family `0xd663823c`) | Bootloader replacement package, not a sketch. Changes MBR/bootloader/UICR; reboots into app mode. See [In-field UF2 bootloader update](#in-field-uf2-bootloader-update-no-softdevice--nicenano) below. |
-| **Tools → Burn Bootloader** (SWD) | Package currently ships **`nice_nano_bootloader-0.6.0_s140_6.1.1.hex`** only. After burning, use the **S140 v6 `(0x26000)`** rows above. |
-| **Nordic Open DFU** (`usb_dongle_nrf52840`) | Different protocol — not Adafruit UF2. Use Nordic tooling. |
+| **Tools -> Burn Bootloader** (SWD) | Package ships board-specific SWD bootloader images. For `promicro_nrf52840`, burn `promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex`; for nice!nano-family entries, burn `nice_nano_bootloader-0.6.0_s140_6.1.1.hex`. After burning either S140 v6 image, use the **S140 v6 `(0x26000)`** rows above. |
+| **Nordic Open DFU** (`usb_dongle_nrf52840`) | Different protocol; not Adafruit UF2. Use Nordic tooling. |
 | **Seeed XIAO** UF2 labels | Volume label / model differ (`XIAO-BOOT`, etc.) but S140 v6/v7 **app-start rules are the same**; pick the matching `(0x26000)` / `(0x27000)` / `(0x1000)` entry for your board definition. |
 
 If a future community bootloader introduces a **new app start** not listed here, add
 a new **Bootloader / DFU** menu entry in the board definition following the
 existing naming pattern (`<transport>, <SoftDevice or layout note> (0xXXXX)`)
-— do not add a parallel menu axis keyed only on `UF2 Bootloader X.Y.Z`.
+and do not add a parallel menu axis keyed only on `UF2 Bootloader X.Y.Z`.
 
 ### Nordic Open DFU
 
@@ -92,7 +92,7 @@ choose the probe from **Tools -> Programmer** instead.
 
 On Windows, the J-Link paths use SEGGER's command-line tools. This avoids the
 common OpenOCD/libusb failure mode on machines that have the official SEGGER
-driver installed. CMSIS-DAP paths continue to use OpenOCD.
+driver installed. CMSIS-DAP paths use OpenOCD.
 
 Arduino IDE 2 SWD Debug follows the selected **Upload Method**: CMSIS-DAP keeps
 the OpenOCD server, while the J-Link upload method switches the debug metadata
@@ -107,12 +107,15 @@ definitions that have a known bundled bootloader image:
 
 Select **Tools -> Programmer -> SEGGER J-Link (SWD)** or **CMSIS-DAP (SWD)**
 first. The wrapper performs a chip erase/recover and then programs the bundled
-nice!nano bootloader HEX. J-Link uses SEGGER `JLink.exe`; CMSIS-DAP uses
-OpenOCD `nrf52_recover`.
+board-specific bootloader HEX. J-Link uses SEGGER `JLink.exe`; CMSIS-DAP uses
+OpenOCD `nrf52_recover`. The recover step clears `APPROTECT`; the bootloader
+HEX must leave APPROTECT erased (`0xFF`) or unmentioned so recovery remains
+possible.
 
-`hardware/arduinonrf/nrf52/bootloaders/nice_nano/nice_nano_bootloader-0.6.0_s140_6.1.1.hex`
+- `hardware/arduinonrf/nrf52/bootloaders/promicro_nrf52840/promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex`
+- `hardware/arduinonrf/nrf52/bootloaders/nice_nano/nice_nano_bootloader-0.6.0_s140_6.1.1.hex`
 
-After burning this image, select a S140 v6 / `0x26000` Bootloader / DFU layout
+After burning either S140 image, select a S140 v6 / `0x26000` Bootloader / DFU layout
 before compiling sketches. Do not use the no-SoftDevice `0x1000` menu entries
 with this bootloader image.
 
@@ -141,26 +144,26 @@ clone can never write **DP SELECT** to reach the **CTRL-AP** and run the nRF52
 the clone cannot, and neither can J-Link Commander `recover`/`Erase`,
 pyOCD-over-J-Link, nor STM32CubeProgrammer's bundled `JLink_x64.dll`.
 
-**Fix — use a CMSIS-DAP probe instead** (its raw SWD access does not need a prior
-halting connect), then run the CTRL-AP mass-erase that clears APPROTECT:
+**Fix — use a raw-SWD probe instead** (for example CMSIS-DAP, or a genuine
+SEGGER J-Link whose own DLL handles recover), then run the CTRL-AP mass-erase
+that clears APPROTECT:
 
 ```bash
 # OpenOCD (the Burn Bootloader CMSIS-DAP path already uses this target):
 openocd -f interface/cmsis-dap.cfg -f target/nrf52.cfg -c "init; nrf52_recover; exit"
 # or pyOCD:
-pyocd erase -t nrf52840 --mass    # CTRL-AP ERASEALL over CMSIS-DAP
+pyocd erase -t nrf52840 --mass    # CTRL-AP ERASEALL over CMSIS-DAP/raw-SWD
 ```
 
 After the erase, APPROTECT is cleared and the debug port opens; re-run **Burn
-Bootloader** (or flash `nice_nano_bootloader-0.6.0_s140_6.1.1.hex` directly) and
-select the S140 `0x26000` layout. A genuine SEGGER J-Link is the other fix; a
-clone J-Link OB cannot recover a locked nRF52840.
+Bootloader** (or flash the board-specific S140 bootloader HEX directly) and
+select the S140 `0x26000` layout.
 
 ### In-field UF2 bootloader update (no SoftDevice / nice!nano)
 
 Bundled under `hardware/arduinonrf/nrf52/bootloaders/nice_nano/`:
 
-- `update-nice_nano_bootloader-0.6.0_nosd.uf2` — Adafruit **update** UF2
+- `update-nice_nano_bootloader-0.6.0_nosd.uf2` - Adafruit **update** UF2
   (family `0xd663823c`). Rewrites MBR/bootloader/UICR for app start `0x1000`.
   This is **not** a sketch and **not** the same as **Burn Bootloader** over SWD.
 
