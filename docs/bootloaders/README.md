@@ -64,7 +64,7 @@ before any manual `.uf2` copy.
 | Item | Notes |
 |---|---|
 | Adafruit **`update-*` bootloader UF2** (family `0xd663823c`) | Bootloader replacement package, not a sketch. Changes MBR/bootloader/UICR; reboots into app mode. See [In-field UF2 bootloader update](#in-field-uf2-bootloader-update-no-softdevice--nicenano) below. |
-| **Tools -> Burn Bootloader** (SWD) | Package ships board-specific SWD bootloader images. For `promicro_nrf52840`, burn `promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex`; for nice!nano-family entries, burn `nice_nano_bootloader-0.6.0_s140_6.1.1.hex`. After burning either S140 v6 image, use the **S140 v6 `(0x26000)`** rows above. |
+| **Tools -> Burn Bootloader** (SWD) | Package ships board-specific SWD bootloader images. For `promicro_nrf52840`, the default S140 recovery image is `promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex`; its no-SoftDevice recovery image is `promicro_nrf52840_bootloader-0.11.0_nosd.hex`. For nice!nano-family entries, burn `nice_nano_bootloader-0.6.0_s140_6.1.1.hex`. After burning an S140 v6 image, use the **S140 v6 `(0x26000)`** rows above; after burning a noSD image, use a **no SoftDevice `(0x1000)`** row. |
 | **Nordic Open DFU** (`usb_dongle_nrf52840`) | Different protocol; not Adafruit UF2. Use Nordic tooling. |
 | **Seeed XIAO** UF2 labels | Volume label / model differ (`XIAO-BOOT`, etc.) but S140 v6/v7 **app-start rules are the same**; pick the matching `(0x26000)` / `(0x27000)` / `(0x1000)` entry for your board definition. |
 
@@ -106,18 +106,21 @@ definitions that have a known bundled bootloader image:
 - `supermini_nrf52840`
 
 Select **Tools -> Programmer -> SEGGER J-Link (SWD)** or **CMSIS-DAP (SWD)**
-first. The wrapper performs a chip erase/recover and then programs the bundled
-board-specific bootloader HEX. J-Link uses SEGGER `JLink.exe`; CMSIS-DAP uses
-OpenOCD `nrf52_recover`. The recover step clears `APPROTECT`; the bootloader
-HEX must leave APPROTECT erased (`0xFF`) or unmentioned so recovery remains
-possible.
+first. For `promicro_nrf52840`, also select the matching **Bootloader / DFU**
+layout before burning: S140 entries keep the default S140 HEX; no-SoftDevice
+entries select the packaged noSD recovery HEX. The wrapper performs a chip
+erase/recover and then programs the bundled board-specific bootloader HEX.
+J-Link uses SEGGER `JLink.exe`; CMSIS-DAP uses OpenOCD `nrf52_recover`. The
+recover step clears `APPROTECT`; the bootloader HEX must leave APPROTECT erased
+(`0xFF`) or unmentioned so recovery remains possible.
 
 - `hardware/arduinonrf/nrf52/bootloaders/promicro_nrf52840/promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex`
+- `hardware/arduinonrf/nrf52/bootloaders/promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex`
 - `hardware/arduinonrf/nrf52/bootloaders/nice_nano/nice_nano_bootloader-0.6.0_s140_6.1.1.hex`
 
-After burning either S140 image, select a S140 v6 / `0x26000` Bootloader / DFU layout
-before compiling sketches. Do not use the no-SoftDevice `0x1000` menu entries
-with this bootloader image.
+After burning an S140 image, select a S140 v6 / `0x26000` Bootloader / DFU
+layout before compiling sketches. After burning the ProMicro noSD image, select
+a no-SoftDevice / `0x1000` Bootloader / DFU layout before compiling sketches.
 
 Burn Bootloader is intentionally **not** exposed as a single-USB operation. If
 the existing bootloader still works, USB DFU bootloader updates can be done with

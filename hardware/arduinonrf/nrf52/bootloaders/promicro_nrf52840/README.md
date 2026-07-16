@@ -16,7 +16,22 @@ ProMicro nRF52840 board entry.
     deliberate: a recovered blank board must enumerate over USB instead of
     silently entering BLE-only OTA.
 
-Recovery check for this packaged image:
+- `promicro_nrf52840_bootloader-0.11.0_nosd.hex`
+  - No-SoftDevice / MBR-only layout; application start is `0x1000`.
+  - Built from the upstream Adafruit nRF52 bootloader `nice_nano` target
+    because the verified clone-family USB identity is `239A:00B3`, volume
+    `NICENANO`, model `nice!nano`.
+  - Contains MBR + bootloader + UICR bootloader/MBR pointers only. It does not
+    write `UICR.APPROTECT`, so a J-Link/CMSIS-DAP recover path remains open.
+  - Select a no-SoftDevice `Bootloader / DFU` menu entry before using
+    **Tools -> Burn Bootloader** with this image or before compiling sketches
+    for a board recovered with this image.
+
+- `update-promicro_nrf52840_bootloader-0.11.0_nosd.uf2`
+  - UF2 bootloader update package for an already-working Adafruit/nice!nano
+    class UF2 bootloader. It is not a sketch UF2.
+
+Recovery check for the default S140 packaged image:
 
 ```powershell
 nrfutil device fw-verify --serial-number <probe-serial> --traits jlink --family nrf52 `

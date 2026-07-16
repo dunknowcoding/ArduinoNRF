@@ -144,6 +144,7 @@ promicro_nrf52840.menu.bootloader.autonosd.upload.uf2_model=nice!nano
 promicro_nrf52840.menu.bootloader.autonosd.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.autonosd.upload.runtime_usb_pid=0x00B3
 promicro_nrf52840.menu.bootloader.autonosd.upload.maximum_size=950272
+promicro_nrf52840.menu.bootloader.autonosd.bootloader.file=promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex
 promicro_nrf52840.menu.bootloader.autonosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.autonosd.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.autonosd.build.bootloader_app_start=0x1000
@@ -172,6 +173,7 @@ promicro_nrf52840.menu.bootloader.promicronosduf2.upload.uf2_model=nice!nano
 promicro_nrf52840.menu.bootloader.promicronosduf2.upload.uf2_board_id=nRF52840-nicenano
 promicro_nrf52840.menu.bootloader.promicronosduf2.upload.runtime_usb_pid=0x00B3
 promicro_nrf52840.menu.bootloader.promicronosduf2.upload.maximum_size=950272
+promicro_nrf52840.menu.bootloader.promicronosduf2.bootloader.file=promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex
 promicro_nrf52840.menu.bootloader.promicronosduf2.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.promicronosduf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.promicronosduf2.build.bootloader_app_start=0x1000
@@ -217,6 +219,7 @@ promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.runtime_usb_pid=0x00
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.maximum_size=950272
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.use_1200bps_touch=false
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.wait_for_upload_port=false
+promicro_nrf52840.menu.bootloader.promicroserialnosd.bootloader.file=promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_app_start=0x1000
