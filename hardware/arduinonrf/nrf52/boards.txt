@@ -31,7 +31,11 @@ promicro_nrf52840.upload.adafruit_sd_req=0xFFFE
 promicro_nrf52840.upload.uf2_volume_label=NICENANO
 promicro_nrf52840.upload.uf2_model=nice!nano
 promicro_nrf52840.upload.uf2_board_id=nRF52840-nicenano
-promicro_nrf52840.upload.runtime_usb_pid=0x00B3
+# Keep the application identity distinct from the 0x00B3 UF2 bootloader.
+# The bootloader exposes interface 2 as mass storage while TaichiUSB exposes
+# interface 2 as the user CDC port. Reusing the same PID and chip serial makes
+# Windows retain the bootloader's usbstor binding for the runtime CDC node.
+promicro_nrf52840.upload.runtime_usb_pid=0x00B4
 promicro_nrf52840.bootloader.tool=niusboot
 promicro_nrf52840.bootloader.tool.default=niusboot
 promicro_nrf52840.bootloader.file=promicro_nrf52840/promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex
@@ -71,10 +75,10 @@ promicro_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 promicro_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
 promicro_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)
 promicro_nrf52840.menu.usbcdc.disabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=0 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=0
-promicro_nrf52840.menu.usbdesc.standard=Enabled (runtime DFU endpoint)
-promicro_nrf52840.menu.usbdesc.standard.build.usbdesc_flags=
 promicro_nrf52840.menu.usbdesc.no_app_dfu=Disabled (hide runtime DFU)
 promicro_nrf52840.menu.usbdesc.no_app_dfu.build.usbdesc_flags=-DNRF_USB_RUNTIME_DISABLE_APP_DFU=1
+promicro_nrf52840.menu.usbdesc.standard=Enabled (advanced; runtime DFU endpoint)
+promicro_nrf52840.menu.usbdesc.standard.build.usbdesc_flags=
 promicro_nrf52840.menu.flashprofile.internal1m=Internal flash only (1 MB)
 promicro_nrf52840.menu.flashprofile.internal1m.build.flash_flags=-DNRF_BOARD_HAS_QSPI=0 -DNRF_BOARD_FLASH_PROFILE=2 -DNRF_BOARD_PROGRAM_FLASH_BYTES={upload.maximum_size}
 promicro_nrf52840.menu.ramprofile.sram256=Built-in RAM (256 KB)
@@ -142,10 +146,10 @@ promicro_nrf52840.menu.bootloader.autonosd.upload.adafruit_sd_req=0xFFFE
 promicro_nrf52840.menu.bootloader.autonosd.upload.uf2_volume_label=NICENANO
 promicro_nrf52840.menu.bootloader.autonosd.upload.uf2_model=nice!nano
 promicro_nrf52840.menu.bootloader.autonosd.upload.uf2_board_id=nRF52840-nicenano
-promicro_nrf52840.menu.bootloader.autonosd.upload.runtime_usb_pid=0x00B3
+promicro_nrf52840.menu.bootloader.autonosd.upload.runtime_usb_pid=0x00B4
 promicro_nrf52840.menu.bootloader.autonosd.upload.maximum_size=950272
 promicro_nrf52840.menu.bootloader.autonosd.bootloader.file=promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex
-promicro_nrf52840.menu.bootloader.autonosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
+promicro_nrf52840.menu.bootloader.autonosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B4 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.autonosd.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.autonosd.build.bootloader_app_start=0x1000
 promicro_nrf52840.menu.bootloader.promicro=UF2 mass storage, SoftDevice S140 v6 layout (0x26000)
@@ -171,10 +175,10 @@ promicro_nrf52840.menu.bootloader.promicronosduf2.upload.adafruit_sd_req=0xFFFE
 promicro_nrf52840.menu.bootloader.promicronosduf2.upload.uf2_volume_label=NICENANO
 promicro_nrf52840.menu.bootloader.promicronosduf2.upload.uf2_model=nice!nano
 promicro_nrf52840.menu.bootloader.promicronosduf2.upload.uf2_board_id=nRF52840-nicenano
-promicro_nrf52840.menu.bootloader.promicronosduf2.upload.runtime_usb_pid=0x00B3
+promicro_nrf52840.menu.bootloader.promicronosduf2.upload.runtime_usb_pid=0x00B4
 promicro_nrf52840.menu.bootloader.promicronosduf2.upload.maximum_size=950272
 promicro_nrf52840.menu.bootloader.promicronosduf2.bootloader.file=promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex
-promicro_nrf52840.menu.bootloader.promicronosduf2.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
+promicro_nrf52840.menu.bootloader.promicronosduf2.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B4 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.promicronosduf2.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=2
 promicro_nrf52840.menu.bootloader.promicronosduf2.build.bootloader_app_start=0x1000
 promicro_nrf52840.menu.bootloader.promicrolegacy=UF2 mass storage, SoftDevice S140 v7 / legacy layout (0x27000)
@@ -215,12 +219,12 @@ promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.adafruit_sd_req=0xFF
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.uf2_volume_label=NICENANO
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.uf2_model=nice!nano
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.uf2_board_id=nRF52840-nicenano
-promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.runtime_usb_pid=0x00B3
+promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.runtime_usb_pid=0x00B4
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.maximum_size=950272
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.use_1200bps_touch=false
 promicro_nrf52840.menu.bootloader.promicroserialnosd.upload.wait_for_upload_port=false
 promicro_nrf52840.menu.bootloader.promicroserialnosd.bootloader.file=promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex
-promicro_nrf52840.menu.bootloader.promicroserialnosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B3 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
+promicro_nrf52840.menu.bootloader.promicroserialnosd.build.usb_backend_flags=-DNRF_SYSTEM_USB_BACKEND=1 -DNRF_SYSTEM_RUNTIME_USB_PID=0x00B4 -DNRF_USBD_CONFIG_TIMEOUT_RESET_MS=60000 -DNRF_USBD_1200_RESET_ARM_MS=2500 -DNRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT=0
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_flags=-DNRF_SYSTEM_BOOTLOADER_MODE=1 -DNRF_SYSTEM_BOOTLOADER_RESET_MODE=2
 promicro_nrf52840.menu.bootloader.promicroserialnosd.build.bootloader_app_start=0x1000
 promicro_nrf52840.menu.bootloader.promicroseriallegacy=Serial DFU, SoftDevice S140 v7 / legacy layout (0x27000)

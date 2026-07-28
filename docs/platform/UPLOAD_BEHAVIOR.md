@@ -31,7 +31,8 @@ IDE **Tools -> Programmer** selection, because Arduino upload recipes use the
 board's selected `Upload Method` properties. Use **Tools -> Programmer** for
 **Sketch -> Upload Using Programmer** and **Tools -> Burn Bootloader**.
 `SEGGER J-Link (SWD)` uses SEGGER's command-line tools; `CMSIS-DAP (SWD)` uses
-OpenOCD.
+OpenOCD for locked-target recover. For locked nRF52 parts, the recover/erase
+step is what clears `APPROTECT`; the bootloader HEX is flashed afterward.
 
 Arduino IDE 2 SWD Debug follows the selected `Upload Method`: CMSIS-DAP keeps
 the OpenOCD server, while the J-Link upload method switches the debug server
@@ -82,7 +83,19 @@ choices because it has no native USB upload path in this package.
   [../bootloaders/README.md](../bootloaders/README.md).
 - `Upload Method → Enter UF2 drive only (no upload)` performs the touch/bootloader wait, reports the matched drive, and exits before copying firmware.
 - If the selected upload COM is stale after a mode change, the wrapper fails with a clear "re-select the current SERVICE/DFU port" message instead of falling through to another board.
-- The wrapper treats same-PID runtime/bootloader cases as a separate class, rather than assuming a visible `0x239A:0x00B3` COM is already a bootloader port. On these boards it does NOT block the DFU on a PnP-level "transition observed" signal (because runtime and bootloader share `0x00B3`) — it surfaces a `[warn] ... Port never detached after touch` informational line and proceeds with a direct DFU attempt, which now succeeds because the firmware-side touch fix lands the chip in the bootloader before the warn fires.
+- ProMicro-class application firmware uses runtime PID `0x00B4`; PID `0x00B3`
+  belongs to the UF2 bootloader. Keep this split even for no-SoftDevice builds:
+  the bootloader exposes interface 2 as mass storage, while TaichiUSB exposes it
+  as the user CDC port. Reusing one PID and chip serial for both descriptor
+  layouts makes Windows retain the wrong per-interface driver binding.
+- After serial DFU, the upload wrapper accepts the selected runtime COM when it
+  returns or a newly enumerated COM with the expected runtime VID/PID. Windows
+  may assign a different number when the bootloader and application expose
+  different composite interfaces; that remap is not an upload failure.
+- The runtime DFU interface is hidden by default. Hands-free upload uses the
+  service CDC's 1200-bps touch, so the extra driverless DFU-runtime node is not
+  needed for ordinary use. Enable it explicitly only for a workflow that sends
+  USB DFU runtime requests directly.
 - The previous service-port "boot token" fallback (`~NIUSBL!42\r` after arming with line coding `134/8/2/2 + DTR+RTS`) has been removed — the standard 1200 bps touch path is now the single primary trigger.
 
 ## Real Promicro-class board result

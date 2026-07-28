@@ -1180,9 +1180,41 @@ function Invoke-NiusRecoverBoardToBootloader {
     }
 }
 
+function Get-NiusRuntimeComNamesForIdentity {
+    param(
+        [string]$RuntimeVid,
+        [string]$RuntimePid,
+        [switch]$Fresh
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RuntimeVid) -or
+        [string]::IsNullOrWhiteSpace($RuntimePid)) {
+        return @()
+    }
+
+    $vid = $RuntimeVid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
+    $normalizedPid =
+        $RuntimePid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
+    $prefix =
+        ('USB\VID_{0}&PID_{1}' -f $vid, $normalizedPid).ToUpperInvariant()
+    return @(
+        Get-SerialPortInventory -Fresh:$Fresh |
+            Where-Object {
+                ([string]$_.PNPDeviceID).Trim().ToUpperInvariant().StartsWith($prefix)
+            } |
+            ForEach-Object { ([string]$_.DeviceID).Trim().ToUpperInvariant() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+}
+
 function Invoke-NiusMisflashGuardAfterSamePidUpload {
     param(
         [string]$PortName,
+        [string]$FallbackRuntimePortName = '',
+        [string]$RuntimeVid = '',
+        [string]$RuntimePid = '',
+        [string[]]$RuntimePortsBefore = @(),
         [string]$ExpectedAppStart,
         [string]$ExpectedLabel = '',
         [string]$ExpectedModel = '',
@@ -1196,13 +1228,54 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
     }
 
     $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    $before = @{}
+    foreach ($name in @($RuntimePortsBefore)) {
+        if (-not [string]::IsNullOrWhiteSpace($name)) {
+            $before[$name.Trim().ToUpperInvariant()] = $true
+        }
+    }
     while ((Get-Date) -lt $deadline) {
-        if (-not [string]::IsNullOrWhiteSpace($PortName)) {
-            $st = Get-SerialPortUsableState -PortName $PortName
+        $knownCandidates = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($name in @($PortName, $FallbackRuntimePortName)) {
+            if (-not [string]::IsNullOrWhiteSpace($name) -and
+                -not $knownCandidates.Contains($name.Trim().ToUpperInvariant())) {
+                $knownCandidates.Add($name.Trim().ToUpperInvariant())
+            }
+        }
+
+        # Check deterministic ports first. A fresh PnP inventory can be slow
+        # when Windows is retiring the composite bootloader interfaces, and it
+        # must not delay success when the selected runtime COM has returned.
+        foreach ($candidate in $knownCandidates) {
+            $st = Get-SerialPortUsableState -PortName $candidate
             if ($st.Openable) {
                 return [pscustomobject]@{
                     Success = $true
-                    Summary = ('post-upload service COM {0} is openable' -f $PortName)
+                    Summary = ('post-upload runtime COM {0} is openable' -f $candidate)
+                }
+            }
+        }
+
+        $remappedCandidates = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($name in @(Get-NiusRuntimeComNamesForIdentity `
+                    -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid -Fresh)) {
+            $normalized = $name.Trim().ToUpperInvariant()
+            # A runtime port that did not exist before this upload belongs to
+            # the just-rebooted target even when its clone bootloader drops the
+            # USB serial string and Windows assigns a different COM number.
+            if (-not $before.ContainsKey($normalized) -and
+                -not $knownCandidates.Contains($normalized) -and
+                -not $remappedCandidates.Contains($normalized)) {
+                $remappedCandidates.Add($normalized)
+            }
+        }
+
+        foreach ($candidate in $remappedCandidates) {
+            $st = Get-SerialPortUsableState -PortName $candidate
+            if ($st.Openable) {
+                return [pscustomobject]@{
+                    Success = $true
+                    Summary = ('post-upload runtime COM {0} is openable' -f $candidate)
                 }
             }
         }
@@ -3737,6 +3810,11 @@ try {
             Pid = $effectiveRuntimeUsbPid
         }
     }
+    $runtimePortsBeforeUpload = @(
+        Get-NiusRuntimeComNamesForIdentity `
+            -RuntimeVid $effectiveRuntimeUsbVid `
+            -RuntimePid $effectiveRuntimeUsbPid
+    )
     $adafruitControlPort = $Port
     $controlPortAlreadyBootloader = $false
     $explicitUf2UploadMode = ($BootloaderMode -eq 'uf2')
@@ -4274,6 +4352,10 @@ try {
             Write-Stage -Percent 94 -Label 'Verifying'
             $null = Invoke-NiusMisflashGuardAfterSamePidUpload `
                 -PortName $adafruitControlPort `
+                -FallbackRuntimePortName $Port `
+                -RuntimeVid $effectiveRuntimeUsbVid `
+                -RuntimePid $effectiveRuntimeUsbPid `
+                -RuntimePortsBefore $runtimePortsBeforeUpload `
                 -ExpectedAppStart $Uf2AppStart `
                 -ExpectedLabel $Uf2VolumeLabel `
                 -ExpectedModel $Uf2Model `
