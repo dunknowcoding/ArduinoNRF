@@ -3995,6 +3995,29 @@ try {
         if ($autoMode) {
             Write-NiusDetail '[nius] Auto-detecting bootloader...' -ForegroundColor DarkGray
             $resolved = Resolve-AutoBootloader -DfuToolPath $toolPath -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId -Attempts 2 -DelayMs 200
+            # VID:PID 239A:00B3 is shared by several clone bootloaders whose
+            # application starts differ. Neither a PnP hit nor dfu-util listing
+            # that identity proves the flash layout. When the candidate default
+            # conflicts with the compiled layout and no INFO_UF2 evidence is
+            # mounted, enter the selected board's bootloader first and read its
+            # authoritative metadata before deciding.
+            if ($resolved.Resolved -and $UseTouch1200 -eq 'true') {
+                $initialCompiledStart = Normalize-NiusHexAddress -Value $Uf2AppStart
+                $initialResolvedStart = Normalize-NiusHexAddress -Value $resolved.AppStart
+                $initialHasUf2Metadata = -not [string]::IsNullOrWhiteSpace([string]$resolved.DriveRoot)
+                if ($resolved.Vid -eq '0x239a' -and
+                    $resolved.Pid -eq '0x00b3' -and
+                    -not $initialHasUf2Metadata -and
+                    -not [string]::IsNullOrWhiteSpace($initialCompiledStart) -and
+                    -not [string]::IsNullOrWhiteSpace($initialResolvedStart) -and
+                    $initialCompiledStart -ne $initialResolvedStart) {
+                    Write-NiusDetail ('[nius] auto-detect: ambiguous 239A:00B3 layout {0} conflicts with compiled {1}; requesting scoped bootloader metadata before deciding.' -f $initialResolvedStart, $initialCompiledStart) -ForegroundColor DarkGray
+                    $resolved = [pscustomobject]@{
+                        Resolved = $false
+                        ProbedCandidates = 'ambiguous 239A:00B3 bootloader identity; INFO_UF2.TXT required'
+                    }
+                }
+            }
             if (-not $resolved.Resolved -and $UseTouch1200 -eq 'true') {
                 Stop-NiusLingeringAdafruitNrfutil -Phase touch
                 Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
