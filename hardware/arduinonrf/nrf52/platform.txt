@@ -1,5 +1,5 @@
 name=ArduinoNRF
-version=0.3.11
+version=0.3.12
 
 compiler.path={runtime.tools.arm-none-eabi-gcc.path}/bin/
 compiler.c.cmd=arm-none-eabi-gcc
