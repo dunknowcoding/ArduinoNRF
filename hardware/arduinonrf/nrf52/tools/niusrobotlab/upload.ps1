@@ -773,6 +773,25 @@ function Resolve-NiusLayoutGuardUf2Summary {
             }
         }
 
+        function Test-PythonLaunch {
+            param(
+                [string]$Exe,
+                [string[]]$PrefixArgs = @()
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Exe)) {
+                return $false
+            }
+
+            try {
+                $null = & $Exe @PrefixArgs -c 'import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)' 2>$null
+                return ($LASTEXITCODE -eq 0)
+            }
+            catch {
+                return $false
+            }
+        }
+
         function Resolve-ConfiguredPythonPath {
             param([string]$Path)
 
@@ -799,80 +818,86 @@ function Resolve-NiusLayoutGuardUf2Summary {
 
         if (-not [string]::IsNullOrWhiteSpace($env:NIUS_UF2_PYTHON_EXE)) {
             $explicit = Resolve-ConfiguredPythonPath -Path $env:NIUS_UF2_PYTHON_EXE
-            if ($explicit) {
+            if ($explicit -and (Test-PythonLaunch -Exe $explicit)) {
                 return New-PythonLaunch -Exe $explicit
             }
         }
 
         if (-not [string]::IsNullOrWhiteSpace($env:NIUS_UF2_VENV)) {
             $venvPython = Resolve-ConfiguredPythonPath -Path $env:NIUS_UF2_VENV
-            if ($venvPython) {
+            if ($venvPython -and (Test-PythonLaunch -Exe $venvPython)) {
                 return New-PythonLaunch -Exe $venvPython
             }
         }
 
         $conda = Get-Command conda -ErrorAction SilentlyContinue
         if ($conda -and -not [string]::IsNullOrWhiteSpace($env:NIUS_UF2_CONDA_ENV)) {
-            return New-PythonLaunch -Exe $conda.Source -PrefixArgs @('run', '-n', $env:NIUS_UF2_CONDA_ENV.Trim(), 'python')
+            $condaEnvLaunch = New-PythonLaunch -Exe $conda.Source -PrefixArgs @('run', '-n', $env:NIUS_UF2_CONDA_ENV.Trim(), 'python')
+            if (Test-PythonLaunch -Exe $condaEnvLaunch.Exe -PrefixArgs $condaEnvLaunch.PrefixArgs) {
+                return $condaEnvLaunch
+            }
         }
 
         foreach ($cmdName in @('python', 'python3')) {
-            $cmd = Get-Command $cmdName -ErrorAction SilentlyContinue
-            if ($cmd -and $cmd.Source -notmatch '\\WindowsApps\\') {
-                return New-PythonLaunch -Exe $cmd.Source
+            foreach ($cmd in @(Get-Command $cmdName -All -ErrorAction SilentlyContinue)) {
+                $cmdPath = ''
+                foreach ($propertyName in @('Source', 'Path', 'Definition')) {
+                    $property = $cmd.PSObject.Properties[$propertyName]
+                    if ($property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
+                        $cmdPath = [string]$property.Value
+                        break
+                    }
+                }
+
+                # Windows Store/App Execution Alias launchers commonly live in
+                # WindowsApps. Judge every candidate by whether it runs Python 3,
+                # not by its installation path.
+                if (Test-PythonLaunch -Exe $cmdPath) {
+                    return New-PythonLaunch -Exe $cmdPath
+                }
             }
         }
 
-        foreach ($cand in @(
-            "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
-            "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
-            "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
-            "$env:LOCALAPPDATA\Programs\Python\Python310\python.exe",
-            "$env:LOCALAPPDATA\Programs\Python\Python39\python.exe"
-        )) {
-            if (Test-Path -LiteralPath $cand) {
-                return New-PythonLaunch -Exe $cand
+        $localPythonRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+        if (Test-Path -LiteralPath $localPythonRoot -PathType Container) {
+            $localInstalls = @(
+                Get-ChildItem -LiteralPath $localPythonRoot -Directory -Filter 'Python*' -ErrorAction SilentlyContinue |
+                    Sort-Object Name -Descending
+            )
+            foreach ($install in $localInstalls) {
+                $cand = Join-Path $install.FullName 'python.exe'
+                if ((Test-Path -LiteralPath $cand -PathType Leaf) -and (Test-PythonLaunch -Exe $cand)) {
+                    return New-PythonLaunch -Exe $cand
+                }
             }
         }
 
-        # Keep `py -3` before local Conda fallbacks: on most Windows hosts this
-        # is the user's system Python and avoids assuming any Conda install.
-        $py = Get-Command py -ErrorAction SilentlyContinue
-        if ($py) {
-            $null = & $py.Source -3 --version 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                return New-PythonLaunch -Exe $py.Source -PrefixArgs @('-3')
-            }
+        $windowsAppsPython = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\python.exe'
+        if ((Test-Path -LiteralPath $windowsAppsPython -PathType Leaf) -and (Test-PythonLaunch -Exe $windowsAppsPython)) {
+            return New-PythonLaunch -Exe $windowsAppsPython
         }
 
-        foreach ($cand in @(
-            "$env:USERPROFILE\Anaconda3\envs\IronEngineWorld\python.exe",
-            "$env:USERPROFILE\miniconda3\envs\IronEngineWorld\python.exe",
-            "$env:USERPROFILE\Miniconda3\envs\IronEngineWorld\python.exe",
-            'G:\Anaconda\envs\IronEngineWorld\python.exe',
-            'C:\ProgramData\Anaconda3\envs\IronEngineWorld\python.exe',
-            'C:\ProgramData\miniconda3\envs\IronEngineWorld\python.exe',
-            "$env:USERPROFILE\Anaconda3\python.exe",
-            'G:\Anaconda\python.exe',
-            'C:\ProgramData\Anaconda3\python.exe'
-        )) {
-            if (Test-Path -LiteralPath $cand) {
-                return New-PythonLaunch -Exe $cand
+        # The Windows Python launcher is independent of PATH entries for each
+        # installed interpreter, so it remains a useful fallback.
+        foreach ($py in @(Get-Command py -All -ErrorAction SilentlyContinue)) {
+            $pyPath = if (-not [string]::IsNullOrWhiteSpace($py.Source)) { $py.Source } else { $py.Path }
+            if (Test-PythonLaunch -Exe $pyPath -PrefixArgs @('-3')) {
+                return New-PythonLaunch -Exe $pyPath -PrefixArgs @('-3')
             }
         }
 
         if ($conda) {
             try {
-                $envList = & $conda.Source env list 2>$null | Out-String
-                if ($LASTEXITCODE -eq 0 -and $envList -match '(?m)^\s*IronEngineWorld\s+') {
-                    return New-PythonLaunch -Exe $conda.Source -PrefixArgs @('run', '-n', 'IronEngineWorld', 'python')
+                $condaBase = (& $conda.Source info --base 2>$null | Select-Object -First 1).Trim()
+                $basePython = Resolve-ConfiguredPythonPath -Path $condaBase
+                if ($basePython -and (Test-PythonLaunch -Exe $basePython)) {
+                    return New-PythonLaunch -Exe $basePython
                 }
             }
             catch {
             }
         }
-
-        throw 'Python 3 was not found. UF2 upload mode needs Python for build_uf2.py - install Python 3, set NIUS_UF2_PYTHON_EXE, set NIUS_UF2_VENV, or set NIUS_UF2_CONDA_ENV.'
+        throw 'Python 3 could not be started by the Arduino IDE process. Restart Arduino IDE after installing Python, or set NIUS_UF2_PYTHON_EXE to the full python.exe path. NIUS_UF2_VENV and NIUS_UF2_CONDA_ENV are also supported.'
     }
 
     function Wait-ForUsbBootloader {

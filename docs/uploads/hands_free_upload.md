@@ -44,6 +44,16 @@ Manual UF2 drag-and-drop is **not** guarded; see
 **[docs/platform/UPLOAD_BEHAVIOR.md](../platform/UPLOAD_BEHAVIOR.md)** and
 **[docs/bootloaders/README.md](../bootloaders/README.md)**.
 
+### Python used for UF2 conversion on Windows
+
+The wrapper verifies that a discovered launcher actually starts Python 3. It
+supports regular `python` / `python3` commands, Windows Store App Execution
+Aliases, the Windows `py -3` launcher, standard per-user Python installs, and
+Conda. If Python was installed while Arduino IDE was open, restart the IDE so
+it inherits the updated `PATH`. As an explicit fallback, set
+`NIUS_UF2_PYTHON_EXE` to the full path of `python.exe`; a virtual-environment
+directory may instead be supplied through `NIUS_UF2_VENV`.
+
 Driven by `tools.niusdfu.upload.pattern.windows` in `platform.txt`.
 
 ## Linux / macOS — `upload.py`
