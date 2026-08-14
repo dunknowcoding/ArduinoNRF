@@ -114,14 +114,9 @@ void NrfUsbSerialBackend::poll() {
 
 void NrfUsbSerialBackend::configureFromSystemProfile() {
     if (nrfUsbRuntimeEnabled()) {
-#if defined(NRF_BOARD_HAS_NATIVE_USB) && (NRF_BOARD_HAS_NATIVE_USB == 1)
-        // After Adafruit-style serial DFU the host tears down the bootloader
-        // composite device and the on-chip USB regulator/front-end can still be
-        // settling when the app starts. Beginning USBD in the same millisecond
-        // window has been observed on ProMicro-class clones to yield no new COM
-        // (clean disconnect in Device Manager, never re-enumerates).
-        delay(400);
-#endif
+        // begin() owns the bootloader handoff: it verifies ENABLE=0 and places
+        // the short detach interval after that edge. Delaying here would leave
+        // an inherited bootloader USBD session enabled and unserviced.
         nrfUsbdDriver().begin();
     }
     if (nrfUsbUserPortEnabled()) {

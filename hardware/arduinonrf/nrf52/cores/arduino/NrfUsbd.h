@@ -145,13 +145,31 @@ private:
         StatusPending,
     };
 
+    enum class DmaDirection : uint8_t {
+        None,
+        In,
+        Out,
+    };
+
     void resetEp0InXferState();
+    void abortEp0Transfer();
     void sendEp0ControlInChunkOrAdvanceStatus();
 
     void initDescriptors();
     void clearEvents();
+    void sanitizeEnabledSession();
     void enableInterrupts();
     void disableInterrupts();
+    bool disablePeripheral();
+    bool wakeFromLowPower();
+    void acknowledgeWakeAndDeferUsbCauses();
+    bool processUsbEvent(bool hasVbus);
+    bool startEasyDma(DmaDirection direction, uint8_t endpoint);
+    bool completeEasyDma(DmaDirection direction, uint8_t endpoint);
+    bool finishEasyDmaBeforeDisable();
+    bool repairEasyDmaParityBeforeDisable();
+    void abortEasyDmaAfterBusReset();
+    void clearEasyDmaAfterConfirmedDisable();
     void enablePullup(bool enabled);
     void processBusState(bool hasVbus);
     void startCdcEndpoints();
@@ -185,6 +203,8 @@ private:
     void resetDynamicEndpoints();
     void queueSerialStateNotification(bool userPort);
     void updateSerialState(bool userPort);
+    void failClosedPeripheral();
+    volatile bool initialized_ = false;
     volatile bool enabled_ = false;
     volatile bool started_ = false;
     volatile bool attached_ = false;
@@ -195,6 +215,12 @@ private:
     volatile bool rts_ = false;
     volatile bool cdcActive_ = false;
     volatile bool cdcOutArmed_ = false; // OUT endpoints armed since last config
+    volatile bool terminalFault_ = false;
+    volatile bool wakePending_ = false;
+    volatile DmaDirection dmaDirection_ = DmaDirection::None;
+    volatile uint8_t dmaEndpoint_ = 0xFFU;
+    volatile bool dmaBytesOdd_ = false;
+    uint32_t dmaParityScratch_ = 0UL;
 
     volatile bool dataInFlight_ = false;
     volatile bool notificationInFlight_ = false;
@@ -206,6 +232,7 @@ private:
     volatile bool userNotificationPending_ = false;
     volatile Ep0InXferPhase ep0InXferPhase_ = Ep0InXferPhase::Idle;
     uint16_t ep0InRemaining_ = 0;
+    uint16_t ep0InRequested_ = 0;
     const uint8_t *ep0InCursor_ = nullptr;
     bool ep0InNeedsZlp_ = false;
 
@@ -221,12 +248,14 @@ private:
     // following DTR-drop arm the touch even if the host's single-port sequence
     // (usbcdc=disabled) made the 1200 baud and the DTR-drop non-coincident.
     volatile uint32_t serviceSaw1200Millis_ = 0;
+    volatile uint32_t startupRetryMillis_ = 0;
     volatile uint8_t ignoredResetTouchCount_ = 0;
     volatile uint8_t address_ = 0;
     volatile uint8_t configuration_ = 0;
     volatile uint8_t pendingAddress_ = 0;
     volatile uint32_t configStartMillis_ = 0;
     volatile uint32_t configuredMillis_ = 0;
+    volatile uint32_t deferredUsbCauses_ = 0;
     NrfUsbLineCoding lineCoding_ = {115200UL, 0U, 0U, 8U};
     NrfUsbLineCoding userLineCoding_ = {115200UL, 0U, 0U, 8U};
     ControlOutTransfer pendingControlOut_ = ControlOutTransfer::None;

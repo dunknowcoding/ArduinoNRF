@@ -14,8 +14,9 @@ This is a merged nice!nano / Adafruit nRF52 Bootloader image with Nordic S140
 (`0x26000`) bootloader menu entries.
 
 Use Arduino IDE `Tools > Burn Bootloader` only with an SWD programmer selected
-under `Tools > Programmer` (`SEGGER J-Link` or `CMSIS-DAP`). It performs a chip
-recover/erase before programming the image.
+under `Tools > Programmer` (`SEGGER J-Link` or `CMSIS-DAP`). It performs the
+chip recover/erase step first and then programs the image. The bootloader HEX
+itself does not disable `APPROTECT`; unlock comes from the SWD recover path.
 
 ## UF2 in-field bootloader update (no SoftDevice)
 
