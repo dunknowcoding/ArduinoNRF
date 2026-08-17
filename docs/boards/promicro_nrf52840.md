@@ -19,7 +19,7 @@
 | Upload transport | UF2 mass storage or Adafruit serial DFU through `upload.ps1` |
 | Runtime service COM | may re-enumerate after upload; always select the current service/DFU COM |
 | Software reset target in code | full bootloader (`GPREGRET = 0x57`) |
-| Current status | UF2 upload, explicit serial DFU, UF2-drive-only, multi-board matching, hands-free reflash, and USB-CDC GDB-stub debug are PASSING; see [`../VALIDATION.md`](../VALIDATION.md) |
+| Current status | UF2 upload, explicit serial DFU, UF2-drive-only, multi-board matching, hands-free reflash, and USB-CDC GDB-stub debug are supported; see [`../platform/UPLOAD_BEHAVIOR.md`](../platform/UPLOAD_BEHAVIOR.md) |
 
 ## Current live-board status
 
@@ -133,5 +133,5 @@ silk-screen.
 ## Notes
 
 - The current source-of-truth docs are:
-  - `docs/VALIDATION.md`
+  - `docs/platform/UPLOAD_BEHAVIOR.md`
   - `docs/platform/UPLOAD_BEHAVIOR.md`

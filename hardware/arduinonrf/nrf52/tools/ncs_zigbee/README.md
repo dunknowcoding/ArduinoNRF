@@ -12,19 +12,19 @@ Local downloads and build outputs belong in the repository root:
 
 That directory is ignored by Git. Delete it whenever you want a clean workspace.
 
-## Current first target
+## Reference target
 
-- Board: `promicro_nrf52840`, physical `board1`
-- Programmer: SEGGER J-Link over SWD
+- Board: `promicro_nrf52840`
+- Programmer: supported SWD probe
 - Bootloader policy: never reflash bootloader by default
 - Firmware path: nCS Zigbee R23 add-on sidecar
 
 ## Tools
 
 - `build_zigbee.ps1`: checks the environment and builds Nordic official
-  `ncs-zigbee` samples through `west build`. On Windows it auto-detects the
-  `IronEngineWorld` conda environment when present and the latest
-  `C:\ncs\toolchains\*\environment.json` toolchain install.
+  `ncs-zigbee` samples through `west build`. On Windows it uses the active
+  Conda environment when suitable, `NCS_TOOLCHAIN_ROOT`, or a standard nCS
+  toolchain install.
 - `flash_zigbee.ps1`: flashes an already-built sidecar `.hex` through J-Link.
   It refuses bootloader/recover style actions and rejects HEX files that write
   outside the selected bootloader layout's protected application window.
@@ -44,7 +44,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -Board promicro_nrf52840 -Target ncp_usb -Pristine always
 ```
 
-For board1-board3 no-SoftDevice ProMicro/nice!nano-style bootloaders, build the
+For no-SoftDevice ProMicro/nice!nano-style bootloaders, build the
 bootloader-preserving NCP USB image instead:
 
 ```powershell
@@ -75,10 +75,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex -DryRun
 ```
 
-board1 was flashed successfully with this image over J-Link. Post-flash
+The reference hardware was flashed successfully with this image over SWD. Post-flash
 readback confirmed the bootloader vectors at `0x00000000` were unchanged, and
-Windows enumerated the running Zephyr NCP USB firmware as `VID_2FE3&PID_0001`
-on `COM27`.
+Windows enumerated the running Zephyr NCP USB firmware as `VID_2FE3&PID_0001`.
 
 ## Official NCP Host package
 
@@ -88,7 +87,7 @@ ignored workspace with:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -Download -Extract
+  -Port $env:NCP_PORT -Download -Extract
 ```
 
 The package is downloaded from the `ncs-zigbee v1.3.0` release as
@@ -100,7 +99,7 @@ On Windows, first check the host status:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27
+  -Port $env:NCP_PORT
 ```
 
 If it reports `Windows optional component: missing or pending reboot`, run this
@@ -110,27 +109,25 @@ once from an elevated PowerShell and reboot Windows:
 wsl --install --no-distribution
 ```
 
-After reboot, install Ubuntu 22.04 for this workflow. The default command keeps
-the distribution under `G:\WSL\ArduinoNRF-Ubuntu` when WSL supports `--location`:
+After reboot, install Ubuntu 22.04 for this workflow:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -InstallUbuntu -WslDistro Ubuntu `
-  -UbuntuLocation G:\WSL\ArduinoNRF-Ubuntu
+  -Port $env:NCP_PORT -InstallUbuntu -WslDistro Ubuntu
 ```
 
 On WSL2, Windows COM ports are not automatically exposed as `/dev/ttyS*`.
 Install `usbipd-win`, find the board's BUSID, and attach the Zephyr NCP USB
-device to Ubuntu. For board1 in the current lab state, `usbipd list` reports the
-NCP USB device as `2fe3:0001` on BUSID `4-3`:
+device to Ubuntu. Obtain the device BUSID from `usbipd list` rather than
+hard-coding a host-specific value:
 
 ```powershell
 winget install --id dorssel.usbipd-win --source winget
 
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -UsbBusId 4-3 -WslDistro Ubuntu `
+  -Port $env:NCP_PORT -UsbBusId $env:NCP_USB_BUS_ID -WslDistro Ubuntu `
   -WslTty /dev/ttyACM0 -AttachUsb
 ```
 
@@ -143,18 +140,18 @@ below.
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -WslTty /dev/ttyACM0 -RunSimpleGw
+  -Port $env:NCP_PORT -WslTty /dev/ttyACM0 -RunSimpleGw
 ```
 
 WSL1 fallback for Windows COM ports:
 
 ```powershell
 wsl --install Ubuntu-22.04 --name ArduinoNRF-Ubuntu1 `
-  --location G:\WSL\ArduinoNRF-Ubuntu1 --version 1 --no-launch --web-download
+  --version 1 --no-launch --web-download
 
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -WslDistro ArduinoNRF-Ubuntu1 -WslTty /dev/ttyS27 `
+  -Port $env:NCP_PORT -WslDistro ArduinoNRF-Ubuntu1 -WslTty $env:NCP_WSL_TTY `
   -RunSimpleGw
 ```
 

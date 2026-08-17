@@ -55,14 +55,9 @@ function Resolve-PythonRoot {
         }
         return [System.IO.Path]::GetFullPath($Value)
     }
-    if (-not [string]::IsNullOrWhiteSpace($env:CONDA_PREFIX)) {
-        if ((Split-Path -Leaf $env:CONDA_PREFIX) -eq 'IronEngineWorld') {
-            return [System.IO.Path]::GetFullPath($env:CONDA_PREFIX)
-        }
-    }
-    $ironEngineWorld = 'G:\Anaconda\envs\IronEngineWorld'
-    if (Test-Path -LiteralPath (Join-Path $ironEngineWorld 'python.exe') -PathType Leaf) {
-        return [System.IO.Path]::GetFullPath($ironEngineWorld)
+    if (-not [string]::IsNullOrWhiteSpace($env:CONDA_PREFIX) -and
+        (Test-Path -LiteralPath (Join-Path $env:CONDA_PREFIX 'python.exe') -PathType Leaf)) {
+        return [System.IO.Path]::GetFullPath($env:CONDA_PREFIX)
     }
     return ''
 }
@@ -76,9 +71,9 @@ function Resolve-ToolchainRoot {
     if (-not [string]::IsNullOrWhiteSpace($env:NCS_TOOLCHAIN_ROOT)) {
         $candidates.Add($env:NCS_TOOLCHAIN_ROOT)
     }
-    $defaultRoot = 'C:\ncs\toolchains'
-    if (Test-Path -LiteralPath $defaultRoot -PathType Container) {
-        foreach ($dir in @(Get-ChildItem -LiteralPath $defaultRoot -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+    $standardRoot = Join-Path $env:SystemDrive 'ncs\toolchains'
+    if (Test-Path -LiteralPath $standardRoot -PathType Container) {
+        foreach ($dir in @(Get-ChildItem -LiteralPath $standardRoot -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
             $candidates.Add($dir.FullName)
         }
     }

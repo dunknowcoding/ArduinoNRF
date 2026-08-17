@@ -18,6 +18,11 @@
 
 #if NIMBLE_CFG_CONTROLLER
 #include "controller/ble_ll.h"
+/* NimBLE normally obtains this SYSINIT entrypoint declaration from generated
+ * Mynewt headers. The bare-metal port calls it directly, so declare the public
+ * controller initializer explicitly instead of relying on an implicit C
+ * declaration. */
+void ble_ll_init(void);
 #endif
 
 void os_msys_init(void);

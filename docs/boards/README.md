@@ -25,4 +25,4 @@ summarized below, and the authoritative pin/peripheral truth lives in
 - `reference-core`: derived from a trusted reference implementation rather than direct hardware proof.
 - `partial`: coherent package behavior exists, but the board-level evidence chain is incomplete.
 
-**Related**: clone ProMicro / single-cable USB upload and dual-CDC + USB-CDC GDB-stub debugging are covered in **[`docs/VALIDATION.md`](../VALIDATION.md)** and **[`docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md`](../platform/ARDUINO_IDE2_USB_GDBSTUB.md)**.
+**Related**: clone ProMicro / single-cable USB upload and dual-CDC + USB-CDC GDB-stub debugging are covered in **[`docs/platform/UPLOAD_BEHAVIOR.md`](../platform/UPLOAD_BEHAVIOR.md)** and **[`docs/platform/ARDUINO_IDE2_USB_GDBSTUB.md`](../platform/ARDUINO_IDE2_USB_GDBSTUB.md)**.

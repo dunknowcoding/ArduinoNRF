@@ -1,5 +1,5 @@
 name=ArduinoNRF
-version=0.3.14
+version=0.3.15
 
 compiler.path={runtime.tools.arm-none-eabi-gcc.path}/bin/
 compiler.c.cmd=arm-none-eabi-gcc
@@ -81,17 +81,17 @@ tools.niusjlink.program.params.verbose=-ArduinoIdeVerboseUpload 'true'
 tools.niusjlink.program.params.quiet=-ArduinoIdeVerboseUpload 'false'
 
 tools.niusdfu.upload.pattern="{runtime.tools.dfu-util.path}/bin/dfu-util" {upload.verbose} -d {upload.usb_vid}:{upload.usb_pid} -a {upload.dfu_alt} -D "{build.path}/{build.project_name}.bin" -R
-# Arduino CLI performs its own 1200-bps touch when upload.use_1200bps_touch=true, which races our
-# PowerShell open sequence on Windows. Keep boards.use_1200bps_touch=false for golang and always pass
-# -UseTouch1200 true here so upload.ps1 owns touch (115200 + 1200 + DTR drop + clone VID/PID logic).
-tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -NrfutilExe '{runtime.tools.adafruit-nrfutil.path}/adafruit-nrfutil.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort '{upload.wait_for_upload_port}' -EnterBootloaderOnly '{upload.enter_bootloader_only}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
+# The platform uploaders own the 1200-bps transition and the identity-scoped
+# bootloader wait. Keep upload.use_1200bps_touch=false so Arduino CLI cannot
+# race that state machine or substitute a peer board's newly appeared port.
+tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -NrfutilExe '{runtime.tools.adafruit-nrfutil.path}/adafruit-nrfutil.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbVid '{upload.runtime_usb_vid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort '{upload.wait_for_upload_port}' -EnterBootloaderOnly '{upload.enter_bootloader_only}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
 # Linux / macOS: Adafruit's standard cross-platform path - adafruit-nrfutil genpkg
 # + dfu serial - driven by a small stdlib-only Python script. Requires
 # adafruit-nrfutil on PATH (pip3 install --user adafruit-nrfutil). The Arduino
-# IDE handles the 1200-bps touch when use_1200bps_touch=true, but the script
-# also passes -t 1200 to adafruit-nrfutil as a safety belt.
-tools.niusdfu.upload.pattern.linux=python3 "{runtime.platform.path}/tools/niusrobotlab/upload.py" --hex "{build.path}/{build.project_name}.hex" --port {serial.port} --vid {upload.usb_vid} --pid {upload.usb_pid} --sd-req {upload.adafruit_sd_req} {upload.verbose}
-tools.niusdfu.upload.pattern.macosx=env LANG=C.UTF-8 LC_ALL=C.UTF-8 python3 "{runtime.platform.path}/tools/niusrobotlab/upload.py" --hex "{build.path}/{build.project_name}.hex" --port {serial.port} --vid {upload.usb_vid} --pid {upload.usb_pid} --sd-req {upload.adafruit_sd_req} {upload.verbose}
+# adafruit-nrfutil receives -t 1200 after the script validates the selected
+# runtime/bootloader identity.
+tools.niusdfu.upload.pattern.linux=python3 "{runtime.platform.path}/tools/niusrobotlab/upload.py" --hex "{build.path}/{build.project_name}.hex" --port {serial.port} --vid {upload.usb_vid} --pid {upload.usb_pid} --runtime-vid {upload.runtime_usb_vid} --runtime-pid {upload.runtime_usb_pid} --sd-req {upload.adafruit_sd_req} {upload.verbose}
+tools.niusdfu.upload.pattern.macosx=env LANG=C.UTF-8 LC_ALL=C.UTF-8 python3 "{runtime.platform.path}/tools/niusrobotlab/upload.py" --hex "{build.path}/{build.project_name}.hex" --port {serial.port} --vid {upload.usb_vid} --pid {upload.usb_pid} --runtime-vid {upload.runtime_usb_vid} --runtime-pid {upload.runtime_usb_pid} --sd-req {upload.adafruit_sd_req} {upload.verbose}
 tools.niusdfu.upload.params.verbose=-ArduinoIdeVerboseUpload 'true'
 tools.niusdfu.upload.params.quiet=-ArduinoIdeVerboseUpload 'false'
 tools.niusdfu.upload.params.verbose.linux=--verbose

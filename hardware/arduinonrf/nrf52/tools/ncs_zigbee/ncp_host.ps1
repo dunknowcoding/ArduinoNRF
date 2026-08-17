@@ -6,7 +6,7 @@ param(
 
     [string]$PackageUrl = 'https://github.com/nrfconnect/ncs-zigbee/releases/download/v1.3.0/ncp_host_v3.6.0.zip',
 
-    [string]$Port = 'COM27',
+    [string]$Port = '',
 
     [AllowEmptyString()]
     [string]$UsbBusId = '',
@@ -15,7 +15,7 @@ param(
 
     [string]$UbuntuDistribution = 'Ubuntu-22.04',
 
-    [string]$UbuntuLocation = 'G:\WSL\ArduinoNRF-Ubuntu',
+    [string]$UbuntuLocation = '',
 
     [AllowEmptyString()]
     [string]$WslTty = '',
@@ -143,9 +143,7 @@ Open an elevated PowerShell and run:
 
   wsl --install --no-distribution
 
-Then reboot Windows and rerun this command:
-
-  powershell -NoProfile -ExecutionPolicy Bypass -File hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 -InstallUbuntu -WslDistro $Distro -UbuntuLocation "$Location"
+Then reboot Windows and rerun the ncp_host.ps1 command with -InstallUbuntu.
 "@
         }
     }
@@ -155,10 +153,18 @@ Then reboot Windows and rerun this command:
         return
     }
 
-    $parent = Split-Path -Parent ([System.IO.Path]::GetFullPath($Location))
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    Write-Host ('[wsl] installing {0} as {1} at {2}' -f $Distribution, $Distro, $Location)
-    & $wsl.Source --install $Distribution --name $Distro --location $Location --no-launch --web-download
+    $arguments = @('--install', $Distribution, '--name', $Distro)
+    if (-not [string]::IsNullOrWhiteSpace($Location)) {
+        $parent = Split-Path -Parent ([System.IO.Path]::GetFullPath($Location))
+        New-Item -ItemType Directory -Force -Path $parent | Out-Null
+        $arguments += @('--location', $Location)
+        Write-Host ('[wsl] installing {0} as {1} at {2}' -f $Distribution, $Distro, $Location)
+    }
+    else {
+        Write-Host ('[wsl] installing {0} as {1} at the WSL default location' -f $Distribution, $Distro)
+    }
+    $arguments += @('--no-launch', '--web-download')
+    & $wsl.Source @arguments
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -236,7 +242,7 @@ Write-Host ("  wsl tty   : {0}" -f $tty)
 Write-Host ("  distro    : {0}" -f $WslDistro)
 Write-Host ("  run secs  : {0}" -f $(if ($RunSeconds -gt 0) { $RunSeconds } else { 'unlimited' }))
 Write-Host ("  ubuntu    : {0}" -f $UbuntuDistribution)
-Write-Host ("  location  : {0}" -f $UbuntuLocation)
+Write-Host ("  location  : {0}" -f $(if ([string]::IsNullOrWhiteSpace($UbuntuLocation)) { '(WSL default)' } else { $UbuntuLocation }))
 Write-Host ''
 
 if ($InstallUbuntu) {

@@ -27,7 +27,7 @@
     "xiao_nrf52840"
   ],
   "hardware_policy": {
-    "preferred_first_board": "board1/promicro_nrf52840",
+    "preferred_first_board": "promicro_nrf52840",
     "preferred_first_programmer": "SEGGER J-Link over SWD",
     "never_reflash_bootloader_by_default": true,
     "external_cc2530_path_remains_supported": true

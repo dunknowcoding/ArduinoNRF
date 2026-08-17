@@ -4,12 +4,10 @@
 #include "NrfBoard.h"
 
 namespace {
-// USB device identity. The user firmware MUST stay inside the Adafruit VID/PID
-// family so Windows binds usbser.sys instead of treating the board like a
-// Nordic Open DFU target. The runtime application does NOT need to reuse the
-// exact bootloader PID: mature nRF52 UF2 stacks intentionally separate the
-// bootloader and application identities so the host sees a clean PnP
-// transition across bootloader -> app hand-off.
+// USB device identity comes from each board recipe. Runtime firmware does not
+// have to reuse the bootloader PID: keeping application and bootloader
+// identities distinct gives the host a clean PnP transition and prevents an
+// MSC bootloader interface from being cached as a runtime CDC interface.
 constexpr uint16_t kAdafruitVid = 0x239A;
 constexpr uint8_t kAdafruitSerialOnlyResetMagic = 0x4EU;
 constexpr uint8_t kAdafruitUf2ResetMagic = 0x57U;
@@ -52,7 +50,9 @@ bool bootloaderDoubleResetFallbackEnabled() {
 }
 
 inline uint16_t boardVid() {
-#if defined(ARDUINO_NRF52_PROMICRO) \
+#if defined(NRF_SYSTEM_RUNTIME_USB_VID)
+    return static_cast<uint16_t>(NRF_SYSTEM_RUNTIME_USB_VID);
+#elif defined(ARDUINO_NRF52_PROMICRO) \
  || defined(ARDUINO_NRF52_NICENANO_V2) \
  || defined(ARDUINO_NRF52_SUPERMINI) \
  || defined(ARDUINO_NRF52_NRFMICRO) \

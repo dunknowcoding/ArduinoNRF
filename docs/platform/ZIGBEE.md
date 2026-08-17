@@ -20,23 +20,20 @@ The first implementation target is a sidecar firmware flow:
 ```text
 nRF Connect SDK + Zigbee R23 add-on -> official Zigbee firmware .hex
 ArduinoNRF board metadata/tools      -> board overlay, build wrapper, flash wrapper
-board1 + J-Link                      -> first hardware validation target
+ProMicro-class board + SWD probe    -> reference hardware validation target
 ```
 
 Tracked files:
 
 - Tools: [`hardware/arduinonrf/nrf52/tools/ncs_zigbee/`](../../hardware/arduinonrf/nrf52/tools/ncs_zigbee/)
 - Pins: [`pins.json`](../../hardware/arduinonrf/nrf52/tools/ncs_zigbee/pins.json)
-- Planning note: `F:\Arduino\driver\arduinonrf_improve.md` in the local driver
-  workspace.
 
 ### What this path means
 
 - Uses the nRF52840's onboard IEEE 802.15.4 RADIO.
 - Uses Nordic's official Zigbee R23 add-on / ZBOSS stack through nCS.
 - First firmware targets are `ncp_usb`, `shell`, and `coordinator`.
-- First board target is physical **board1** (`promicro_nrf52840`) because it has
-  a J-Link connected.
+- The reference board target is `promicro_nrf52840` with a supported SWD probe.
 - Bootloaders are not reflashed by default.
 - Local SDK downloads and builds go in `.ncs-zigbee-work/`, which is ignored by
   Git.
@@ -90,7 +87,7 @@ bootloader-preserving image is built separately with `-ImageLayout no-softdevice
 
 ### Build a no-SoftDevice bootloader-preserving NCP USB image
 
-For board1-board3 style no-SoftDevice ProMicro/nice!nano bootloaders, build the
+For no-SoftDevice ProMicro/nice!nano-style bootloaders, build the
 application-only NCP USB image with:
 
 ```powershell
@@ -132,7 +129,7 @@ or bootloader flashing commands. By default it reads the HEX address range and
 refuses files that write below the selected layout's `app_start` or at/above
 the selected layout's protected `app_end`.
 
-For board1 no-SoftDevice dry-run validation:
+For no-SoftDevice dry-run validation:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
@@ -141,10 +138,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -Hex .ncs-zigbee-work\b\an\pm40\ncp-nosd\zephyr\zephyr.hex -DryRun
 ```
 
-board1 hardware validation has also passed with the same HEX and J-Link path:
+Hardware validation has also passed with the same HEX and SWD path:
 the bootloader vectors at `0x00000000` were unchanged after flashing, the Zephyr
 application vector table was present at `0x00001000`, and Windows enumerated
-the device as Zephyr USB CDC `VID_2FE3&PID_0001`, `COM27`.
+the device as Zephyr USB CDC `VID_2FE3&PID_0001`.
 
 ### NCP host validation path
 
@@ -156,19 +153,18 @@ and check this package under `.ncs-zigbee-work/`:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -Download -Extract
+  -Port $env:NCP_PORT -Download -Extract
 ```
 
 The included `application/simple_gw/simple_gw` executable is a 64-bit Linux ELF.
 It is not a native Windows executable. The expected Windows development path is
 to run it through Ubuntu/WSL or on a Linux host, with the board's Windows COM
-port mapped to the equivalent Linux serial device, for example `COM27` ->
-`/dev/ttyS27`:
+port mapped to the equivalent Linux serial device:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -RunSimpleGw
+  -Port $env:NCP_PORT -RunSimpleGw
 ```
 
 If the wrapper reports `Ubuntu: not available`, install or enable an Ubuntu WSL
@@ -181,19 +177,17 @@ elevated PowerShell and reboot:
 wsl --install --no-distribution
 ```
 
-Then install Ubuntu 22.04 for this workflow, preferably under `G:\` on lab
-machines:
+Then install Ubuntu 22.04 for this workflow:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -InstallUbuntu -WslDistro Ubuntu `
-  -UbuntuLocation G:\WSL\ArduinoNRF-Ubuntu
+  -Port $env:NCP_PORT -InstallUbuntu -WslDistro Ubuntu
 ```
 
 On WSL2, attach the Zephyr NCP USB device with `usbipd-win` instead of using the
-legacy `/dev/ttyS27` COM-port mapping. For board1 in the current lab state,
-`usbipd list` reports the NCP USB CDC device as `2fe3:0001` on BUSID `4-3`.
+legacy `/dev/ttyS*` COM-port mapping. Obtain the device BUSID from
+`usbipd list` instead of hard-coding it.
 Run the attach command from an elevated PowerShell:
 
 ```powershell
@@ -201,7 +195,7 @@ winget install --id dorssel.usbipd-win --source winget
 
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -UsbBusId 4-3 -WslDistro Ubuntu `
+  -Port $env:NCP_PORT -UsbBusId $env:NCP_USB_BUS_ID -WslDistro Ubuntu `
   -WslTty /dev/ttyACM0 -AttachUsb
 ```
 
@@ -210,7 +204,7 @@ After attach, start the official host through the Linux CDC ACM device:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -WslTty /dev/ttyACM0 -RunSimpleGw
+  -Port $env:NCP_PORT -WslTty /dev/ttyACM0 -RunSimpleGw
 ```
 
 If WSL2 USB/IP attaches the Zephyr CDC ACM device and then drops it with
@@ -219,11 +213,11 @@ mapping instead:
 
 ```powershell
 wsl --install Ubuntu-22.04 --name ArduinoNRF-Ubuntu1 `
-  --location G:\WSL\ArduinoNRF-Ubuntu1 --version 1 --no-launch --web-download
+  --version 1 --no-launch --web-download
 
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   hardware\arduinonrf\nrf52\tools\ncs_zigbee\ncp_host.ps1 `
-  -Port COM27 -WslDistro ArduinoNRF-Ubuntu1 -WslTty /dev/ttyS27 `
+  -Port $env:NCP_PORT -WslDistro ArduinoNRF-Ubuntu1 -WslTty $env:NCP_WSL_TTY `
   -RunSimpleGw
 ```
 
@@ -244,11 +238,8 @@ Zigbee / 802.15.4 traffic is handled by an external module.
 - **Built-in flasher:** [`libraries/CCDebugger/`](../../hardware/arduinonrf/nrf52/libraries/CCDebugger/)
   turns the nRF52840 into a TI CC2530 programmer.
 
-Current lab state:
-
-- board1-board5 each have a CC2530 module connected.
-- The NiusZigbee path remains usable while the official onboard path is being
-  added.
+The NiusZigbee path remains usable while the official onboard path is being
+added.
 
 ### Quick use
 

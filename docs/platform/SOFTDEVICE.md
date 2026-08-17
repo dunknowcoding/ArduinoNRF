@@ -32,8 +32,8 @@ register access for their timing-critical protocols.
 
 | Board | Flash layout | SoftDevice in flash |
 |-------|--------------|---------------------|
-| **board1 / board2 / board3** (ProMicro nRF52840 clone) | app linked at `0x1000`, no SoftDevice region | **None** |
-| **board4 / board5** (nice!nano v2) | app linked at `0x26000`, S140 v6.1.1 below it | **S140, dormant** |
+| ProMicro-class nRF52840 clone with no-SoftDevice bootloader | app linked at `0x1000`, no SoftDevice region | **None** |
+| nice!nano v2 with S140 v6 bootloader | app linked at `0x26000`, S140 v6.1.1 below it | **S140, dormant** |
 
 On the ProMicro clones there is literally no SoftDevice to start — there is no
 SoftDevice region in flash. On the nice!nano the S140 sits below the application
@@ -56,9 +56,9 @@ This sits next to the existing startup diag markers (`0x20004000`/`4`/`8`) insid
 the SoftDevice-reserved SRAM zone (`0x20000000`–`0x20005FFF`) that neither the
 bootloader nor our linker script touches, so it survives every reset.
 
-### Verified on board1 (J-Link)
+### Verified over SWD
 
-board1 is a ProMicro clone (no SoftDevice). After flashing a current core build,
+A ProMicro-class clone with no SoftDevice was tested. After flashing a current core build,
 halting over SWD and reading `0x2000400C` returns `0x5DAB0000` and `0x20004010`
 returns `0x00001000` — the core correctly detected "no SoftDevice, app at
 `0x1000`" and proceeded bare-metal.
@@ -114,6 +114,6 @@ Without all four, `requestEnable()` returns `false` and the core stays
 bare-metal. This is intentional: it keeps the common path safe and makes the
 NimBLE/Thread conflict an explicit, deliberate choice rather than an accident.
 
-> Note: the ProMicro clones (board1/2/3) cannot run a SoftDevice at all — there
+> Note: ProMicro clones with the no-SoftDevice bootloader cannot run a SoftDevice — there
 > is no SoftDevice in their flash and the bootloader layout has the application
 > at `0x1000`. The opt-in path only applies to S140-equipped boards.

@@ -1,6 +1,6 @@
 # Upload Behavior
 
-Date: 2026-06-11
+Date: 2026-08-17
 
 This document records the current upload truth exposed by the package. It does not claim that every clone board is fully verified.
 
@@ -44,8 +44,15 @@ choices because it has no native USB upload path in this package.
 ## Current Windows wrapper behavior
 
 - `tools/niusrobotlab/upload.ps1` owns the touch/reset sequence on Windows instead of relying on the Arduino CLI default touch path.
+- Arduino board recipes keep `upload.use_1200bps_touch=false`; this prevents
+  Arduino CLI from issuing a second, unscoped touch before the identity-aware
+  wrapper runs.
 - `Bootloader / DFU → Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use `adafruit-nrfutil`.
 - UF2 drives are matched to the selected serial port by stable USB identity. If two boards expose the same volume label, the wrapper refuses ambiguous matches instead of choosing the first drive.
+- For bootloaders whose USB PID differs from the application PID, the wrapper
+  accepts the selected board's scoped UF2 volume as transition proof. It never
+  waits for the old runtime COM to return before copying firmware; that COM can
+  only return after the copy and reboot have completed.
 - When a UF2 volume is visible, `upload.ps1` reads `INFO_UF2.TXT` and uses the
   `SoftDevice` field to infer the mounted layout (`0x1000`, `0x26000`, or
   `0x27000`). If that layout conflicts with the app start used by the selected
@@ -61,11 +68,14 @@ choices because it has no native USB upload path in this package.
   start (`0x1000` / `0x26000` / `0x27000`) against `INFO_UF2.TXT` on the
   selected board's UF2 drive (matched by stable USB identity, not drive letter).
   Disable with `NIUS_DISABLE_LAYOUT_GUARD=1` (not recommended).
-- **Misflash guard** (`misflash` failure): after **same-PID** serial DFU, waits
-  for the service COM to return in application mode. If USB never comes back
+- **Misflash guard** (`misflash` failure): after serial DFU, direct UF2, or
+  Nordic DFU, waits for the selected board to return in application mode. If USB never comes back
   (typical when app start was wrong), the wrapper attempts 1200 bps touch / UF2
   recovery and fails with an IDE-visible message. Disable with
   `NIUS_DISABLE_MISFLASH_GUARD=1`.
+  A reused COM number is not sufficient evidence: the endpoint must match the
+  board recipe's runtime VID/PID. This prevents the departing bootloader CDC
+  from being mistaken for a successfully started application.
 - **Manual UF2 drag in DFU mode is not guarded.** Copying a `.uf2` from Explorer
   bypasses `upload.ps1`. You must match **bootloader layout**, not just the
   version string in `INFO_UF2.TXT` (for example `0.6.0` exists in both S140
@@ -98,6 +108,16 @@ choices because it has no native USB upload path in this package.
   USB DFU runtime requests directly.
 - The previous service-port "boot token" fallback (`~NIUSBL!42\r` after arming with line coding `134/8/2/2 + DTR+RTS`) has been removed — the standard 1200 bps touch path is now the single primary trigger.
 
+## Linux and macOS wrapper behavior
+
+- `upload.py` accepts the selected port only when it matches either the board
+  recipe's runtime identity or its bootloader identity; the script then owns
+  the 1200-bps transition through `adafruit-nrfutil`.
+- A successful transfer is not sufficient by itself. The selected device's USB
+  serial must return with the declared runtime VID/PID before upload succeeds.
+- Ambiguous same-identity devices fail closed instead of allowing a peer board
+  to satisfy target detection or post-upload verification.
+
 ## Real Promicro-class board result
 
 ### What is now working
@@ -107,7 +127,7 @@ choices because it has no native USB upload path in this package.
 - with `usbcdc=disabled`, the board keeps a single visible SERVICE CDC path
 - UF2 upload from the current DFU port works in both `bootloader=auto` and explicit UF2 menu modes
 - explicit Adafruit serial DFU from the current DFU port works and is not confused by a mounted UF2 volume
-- with two boards simultaneously mounted as `NICENANO`, the selected board maps to its own drive (`J:` vs `K:` in the hardware run)
+- with two boards simultaneously mounted as `NICENANO`, the selected board maps to its own volume by stable USB identity
 - selecting a stale COM after the board re-enumerates is rejected before any upload can target another board
 - **a second upload from user mode works** — the 1200 bps touch triggers `NVIC_SystemReset()` into the bootloader, the selected transport streams the image, and the board re-boots into user mode.
 

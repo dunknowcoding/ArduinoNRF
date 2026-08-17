@@ -1344,7 +1344,7 @@ ble_ll_rx_end(uint8_t *rxbuf, struct ble_mbuf_hdr *rxhdr)
 /* JOINT-DEBUG (two-board): TX-frame captures. point B = mbuf at controller entry
  * (ble_ll_conn_tx_pkt_in), point C = bytes written to the radio (pducb). Each is
  * a ring of the last 4 L2CAP-start data PDUs, word pairs [b0..3],[b4..5|len|hdr].
- * SWD-readable on board1, and board2's sketch prints them over Serial. */
+ * SWD-readable on a reference board, and the diagnostic sketch prints them over Serial. */
 __attribute__((used)) volatile uint32_t g_txB[8] = {0};
 __attribute__((used)) volatile uint32_t g_txB_i = 0;
 __attribute__((used)) volatile uint32_t g_txC[8] = {0};

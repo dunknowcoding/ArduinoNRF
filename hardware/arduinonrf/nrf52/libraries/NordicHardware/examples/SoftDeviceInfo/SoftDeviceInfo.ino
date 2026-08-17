@@ -8,9 +8,9 @@
   AAR and ECB crypto blocks all stay owned by your sketch.
 
   This sketch prints what the core detected at boot:
-    * ProMicro nRF52840 clones (board1/board2/board3): "Absent" - the
+    * no-SoftDevice ProMicro nRF52840 clones: "Absent" - the
       application is linked at 0x1000 with no SoftDevice region.
-    * nice!nano v2 (board4/board5): "Dormant (S140 present, not started)" -
+    * nice!nano v2 with S140 bootloader: "Dormant (S140 present, not started)" -
       app linked at 0x26000, SoftDevice present but unused.
 
   See docs/platform/SOFTDEVICE.md for the full architecture.

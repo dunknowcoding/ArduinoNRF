@@ -5,7 +5,7 @@ All project documentation lives here. Start with the [project README](../README.
 ## Getting started & status
 
 - [COMPATIBILITY.md](COMPATIBILITY.md) — **OS support matrix (Windows / Linux / macOS) and real-board identity audit**
-- [VALIDATION.md](VALIDATION.md) — what's verified on real hardware, timing, and how to reproduce it
+- [COMPATIBILITY.md](COMPATIBILITY.md) — supported boards, layouts, and compatibility status
 - Release notes: the [GitHub Releases page](https://github.com/dunknowcoding/ArduinoNRF/releases)
 
 ## Uploading
