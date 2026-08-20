@@ -1,4 +1,123 @@
 $script:NiusSerialInventoryCache = $null
+
+# Read-only, identity-scoped USB serial discovery. Windows retains Enum\USB
+# registry records after detach, so a registry record is accepted only when its
+# PortName is also in SerialPort.GetPortNames(). This avoids a full PnP provider
+# walk while preserving VID/PID + composite-stable-id attribution.
+function Get-NiusFastUsbSerialRegistrySnapshot {
+    param(
+        [string]$Vid,
+        [string]$ProductId,
+        [string]$PreferredCompositeStableId = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Vid) -or [string]::IsNullOrWhiteSpace($ProductId)) {
+        return [pscustomobject]@{ Available = $false; Matches = @() }
+    }
+
+    $vidToken = $Vid.Replace('0x', '').Replace('0X', '').Trim()
+    $pidToken = $ProductId.Replace('0x', '').Replace('0X', '').Trim()
+    if ($vidToken -notmatch '^[0-9A-Fa-f]{1,4}$' -or $pidToken -notmatch '^[0-9A-Fa-f]{1,4}$') {
+        return [pscustomobject]@{ Available = $false; Matches = @() }
+    }
+    $vidLetters = $vidToken.PadLeft(4, '0').ToUpperInvariant()
+    $pidLetters = $pidToken.PadLeft(4, '0').ToUpperInvariant()
+    $compositeFamily = 'VID_{0}&PID_{1}' -f $vidLetters, $pidLetters
+    $preferredStable = $PreferredCompositeStableId.Trim().ToUpperInvariant()
+    $presentPorts = @{}
+    foreach ($name in [System.IO.Ports.SerialPort]::GetPortNames()) {
+        $presentPorts[([string]$name).Trim().ToUpperInvariant()] = $true
+    }
+
+    $usbRoot = $null
+    try {
+        $usbRoot = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Enum\USB')
+        if ($null -eq $usbRoot) {
+            return [pscustomobject]@{ Available = $false; Matches = @() }
+        }
+
+        $parentToStable = @{}
+        $compositeRoot = $null
+        try {
+            $compositeRoot = $usbRoot.OpenSubKey($compositeFamily)
+            if ($null -eq $compositeRoot) {
+                return [pscustomobject]@{ Available = $true; Matches = @() }
+            }
+            foreach ($stableName in $compositeRoot.GetSubKeyNames()) {
+                $normalizedStable = $stableName.Trim().ToUpperInvariant()
+                if (-not [string]::IsNullOrWhiteSpace($preferredStable) -and $normalizedStable -ne $preferredStable) {
+                    continue
+                }
+                $composite = $null
+                try {
+                    $composite = $compositeRoot.OpenSubKey($stableName)
+                    $parentPrefix = ([string]$composite.GetValue('ParentIdPrefix', '')).Trim().ToUpperInvariant()
+                    if (-not [string]::IsNullOrWhiteSpace($parentPrefix)) {
+                        $parentToStable[$parentPrefix] = $normalizedStable
+                    }
+                }
+                finally {
+                    if ($null -ne $composite) { $composite.Dispose() }
+                }
+            }
+        }
+        finally {
+            if ($null -ne $compositeRoot) { $compositeRoot.Dispose() }
+        }
+
+        if ($parentToStable.Count -eq 0) {
+            return [pscustomobject]@{ Available = $true; Matches = @() }
+        }
+
+        $matches = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($interfaceFamily in $usbRoot.GetSubKeyNames()) {
+            if (-not $interfaceFamily.ToUpperInvariant().StartsWith(($compositeFamily + '&MI_').ToUpperInvariant())) {
+                continue
+            }
+            $interfaceRoot = $null
+            try {
+                $interfaceRoot = $usbRoot.OpenSubKey($interfaceFamily)
+                foreach ($instanceName in $interfaceRoot.GetSubKeyNames()) {
+                    $instanceUpper = $instanceName.Trim().ToUpperInvariant()
+                    $match = [regex]::Match($instanceUpper, '^(?<parent>.+)&[0-9A-F]{4}$')
+                    if (-not $match.Success) { continue }
+                    $parentPrefix = $match.Groups['parent'].Value
+                    if (-not $parentToStable.ContainsKey($parentPrefix)) { continue }
+
+                    $parameters = $null
+                    try {
+                        $parameters = $interfaceRoot.OpenSubKey($instanceName + '\Device Parameters')
+                        if ($null -eq $parameters) { continue }
+                        $portName = ([string]$parameters.GetValue('PortName', '')).Trim().ToUpperInvariant()
+                        if ([string]::IsNullOrWhiteSpace($portName) -or -not $presentPorts.ContainsKey($portName)) {
+                            continue
+                        }
+                        $matches.Add([pscustomobject]@{
+                                DeviceID = $portName
+                                PNPDeviceID = ('USB\{0}\{1}' -f $interfaceFamily, $instanceName).ToUpperInvariant()
+                                InterfaceParentPrefix = ('USB\{0}\{1}' -f $compositeFamily, $parentToStable[$parentPrefix]).ToUpperInvariant()
+                                CompositeStableId = $parentToStable[$parentPrefix]
+                            })
+                    }
+                    finally {
+                        if ($null -ne $parameters) { $parameters.Dispose() }
+                    }
+                }
+            }
+            finally {
+                if ($null -ne $interfaceRoot) { $interfaceRoot.Dispose() }
+            }
+        }
+        return [pscustomobject]@{ Available = $true; Matches = $matches.ToArray() }
+    }
+    catch {
+        return [pscustomobject]@{ Available = $false; Matches = @() }
+    }
+    finally {
+        if ($null -ne $usbRoot) { $usbRoot.Dispose() }
+    }
+}
+
 function Get-SerialPortInventory {
     # NOTE: do NOT use `Get-CimInstance Win32_SerialPort` here. That class is
     # served by the Windows Serial WMI provider, which probes every COM device;
@@ -8,8 +127,8 @@ function Get-SerialPortInventory {
     # fields per port:
     #     .DeviceID    -> the COM name           (e.g. "COM3")
     #     .PNPDeviceID -> the USB instance id     (e.g. "USB\VID_239A&PID_00B4\..")
-    # Both come instantly from Win32_PnPEntity (Get-PnpDeviceInventory: armed-CIM
-    # ~1.4 s, or -PresentOnly ~2.5 s post-touch). Derive them from there and
+    # Both can be derived from Win32_PnPEntity when the scoped registry fast path
+    # is unavailable. Derive them there and
     # never touch the Serial provider. Same cached/-Fresh shape callers expect;
     # Clear-SerialPortInventoryCache before the touch forces a fresh re-derive.
     param([switch]$Fresh)
@@ -632,6 +751,13 @@ function Test-SerialPortMatchesUsbIdentity {
     }
 
     $normalizedPort = $PortName.Trim().ToUpperInvariant()
+    $fastSnapshot = Get-NiusFastUsbSerialRegistrySnapshot -Vid $Vid -ProductId $ProductId
+    if ($fastSnapshot.Available) {
+        return @($fastSnapshot.Matches | Where-Object {
+                ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $normalizedPort
+            }).Count -gt 0
+    }
+
     $vidLetters = $Vid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
     $pidLetters = $ProductId.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
     $needle = ('USB\VID_{0}&PID_{1}' -f $vidLetters, $pidLetters).ToUpperInvariant()

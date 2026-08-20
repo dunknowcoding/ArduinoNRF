@@ -53,6 +53,11 @@ choices because it has no native USB upload path in this package.
   accepts the selected board's scoped UF2 volume as transition proof. It never
   waits for the old runtime COM to return before copying firmware; that COM can
   only return after the copy and reboot have completed.
+- On Windows, runtime verification reads only the expected VID/PID branch and
+  confirms that its COM endpoint is currently present. Stale registry records
+  are rejected, and the full PnP-provider scan remains a compatibility fallback.
+  The UF2 evidence observed during touch is reused instead of rediscovering the
+  same volume before transfer.
 - When a UF2 volume is visible, `upload.ps1` reads `INFO_UF2.TXT` and uses the
   `SoftDevice` field to infer the mounted layout (`0x1000`, `0x26000`, or
   `0x27000`). If that layout conflicts with the app start used by the selected

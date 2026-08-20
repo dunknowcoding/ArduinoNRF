@@ -757,7 +757,10 @@ function Resolve-NiusLayoutGuardUf2Summary {
         if ($summary) {
             return $summary
         }
-        Start-Sleep -Milliseconds 400
+        # The fast registry snapshot is identity-scoped and normally completes
+        # in well under one poll interval; 150 ms keeps enumeration responsive
+        # without busy-spinning while the application USB composite returns.
+        Start-Sleep -Milliseconds 150
     }
 
     return $null
@@ -1236,6 +1239,16 @@ function Get-NiusRuntimeComNamesForIdentity {
         return @()
     }
 
+    $fastSnapshot = Get-NiusFastUsbSerialRegistrySnapshot `
+        -Vid $RuntimeVid -ProductId $RuntimePid `
+        -PreferredCompositeStableId $PreferredCompositeStableId
+    if ($fastSnapshot.Available) {
+        return @($fastSnapshot.Matches |
+                ForEach-Object { ([string]$_.DeviceID).Trim().ToUpperInvariant() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Sort-Object -Unique)
+    }
+
     $vid = $RuntimeVid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
     $normalizedPid =
         $RuntimePid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
@@ -1274,6 +1287,7 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         [int]$TimeoutMs = 12000
     )
 
+    Write-NiusTiming 'post-upload runtime verification start'
     if ($env:NIUS_DISABLE_MISFLASH_GUARD -eq '1') {
         return [pscustomobject]@{ Success = $true; Summary = 'misflash guard disabled' }
     }
@@ -1297,6 +1311,9 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         # Check deterministic ports first. A fresh PnP inventory can be slow
         # when Windows is retiring the composite bootloader interfaces, and it
         # must not delay success when the selected runtime COM has returned.
+        $fastRuntimeSnapshot = Get-NiusFastUsbSerialRegistrySnapshot `
+            -Vid $RuntimeVid -ProductId $RuntimePid `
+            -PreferredCompositeStableId $PreferredCompositeStableId
         foreach ($candidate in $knownCandidates) {
             $st = Get-SerialPortUsableState -PortName $candidate
             # A bootloader CDC can retain the same COM number briefly after a
@@ -1305,16 +1322,26 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
             # Require the board recipe's runtime VID/PID before accepting this
             # deterministic name; otherwise a bad application is falsely
             # reported healthy just before the bootloader endpoint disappears.
-            $runtimeIdentityMatches =
-                -not [string]::IsNullOrWhiteSpace($RuntimeVid) -and
-                -not [string]::IsNullOrWhiteSpace($RuntimePid) -and
-                (Test-SerialPortMatchesUsbIdentity `
-                    -PortName $candidate `
-                    -Vid $RuntimeVid `
-                    -ProductId $RuntimePid)
-            $stableIdMatches = [string]::IsNullOrWhiteSpace($PreferredCompositeStableId) -or
-                ((Get-SerialPortUsbParentCompositeStableId -PortName $candidate -Fresh) -eq $PreferredCompositeStableId.Trim().ToUpperInvariant())
-            if ($st.Openable -and $runtimeIdentityMatches -and $stableIdMatches) {
+            $runtimeIdentityMatches = $false
+            if ($fastRuntimeSnapshot.Available) {
+                $runtimeIdentityMatches = @($fastRuntimeSnapshot.Matches | Where-Object {
+                        ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $candidate
+                    }).Count -gt 0
+            }
+            else {
+                $runtimeIdentityMatches =
+                    -not [string]::IsNullOrWhiteSpace($RuntimeVid) -and
+                    -not [string]::IsNullOrWhiteSpace($RuntimePid) -and
+                    (Test-SerialPortMatchesUsbIdentity `
+                        -PortName $candidate `
+                        -Vid $RuntimeVid `
+                        -ProductId $RuntimePid)
+                $stableIdMatches = [string]::IsNullOrWhiteSpace($PreferredCompositeStableId) -or
+                    ((Get-SerialPortUsbParentCompositeStableId -PortName $candidate -Fresh) -eq $PreferredCompositeStableId.Trim().ToUpperInvariant())
+                $runtimeIdentityMatches = $runtimeIdentityMatches -and $stableIdMatches
+            }
+            if ($st.Openable -and $runtimeIdentityMatches) {
+                Write-NiusTiming ('post-upload runtime verified: {0}' -f $candidate)
                 return [pscustomobject]@{
                     Success = $true
                     Summary = ('post-upload runtime COM {0} is openable' -f $candidate)
@@ -1340,6 +1367,7 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         foreach ($candidate in $remappedCandidates) {
             $st = Get-SerialPortUsableState -PortName $candidate
             if ($st.Openable) {
+                Write-NiusTiming ('post-upload remapped runtime verified: {0}' -f $candidate)
                 return [pscustomobject]@{
                     Success = $true
                     Summary = ('post-upload runtime COM {0} is openable' -f $candidate)
@@ -1817,9 +1845,13 @@ function Invoke-Uf2Deploy {
         [string]$DrivePath
     )
 
+    Write-NiusTiming 'UF2 conversion start'
     $uf2Path = New-Uf2Artifact -HexPath $HexPath -FamilyId $FamilyId
+    Write-NiusTiming 'UF2 conversion done'
     $destination = Join-Path $DrivePath ([System.IO.Path]::GetFileName($uf2Path))
+    Write-NiusTiming 'UF2 copy start'
     Copy-Item -LiteralPath $uf2Path -Destination $destination -Force
+    Write-NiusTiming 'UF2 copy returned'
 }
 
 function New-Uf2Artifact {
@@ -3249,24 +3281,10 @@ function Invoke-Touch1200Transition {
         [string]$ExpectedBoardId = ''
     )
 
-    # Order matters for speed: the plain "single 1200 touch" is what actually
-    # triggers the Adafruit-fork clone bootloader; the legacy 115200->1200
-    # prepulse variant does not, and used to run first and burn a full timeout
-    # before we fell through to the one that works. Try the working one first;
-    # keep the legacy prepulse only as a fallback for other boards.
-    # Touch order is EMPIRICALLY determined (2026-05-29 hardware measurements
-    # on the verified ProMicro clone). On the current promicroserialnosd
-    # firmware the plain "single 1200 touch" (opening the port directly at
-    # 1200 baud) does NOT trigger a reset - confirmed it leaves the board in
-    # application mode after both a 100 ms pulse AND a 2.7 s hold. Only the
-    # 115200 -> 1200 baud TRANSITION arms the firmware's reset. The prepulse
-    # variant always issues a final 1200 pulse as well, so it ALSO triggers
-    # boards that react to a plain 1200 open - it is a strict superset. Putting
-    # it first eliminates the ~5.6 s previously wasted on the doomed
-    # single-1200 attempt on every upload. single-1200 stays as a harmless
-    # fallback for any board where the prepulse variant somehow regresses.
-    # (The older comment claimed the opposite ordering; that was measured on
-    # different firmware and no longer holds - see the git history.)
+    # The no-SoftDevice service firmware arms reset on a 115200 -> 1200 line-
+    # coding transition. That prepulse path also ends with a normal 1200 touch,
+    # so it remains compatible with bootloaders that react to a plain 1200 open.
+    # Keep plain 1200 as a fallback for other firmware implementations.
     $touchModes = @(
         [pscustomobject]@{
             Label = 'legacy 115200->1200 touch'
@@ -3278,8 +3296,8 @@ function Invoke-Touch1200Transition {
         }
     )
 
-    # Per-mode transition-detect timeout. The old 12 s default meant a first
-    # A successful touch normally produces scoped bootloader evidence in 1-2 s.
+    # Per-mode transition-detect timeout. A successful touch normally produces
+    # scoped bootloader evidence quickly.
     # Keep this bounded so a failed attempt cannot strand an unprobed board in a
     # host-side wait; override via NIUS_TOUCH_TRANSITION_TIMEOUT_MS when needed.
     $perModeTimeoutMs = 2500
@@ -3320,12 +3338,14 @@ function Invoke-Touch1200Transition {
             return [pscustomobject]@{
                 Triggered = $true
                 Candidate = $touchMode
+                Transition = $null
             }
         }
 
         try {
+            $transitionEvidence = $null
             if ($hasBootloaderIdentity) {
-                Wait-AdafruitBootloaderTransition `
+                $transitionEvidence = Wait-AdafruitBootloaderTransition `
                     -PortName $PortName `
                     -BootloaderVid $BootloaderVid `
                     -BootloaderPid $BootloaderPid `
@@ -3337,7 +3357,7 @@ function Invoke-Touch1200Transition {
                     -ExpectedModel $ExpectedModel `
                     -ExpectedBoardId $ExpectedBoardId `
                     -TimeoutMs $perModeTimeoutMs `
-                    -Purpose $touchMode.Label | Out-Null
+                    -Purpose $touchMode.Label
             }
             else {
                 Wait-SerialPortResetCycle -PortName $PortName -Purpose $touchMode.Label
@@ -3347,6 +3367,7 @@ function Invoke-Touch1200Transition {
             return [pscustomobject]@{
                 Triggered = $true
                 Candidate = $touchMode
+                Transition = $transitionEvidence
             }
         }
         catch {
@@ -3358,6 +3379,7 @@ function Invoke-Touch1200Transition {
                     return [pscustomobject]@{
                         Triggered = $false
                         Candidate = $null
+                        Transition = $null
                     }
                 }
             }
@@ -3370,6 +3392,7 @@ function Invoke-Touch1200Transition {
     return [pscustomobject]@{
         Triggered = $false
         Candidate = $null
+        Transition = $null
     }
 }
 
@@ -4020,8 +4043,19 @@ try {
     $adafruitControlPortParentPrefix = ''
     $adafruitControlPortCompositeStableId = ''
     if ($Mode -eq 'dfu') {
-        $adafruitControlPortParentPrefix = Get-SerialPortUsbInterfaceParentInstancePrefix -PortName $adafruitControlPort
-        $adafruitControlPortCompositeStableId = Get-SerialPortUsbParentCompositeStableId -PortName $adafruitControlPort
+        $fastControlSnapshot = Get-NiusFastUsbSerialRegistrySnapshot `
+            -Vid $effectiveRuntimeUsbVid -ProductId $effectiveRuntimeUsbPid
+        $fastControlMatch = @($fastControlSnapshot.Matches | Where-Object {
+                ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $adafruitControlPort.Trim().ToUpperInvariant()
+            } | Select-Object -First 1)
+        if ($fastControlSnapshot.Available -and $fastControlMatch.Count -eq 1) {
+            $adafruitControlPortParentPrefix = [string]$fastControlMatch[0].InterfaceParentPrefix
+            $adafruitControlPortCompositeStableId = [string]$fastControlMatch[0].CompositeStableId
+        }
+        else {
+            $adafruitControlPortParentPrefix = Get-SerialPortUsbInterfaceParentInstancePrefix -PortName $adafruitControlPort
+            $adafruitControlPortCompositeStableId = Get-SerialPortUsbParentCompositeStableId -PortName $adafruitControlPort
+        }
         $script:NiusUploadCompositeStableId = $adafruitControlPortCompositeStableId
         if (-not [string]::IsNullOrWhiteSpace($adafruitControlPort) -and
             [string]::IsNullOrWhiteSpace($adafruitControlPortParentPrefix) -and
@@ -4212,6 +4246,7 @@ try {
 
         $touchPrepared = $false
         $bootloaderTransitionConfirmed = $false
+        $touchDetectedBootloader = $null
         if ($BootloaderMode -eq 'adafruit-dfu' -and $UseTouch1200 -eq 'true' -and $controlPortAlreadyBootloader) {
             Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
         } elseif ($UseTouch1200 -eq 'true') {
@@ -4236,6 +4271,15 @@ try {
             if ($touchTransitionResult.Triggered) {
                 $touchPrepared = $true
                 $bootloaderTransitionConfirmed = $true
+                if ($touchTransitionResult.PSObject.Properties['Transition'] -and
+                    $touchTransitionResult.Transition -and
+                    $touchTransitionResult.Transition.PSObject.Properties['Uf2'] -and
+                    $touchTransitionResult.Transition.Uf2) {
+                    $touchDetectedBootloader = [pscustomobject]@{
+                        Kind = 'uf2'
+                        Summary = $touchTransitionResult.Transition.Uf2
+                    }
+                }
                 if ($touchTransitionResult.Candidate) {
                     Write-NiusDetail ('[nius] 1200 bps touch path confirmed via {0}.' -f $touchTransitionResult.Candidate.Label) -ForegroundColor DarkGray
                 }
@@ -4582,7 +4626,15 @@ try {
         $detectedBootloader = $null
         if ($WaitForUploadPort -eq 'true') {
             Write-Stage -Percent 32 -Label 'Connecting'
-            $detectedBootloader = Wait-ForUsbBootloader -Exe $toolPath -UsbVid $UsbVid -UsbPid $UsbPid -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId -PreferredCompositeStableId $adafruitControlPortCompositeStableId -ExpectUf2 ($BootloaderMode -eq 'uf2')
+            if ($BootloaderMode -eq 'uf2' -and $touchDetectedBootloader) {
+                $detectedBootloader = $touchDetectedBootloader
+                Write-NiusTiming 'final bootloader discovery reused touch evidence'
+            }
+            else {
+                Write-NiusTiming 'final bootloader discovery start'
+                $detectedBootloader = Wait-ForUsbBootloader -Exe $toolPath -UsbVid $UsbVid -UsbPid $UsbPid -ExpectedLabel $Uf2VolumeLabel -ExpectedModel $Uf2Model -ExpectedBoardId $Uf2BoardId -PreferredCompositeStableId $adafruitControlPortCompositeStableId -ExpectUf2 ($BootloaderMode -eq 'uf2')
+                Write-NiusTiming 'final bootloader discovery done'
+            }
             if (-not $detectedBootloader) {
                 if ($BootloaderMode -eq 'uf2') {
                     Write-Stage -Percent 68 -Label 'Uploading'
