@@ -293,7 +293,12 @@ int HardwareSerial::availableForWrite() {
 HardwareSerial::operator bool() const {
     if (usbBacked_) {
         if (nrfSerialUsbUsesServicePortOnly()) {
-            return nrfUsbdDriver().configured();
+            // Match Arduino native-USB Serial semantics: enumeration alone is
+            // not an open monitor. Waiting for DTR prevents a sketch from
+            // launching its first service-CDC IN packet before usbser has
+            // completed the first-open control sequence (which could drop the
+            // leading byte after a bootloader hand-off).
+            return nrfUsbdDriver().connected();
         }
         return connected();
     }

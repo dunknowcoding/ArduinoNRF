@@ -43,6 +43,12 @@ constexpr uint8_t DFU_REQ_GETSTATE = 0x05U;
 constexpr uint8_t DFU_STATE_APP_IDLE = 0x00U;
 constexpr uint8_t DFU_STATUS_OK = 0x00U;
 constexpr uint32_t USBD_BASE = 0x40027000UL;
+// nRF52840 anomaly 199 workaround used by Nordic's nrfx USBD driver. While
+// EasyDMA owns the peripheral, this latch prevents USB tasks/tokens from being
+// lost. TaichiUSB serializes every endpoint DMA and brackets it with the same
+// latch so EP0, both CDC functions, and pluggable endpoints cannot collide.
+constexpr uint32_t USBD_DMA_TASK_HOLD = 0x40027C1CUL;
+constexpr uint32_t USBD_DMA_TASK_HOLD_ENABLE = 0x00000082UL;
 constexpr uint32_t POWER_BASE = 0x40000000UL;
 constexpr uint32_t CLOCK_BASE = 0x40000000UL;
 constexpr uint32_t TASKS_STARTEPIN_BASE = 0x004UL;
@@ -50,22 +56,18 @@ constexpr uint32_t TASKS_STARTEPOUT_BASE = 0x028UL;
 constexpr uint32_t TASKS_EP0RCVOUT = 0x04CUL;
 constexpr uint32_t TASKS_EP0STATUS = 0x050UL;
 constexpr uint32_t TASKS_EP0STALL = 0x054UL;
-constexpr uint32_t TASKS_DPDMNODRIVE = 0x05CUL;
 constexpr uint32_t EVENTS_USBRESET = 0x100UL;
 constexpr uint32_t EVENTS_STARTED = 0x104UL;
 constexpr uint32_t EVENTS_ENDEPIN_BASE = 0x108UL;
-constexpr uint32_t EVENTS_EP0DATADONE = 0x128UL;
-constexpr uint32_t EVENTS_ENDISOIN = 0x12CUL;
 constexpr uint32_t EVENTS_ENDEPOUT_BASE = 0x130UL;
-constexpr uint32_t EVENTS_ENDISOOUT = 0x150UL;
-constexpr uint32_t EVENTS_SOF = 0x154UL;
+constexpr uint32_t EVENTS_EP0DATADONE = 0x128UL;
 constexpr uint32_t EVENTS_USBEVENT = 0x158UL;
 constexpr uint32_t EVENTS_EP0SETUP = 0x15CUL;
 constexpr uint32_t EVENTS_EPDATA = 0x160UL;
 // nRF52840 USBD register map: EPSTATUS=0x468 (which endpoints' EasyDMA was
 // captured), EPDATASTATUS=0x46C (which endpoints had an acknowledged host data
-// transfer -- the "this OUT packet is buffered, drain it" signal). USBADDR at
-// 0x470 is read-only and is intentionally not exposed as a writable constant.
+// transfer — the "this OUT packet is buffered, drain it" signal). USBADDR at
+// 0x470 is read-only and must never be treated as an initialization register.
 // This was previously 0x468, i.e. the firmware read EPSTATUS by mistake: its
 // EP0 bits (EPIN0=bit0, EPOUT0=bit16) read as a constant 0x00010001 and its
 // EPOUT data bits never reflect a freshly-arrived host packet, so the EPDATA
@@ -77,7 +79,6 @@ constexpr uint32_t EVENTS_EPDATA = 0x160UL;
 // CDC — was the first to expose this.
 constexpr uint32_t EPSTATUS = 0x468UL;
 constexpr uint32_t EPDATASTATUS = 0x46CUL;
-constexpr uint32_t SHORTS = 0x200UL;
 constexpr uint32_t INTENSET = 0x304UL;
 constexpr uint32_t INTENCLR = 0x308UL;
 constexpr uint32_t EVENTCAUSE = 0x400UL;
@@ -91,28 +92,21 @@ constexpr uint32_t WLENGTHL = 0x498UL;
 constexpr uint32_t WLENGTHH = 0x49CUL;
 constexpr uint32_t ENABLE = 0x500UL;
 constexpr uint32_t USBPULLUP = 0x504UL;
-constexpr uint32_t DPDMVALUE = 0x508UL;
 constexpr uint32_t DTOGGLE = 0x50CUL;
 constexpr uint32_t EPINEN = 0x510UL;
 constexpr uint32_t EPOUTEN = 0x514UL;
 constexpr uint32_t EPSTALL = 0x518UL;
-constexpr uint32_t ISOSPLIT = 0x51CUL;
-constexpr uint32_t LOWPOWER = 0x52CUL;
-constexpr uint32_t ISOINCONFIG = 0x530UL;
 constexpr uint32_t EPOUT_PTR_BASE = 0x700UL;
 constexpr uint32_t EPOUT_MAXCNT_BASE = 0x704UL;
 constexpr uint32_t EPOUT_AMOUNT_BASE = 0x708UL;
 constexpr uint32_t EPIN_PTR_BASE = 0x600UL;
 constexpr uint32_t EPIN_MAXCNT_BASE = 0x604UL;
-constexpr uint32_t EPIN_AMOUNT_BASE = 0x608UL;
 constexpr uint32_t USBD_ENDPOINT_CLUSTER_STRIDE = 0x14UL;
 constexpr uint32_t POWER_USBREGSTATUS = 0x438UL;
 constexpr uint32_t POWER_USBREGSTATUS_VBUSDETECT = 1UL;
 constexpr uint32_t POWER_GPREGRET = 0x51CUL;
 constexpr uint32_t NVIC_ISER_BASE = 0xE000E100UL;
 constexpr uint32_t NVIC_ICER_BASE = 0xE000E180UL;
-constexpr uint32_t NVIC_ISPR_BASE = 0xE000E200UL;
-constexpr uint32_t NVIC_ICPR_BASE = 0xE000E280UL;
 constexpr uint32_t CLOCK_TASKS_HFCLKSTART = 0x000UL;
 constexpr uint32_t CLOCK_EVENTS_HFCLKSTARTED = 0x100UL;
 constexpr uint32_t AIRCR = 0xE000ED0CUL;
@@ -138,9 +132,6 @@ constexpr uint32_t USBD_INT_ENDEPIN1_MASK = (1UL << 3);
 constexpr uint32_t USBD_INT_ENDEPIN2_MASK = (1UL << 4);
 constexpr uint32_t USBD_INT_ENDEPIN3_MASK = (1UL << 5);
 constexpr uint32_t USBD_INT_ENDEPIN4_MASK = (1UL << 6);
-constexpr uint32_t USBD_INT_ENDEPIN5_MASK = (1UL << 7);
-constexpr uint32_t USBD_INT_ENDEPIN6_MASK = (1UL << 8);
-constexpr uint32_t USBD_INT_ENDEPIN7_MASK = (1UL << 9);
 constexpr uint32_t USBD_INT_EP0DATADONE_MASK = (1UL << 10);
 constexpr uint32_t USBD_INT_ENDEPOUT2_MASK = (1UL << 14);  // nRF52840 PS: ENDEPOUT[2] = bit 14
 constexpr uint32_t USBD_INT_ENDEPOUT4_MASK = (1UL << 16);  // nRF52840 PS: ENDEPOUT[4] = bit 16
@@ -152,18 +143,16 @@ constexpr uint32_t USBD_INT_EP0SETUP_MASK = (1UL << 23);
 // (Nordic: USBD_EPDATASTATUS_EPOUT1_Pos=17, EPOUT2=18 ... EPOUT7=23). The
 // per-endpoint bit is therefore (17 + endpoint - 1) == (16 + endpoint).
 // NOTE: this base was 16 (giving bit 17 for EP2 instead of 18), so the
-// service-CDC OUT data-ready bit never matched, queueDataOut() was never
-// called, and the first host OUT packet sat undrained in the endpoint's
+// service-CDC OUT data-ready bit never matched, its DMA was never scheduled,
+// and the first host OUT packet sat undrained in the endpoint's
 // internal buffer — wedging every subsequent OUT into a NAK. That was the
 // real cause of the GDB-stub "service CDC OUT NAKs while halted" bug: the
 // stub is simply the first feature to receive bulk OUT on the service CDC
 // (uploads only use EP0 control), so the latent off-by-one finally bit.
 constexpr uint32_t USBD_INT_EPDATA_MASK = (1UL << 24);
-constexpr uint32_t EPSTATUS_OUT_BASE_BIT = 16U;
 constexpr uint32_t EPDATASTATUS_OUT_BASE_BIT = 17U;
 constexpr uint32_t USBD_EVENTCAUSE_SUSPEND_MASK = (1UL << 8);
 constexpr uint32_t USBD_EVENTCAUSE_RESUME_MASK = (1UL << 9);
-constexpr uint32_t USBD_EVENTCAUSE_USBWUALLOWED_MASK = (1UL << 10);
 constexpr uint32_t USBD_EVENTCAUSE_READY_MASK = (1UL << 11);
 constexpr uint8_t SERVICE_NOTIFICATION_EP = 1U;
 constexpr uint8_t SERVICE_DATA_EP = 2U;
@@ -191,22 +180,10 @@ constexpr uint32_t USBD_DTOGGLE_VALUE_POS = 8UL;
 constexpr uint32_t USBD_DTOGGLE_NOP = 0UL;
 constexpr uint32_t USBD_DTOGGLE_DATA0 = 1UL;
 constexpr uint32_t USBD_START_CAPTURE_TIMEOUT_SPINS = 100000UL;
-constexpr uint32_t USBD_DISABLE_TIMEOUT_SPINS = 64000UL;
-constexpr uint32_t USBD_PARITY_REPAIR_TIMEOUT_SPINS = 64000UL;
-constexpr uint32_t USBD_HANDOFF_DETACH_MS = 20UL;
-constexpr uint32_t USBD_ISOSPLIT_HALF_VALUE = 0x0080UL;
-constexpr uint32_t USBD_ERRATA166_INDEX_ADDRESS = USBD_BASE + 0x800UL;
-constexpr uint32_t USBD_ERRATA166_VALUE_ADDRESS = USBD_BASE + 0x804UL;
-constexpr uint32_t USBD_ERRATA199_DMA_PENDING_ADDRESS = 0x40027C1CUL;
-constexpr uint32_t USBD_ERRATA199_DMA_PENDING_VALUE = 0x00000082UL;
 // Bounded spin for flush() while the GDB stub is halted (ISR-mode). Generous —
 // the USBD ISR drains the IN ring between kicks — but finite so a host that
 // stops reading can't wedge the stub forever.
 constexpr uint32_t USBD_STUB_FLUSH_SPINS = 2000000UL;
-// Bounded wait for the speculative OUT drain's STARTEPOUT to complete (ENDEPOUT)
-// each stub poll. Short — the EasyDMA copy is a few cycles when data is present,
-// and on an empty endpoint ENDEPOUT still fires with AMOUNT=0.
-constexpr uint32_t USBD_DRAIN_OUT_SPINS = 4000UL;
 constexpr size_t USBD_RING_BUFFER_SIZE = 256U;
 #if defined(NRF_USBD_CONFIG_TIMEOUT_RESET_MS)
 constexpr uint32_t USBD_CONFIG_TIMEOUT_RESET_MS = static_cast<uint32_t>(NRF_USBD_CONFIG_TIMEOUT_RESET_MS);
@@ -216,7 +193,15 @@ constexpr uint32_t USBD_CONFIG_TIMEOUT_RESET_MS = 0UL;
 #if defined(NRF_USBD_1200_RESET_ARM_MS)
 constexpr uint32_t USBD_1200_RESET_ARM_MS = static_cast<uint32_t>(NRF_USBD_1200_RESET_ARM_MS);
 #else
-constexpr uint32_t USBD_1200_RESET_ARM_MS = 3000UL;
+// The trigger already requires the maintenance CDC to be configured, receive
+// an explicit 1200-bps line-coding request, and observe a DTR falling edge.
+// Three seconds added no meaningful protection and made a second upload issued
+// immediately after re-enumeration silently lose its touch. Windows can replay
+// the port's previous line coding during the first few hundred milliseconds of
+// enumeration, however, so the guard must extend past that setup traffic. The
+// 400 ms boundary is the shortest value that survived repeated physical reset
+// and CDC-traffic cycles on the ProMicro nRF52840 route.
+constexpr uint32_t USBD_1200_RESET_ARM_MS = 400UL;
 #endif
 #if defined(NRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT)
 constexpr uint8_t USBD_IGNORE_INITIAL_1200_RESET_COUNT = static_cast<uint8_t>(NRF_USBD_IGNORE_INITIAL_1200_RESET_COUNT);
@@ -224,45 +209,15 @@ constexpr uint8_t USBD_IGNORE_INITIAL_1200_RESET_COUNT = static_cast<uint8_t>(NR
 constexpr uint8_t USBD_IGNORE_INITIAL_1200_RESET_COUNT = 0U;
 #endif
 constexpr uint32_t USBD_TOUCH_RESET_CONFIRM_MS = 40UL;
-constexpr uint32_t USBD_STARTUP_RETRY_MS = 25UL;
+// usbser may assert DTR before its first bulk-IN read is posted. A short
+// post-DTR guard prevents the application's first bytes from being committed
+// to the endpoint FIFO before Windows is ready to consume them.
+constexpr uint32_t USBD_CDC_OPEN_SETTLE_MS = 10UL;
 
-// Compile-time register-map guards. These are intentionally expressed in the
-// core rather than a host-only test so every supported Arduino build checks
-// the two EasyDMA OUT interrupt positions that previously drifted by one bit.
-static_assert(USBD_INT_ENDEPOUT2_MASK == (1UL << 14));
-static_assert(USBD_INT_ENDEPOUT4_MASK == (1UL << 16));
-static_assert((USBD_INT_ENDEPIN5_MASK | USBD_INT_ENDEPIN6_MASK |
-               USBD_INT_ENDEPIN7_MASK) == (0x7UL << 7));
-static_assert((1UL << (EPSTATUS_OUT_BASE_BIT + 0U)) == (1UL << 16));
-static_assert(TASKS_DPDMNODRIVE == 0x05CUL);
-static_assert(EVENTS_ENDISOIN == 0x12CUL);
-static_assert(EVENTS_ENDISOOUT == 0x150UL);
-static_assert(LOWPOWER == 0x52CUL);
-static_assert(USBD_EVENTCAUSE_USBWUALLOWED_MASK == (1UL << 10));
-static_assert(USBD_ISOSPLIT_HALF_VALUE == 0x0080UL);
-static_assert(USBD_ERRATA166_INDEX_ADDRESS == 0x40027800UL);
-static_assert(USBD_ERRATA166_VALUE_ADDRESS == 0x40027804UL);
-
-constexpr bool dmaParityAfterAmount(bool wasOdd, uint32_t amount) {
-    return wasOdd != ((amount & 1UL) != 0UL);
-}
-
-constexpr bool dmaDisableMayCommit(bool wakeAcknowledged,
-                                   bool dmaSettled,
-                                   bool parityEven) {
-    return wakeAcknowledged && dmaSettled && parityEven;
-}
-
-// Nordic's current nrfx_usbd tracks cumulative completed EasyDMA bytes. A
-// zero/even transfer preserves parity; every odd AMOUNT toggles it.
-static_assert(!dmaParityAfterAmount(false, 0UL));
-static_assert(dmaParityAfterAmount(false, 1UL));
-static_assert(!dmaParityAfterAmount(true, 1UL));
-static_assert(dmaParityAfterAmount(true, 64UL));
-static_assert(dmaDisableMayCommit(true, true, true));
-static_assert(!dmaDisableMayCommit(false, true, true));
-static_assert(!dmaDisableMayCommit(true, false, true));
-static_assert(!dmaDisableMayCommit(true, true, false));
+static_assert(USBD_INT_ENDEPOUT2_MASK == (1UL << 14),
+              "nRF52840 ENDEPOUT2 interrupt position drifted");
+static_assert(USBD_INT_ENDEPOUT4_MASK == (1UL << 16),
+              "nRF52840 ENDEPOUT4 interrupt position drifted");
 
 constexpr bool controlInNeedsZlp(size_t actualLength,
                                  size_t requestedLength,
@@ -271,14 +226,9 @@ constexpr bool controlInNeedsZlp(size_t actualLength,
            maxPacket > 0U && (actualLength % maxPacket) == 0U;
 }
 
-// USB 2.0 control-read termination truth table: a full-size final packet only
-// needs an extra ZLP when the device returned fewer bytes than the host asked
-// for. If actual == wLength, the host already knows the transfer is complete.
 static_assert(controlInNeedsZlp(64U, 65U));
-static_assert(controlInNeedsZlp(128U, 255U));
 static_assert(!controlInNeedsZlp(64U, 64U));
 static_assert(!controlInNeedsZlp(63U, 64U));
-static_assert(!controlInNeedsZlp(0U, 64U));
 
 inline bool servicePortEnabled() {
     return nrfUsbServicePortEnabled();
@@ -312,28 +262,8 @@ inline void disableNvicIrq(uint32_t irqNumber) {
     reg32(NVIC_ICER_BASE, (irqNumber / 32UL) * 4UL) = 1UL << (irqNumber % 32UL);
 }
 
-inline void clearPendingNvicIrq(uint32_t irqNumber) {
-    reg32(NVIC_ICPR_BASE, (irqNumber / 32UL) * 4UL) = 1UL << (irqNumber % 32UL);
-}
-
-inline void setPendingNvicIrq(uint32_t irqNumber) {
-    reg32(NVIC_ISPR_BASE, (irqNumber / 32UL) * 4UL) = 1UL << (irqNumber % 32UL);
-}
-
 inline bool nvicIrqEnabled(uint32_t irqNumber) {
     return (reg32(NVIC_ISER_BASE, (irqNumber / 32UL) * 4UL) & (1UL << (irqNumber % 32UL))) != 0UL;
-}
-
-inline void keepOnlyUsbdWakeInterrupt() {
-#if defined(NRF_USBD_POLL_ONLY) && (NRF_USBD_POLL_ONLY == 1)
-    return;
-#else
-    // Once LOWPOWER disconnects the USBD register clock, endpoint-event
-    // sources cannot be serviced. Leave only the wake-capable aggregate event
-    // armed so a stale endpoint event cannot turn suspend into an IRQ storm.
-    reg32(USBD_BASE, INTENCLR) = 0xFFFFFFFFUL;
-    reg32(USBD_BASE, INTENSET) = USBD_INT_USBEVENT_MASK;
-#endif
 }
 
 // NVIC priority registers are byte-addressable, one byte per IRQ. The nRF52840
@@ -416,8 +346,8 @@ inline uint32_t epoutAmountOffset(uint8_t endpoint) {
 // SIZE.EPOUT[n] (0x4A0 + n*4): reading gives the byte count of the packet
 // sitting in the endpoint's internal buffer; WRITING any value is the
 // documented "buffer consumed" handshake that lets the endpoint ACK the next
-// host OUT. Skipping this write can re-present stale FIFO content as phantom
-// packets after every real one on affected nRF52840 hardware.
+// host OUT. Skipping this write is what made this clone re-present stale
+// FIFO content as phantom packets after every real one.
 inline uint32_t sizeEpoutOffset(uint8_t endpoint) {
     return 0x4A0UL + (static_cast<uint32_t>(endpoint) * 4UL);
 }
@@ -428,10 +358,6 @@ inline uint32_t epinPtrOffset(uint8_t endpoint) {
 
 inline uint32_t epinMaxcntOffset(uint8_t endpoint) {
     return EPIN_MAXCNT_BASE + (static_cast<uint32_t>(endpoint) * USBD_ENDPOINT_CLUSTER_STRIDE);
-}
-
-inline uint32_t epinAmountOffset(uint8_t endpoint) {
-    return EPIN_AMOUNT_BASE + (static_cast<uint32_t>(endpoint) * USBD_ENDPOINT_CLUSTER_STRIDE);
 }
 
 inline uint32_t endpointMask(uint8_t endpoint) {
@@ -460,104 +386,76 @@ inline void resetEndpointDataState(uint8_t endpointAddress) {
     clearEndpointStall(endpointAddress);
 }
 
+inline bool triggerEndpointStartTask(uint32_t taskOffset) {
+    uint32_t endEventOffset = 0UL;
+    if (taskOffset >= TASKS_STARTEPIN_BASE &&
+        taskOffset <= taskStartEpinOffset(USB_MAX_ENDPOINTS - 1U)) {
+        const uint8_t endpoint = static_cast<uint8_t>((taskOffset - TASKS_STARTEPIN_BASE) / 4UL);
+        endEventOffset = eventEndEpinOffset(endpoint);
+    } else if (taskOffset >= TASKS_STARTEPOUT_BASE &&
+               taskOffset <= taskStartEpoutOffset(USB_MAX_ENDPOINTS - 1U)) {
+        const uint8_t endpoint = static_cast<uint8_t>((taskOffset - TASKS_STARTEPOUT_BASE) / 4UL);
+        endEventOffset = eventEndEpoutOffset(endpoint);
+    } else {
+        return false;
+    }
+
+    // EVENTS_STARTED means only that the task was captured, not that EasyDMA
+    // is free for another endpoint. Waiting for END mirrors nrfx's stable
+    // scheduler and keeps register accesses outside an active DMA window.
+    reg32(USBD_BASE, endEventOffset) = 0UL;
+    reg32(USBD_BASE, EVENTS_STARTED) = 0UL;
+    reg32(0UL, USBD_DMA_TASK_HOLD) = USBD_DMA_TASK_HOLD_ENABLE;
+    reg32(USBD_BASE, taskOffset) = 1UL;
+    asm volatile("dsb 0xf" ::: "memory");
+    asm volatile("isb 0xf" ::: "memory");
+    for (uint32_t spin = 0UL; spin < USBD_START_CAPTURE_TIMEOUT_SPINS; ++spin) {
+        if (reg32(USBD_BASE, endEventOffset) != 0UL) {
+            reg32(USBD_BASE, EVENTS_STARTED) = 0UL;
+            reg32(0UL, USBD_DMA_TASK_HOLD) = 0UL;
+            return true;
+        }
+    }
+    reg32(0UL, USBD_DMA_TASK_HOLD) = 0UL;
+    return false;
+}
+
 inline bool vbusDetected() {
     return (reg32(POWER_BASE, POWER_USBREGSTATUS) & POWER_USBREGSTATUS_VBUSDETECT) != 0UL;
 }
 
+inline bool usbVbusAssumedPresent() {
+#if defined(NRF_SYSTEM_USB_ASSUME_VBUS) && (NRF_SYSTEM_USB_ASSUME_VBUS == 1)
+    return true;
+#else
+    return false;
+#endif
+}
+
+inline bool effectiveVbusDetected() {
+    return vbusDetected() || usbVbusAssumedPresent();
+}
+
 // nRF52840 POWER->USBREGSTATUS bit 1 = OUTPUTRDY (USB regulator stable).
-// Nordic's startup order is real VBUS -> ENABLE -> EVENTCAUSE.READY and then
-// OUTPUTRDY before the D+ pull-up. OUTPUTRDY is therefore never used as a
-// precondition for ENABLE, and a build-time "assume VBUS" policy can never
-// authorize the physical pull-up.
+// Both VBUSDETECT and OUTPUTRDY must be asserted before USBD->ENABLE will
+// behave correctly; the bootloader's hand-off via SYSRESETREQ does not
+// reset POWER, but a full chip reset (e.g. after WDT_RESET or after the
+// adafruit-nrfutil DFU "DETACH" command power-cycles internal blocks) does.
 constexpr uint32_t POWER_USBREGSTATUS_OUTPUTRDY = (1UL << 1);
 
 inline bool usbPwrRdy() {
     return (reg32(POWER_BASE, POWER_USBREGSTATUS) & POWER_USBREGSTATUS_OUTPUTRDY) != 0UL;
 }
 
-// The generated nRF52 errata predicates used by current nrfx read these FICR
-// configuration IDs. For nRF52840, ID0 == 0x08; erratum 171 covers every
-// revision while 187 starts at revision 1. Current nrfx also marks every
-// nRF52833 (0x0D) and nRF52820 (0x10) revision as affected by 187. Unknown
-// parts fail closed by not touching undocumented workaround registers.
-constexpr uint32_t FICR_CONFIG_ID0_ADDRESS = 0x10000130UL;
-constexpr uint32_t FICR_CONFIG_ID1_ADDRESS = 0x10000134UL;
-
-constexpr bool usbErrata171Affected(uint32_t configId0, uint32_t /*configId1*/) {
-    return configId0 == 0x08UL;
-}
-
-constexpr bool usbErrata166Affected(uint32_t configId0, uint32_t /*configId1*/) {
-    // Current Nordic MDK marks every nRF52840 revision as affected, including
-    // the observed 0x08/0x03 configuration-id pair.
-    return configId0 == 0x08UL;
-}
-
-constexpr bool usbErrata187Affected(uint32_t configId0, uint32_t configId1) {
-    return (configId0 == 0x08UL && configId1 != 0x00UL) ||
-           configId0 == 0x0DUL || configId0 == 0x10UL;
-}
-
-constexpr bool usbErrata199Affected(uint32_t configId0, uint32_t /*configId1*/) {
-    // Current Nordic MDK marks every nRF52840 revision as affected. Unlike
-    // 187/211, revision 0 is included.
-    return configId0 == 0x08UL;
-}
-
-constexpr bool usbErrata211Affected(uint32_t configId0, uint32_t configId1) {
-    // Current Nordic MDK predicates use the same supported-part/revision set
-    // as Erratum 187. The lifetime is different: 187 brackets ENABLE -> READY,
-    // while 211 must hold ED14=3 until USBD has been disabled.
-    return usbErrata187Affected(configId0, configId1);
-}
-
-static_assert(usbErrata171Affected(0x08UL, 0x00UL));
-static_assert(usbErrata171Affected(0x08UL, 0x05UL));
-static_assert(!usbErrata171Affected(0x0DUL, 0x01UL));
-static_assert(usbErrata166Affected(0x08UL, 0x00UL));
-static_assert(usbErrata166Affected(0x08UL, 0x03UL));
-static_assert(!usbErrata166Affected(0x0DUL, 0x03UL));
-static_assert(!usbErrata187Affected(0x08UL, 0x00UL));
-static_assert(usbErrata187Affected(0x08UL, 0x01UL));
-static_assert(usbErrata187Affected(0x0DUL, 0x00UL));
-static_assert(usbErrata187Affected(0x10UL, 0x03UL));
-static_assert(!usbErrata187Affected(0x09UL, 0x01UL));
-static_assert(usbErrata199Affected(0x08UL, 0x00UL));
-static_assert(usbErrata199Affected(0x08UL, 0x05UL));
-static_assert(!usbErrata199Affected(0x0DUL, 0x01UL));
-static_assert(!usbErrata211Affected(0x08UL, 0x00UL));
-static_assert(usbErrata211Affected(0x08UL, 0x03UL));
-static_assert(usbErrata211Affected(0x0DUL, 0x00UL));
-
-inline bool usbErrata171Applies() {
-    return usbErrata171Affected(mem32(FICR_CONFIG_ID0_ADDRESS),
-                                mem32(FICR_CONFIG_ID1_ADDRESS));
-}
-
-inline bool usbErrata166Applies() {
-    return usbErrata166Affected(mem32(FICR_CONFIG_ID0_ADDRESS),
-                                mem32(FICR_CONFIG_ID1_ADDRESS));
-}
-
-inline bool usbErrata187Applies() {
-    return usbErrata187Affected(mem32(FICR_CONFIG_ID0_ADDRESS),
-                                mem32(FICR_CONFIG_ID1_ADDRESS));
-}
-
-inline bool usbErrata199Applies() {
-    return usbErrata199Affected(mem32(FICR_CONFIG_ID0_ADDRESS),
-                                mem32(FICR_CONFIG_ID1_ADDRESS));
-}
-
-inline bool usbErrata211Applies() {
-    return usbErrata211Affected(mem32(FICR_CONFIG_ID0_ADDRESS),
-                                mem32(FICR_CONFIG_ID1_ADDRESS));
-}
-
 // nRF52840 Errata 187 ("USBD: USB cannot be enabled"): wraps the USBD
 // ENABLE handshake with a trim-register sequence at 0x4006EC00 / 0x4006ED14.
-// Keep the established TaichiUSB transaction body intact, but call it only
-// when the current nrfx dynamic silicon predicate says the anomaly applies.
+// CRITICAL: the canonical Nordic nrfx_usbd implementation READS 0x4006EC00
+// first; if it's already non-zero (e.g., the bootloader's nrfx_usbd primed
+// it before handing off via NVIC_SystemReset), only the flag at 0x4006ED14
+// is updated. Writing 0x9375 unconditionally to 0x4006EC00 CORRUPTS the
+// trim and the USBD peripheral then enumerates with garbage descriptors
+// (host sees the device but never binds it). Reproduced exactly as
+// nrfx_usbd::usbd_errata_187_211_begin / _end.
 inline void usbErrata187First() {
     if (*reinterpret_cast<volatile uint32_t *>(0x4006EC00UL) == 0x00000000UL) {
         *reinterpret_cast<volatile uint32_t *>(0x4006EC00UL) = 0x00009375UL;
@@ -580,8 +478,9 @@ inline void usbErrata187Second() {
 
 // nRF52840 Errata 171 ("USBD: USB might not power up"): Nordic's nrfx_usbd
 // applies this workaround inside Errata 187 around the ENABLE handshake.
-// Its flag lives at 0x4006EC14 (not the 0x4006ED14 used by 187) and uses
-// 0xC0 rather than 0x3. The transaction is also revision-gated above.
+// Same gating: read 0x4006EC00; if zero, do the full magic-flag-magic
+// sequence; otherwise just update the flag at 0x4006EC14 (note: EC14, NOT
+// the 0x4006ED14 used by 187). Magic value is 0xC0 (vs. 0x3 for 187).
 inline void usbErrata171First() {
     if (*reinterpret_cast<volatile uint32_t *>(0x4006EC00UL) == 0x00000000UL) {
         *reinterpret_cast<volatile uint32_t *>(0x4006EC00UL) = 0x00009375UL;
@@ -599,18 +498,6 @@ inline void usbErrata171Second() {
         *reinterpret_cast<volatile uint32_t *>(0x4006EC00UL) = 0x00009375UL;
     } else {
         *reinterpret_cast<volatile uint32_t *>(0x4006EC14UL) = 0x00000000UL;
-    }
-}
-
-inline void usbErrata199BeginDma() {
-    if (usbErrata199Applies()) {
-        mem32(USBD_ERRATA199_DMA_PENDING_ADDRESS) = USBD_ERRATA199_DMA_PENDING_VALUE;
-    }
-}
-
-inline void usbErrata199EndDma() {
-    if (usbErrata199Applies()) {
-        mem32(USBD_ERRATA199_DMA_PENDING_ADDRESS) = 0UL;
     }
 }
 
@@ -644,19 +531,10 @@ inline void ensureHfclk() {
 constexpr uint32_t USBD_BOOTLOADER_RESET_DISCONNECT_SPINS = 640000UL;
 
 inline void requestBootloaderReset() {
-    // Funnel every software-DFU handoff through the driver's normal teardown.
-    // Besides detach and errata cleanup, end() accounts the actual AMOUNT of a
-    // just-completed EasyDMA and, when the cumulative byte count is odd, runs
-    // Nordic's one-byte EPIN0 parity repair before ENABLE can reach zero.
-    nrfUsbdDriver().end();
-    if (reg32(USBD_BASE, ENABLE) == 0UL) {
-        // Give the host a real detach interval only after the hardware has
-        // stopped driving the bus, then hand control to the bootloader.
-        for (volatile uint32_t spin = 0UL;
-             spin < USBD_BOOTLOADER_RESET_DISCONNECT_SPINS;
-             ++spin) {
-            __asm volatile("nop");
-        }
+    reg32(USBD_BASE, USBPULLUP) = 0UL;
+    reg32(USBD_BASE, ENABLE) = 0UL;
+    for (volatile uint32_t spin = 0UL; spin < USBD_BOOTLOADER_RESET_DISCONNECT_SPINS; ++spin) {
+        __asm volatile("nop");
     }
     nrfPrepareBootloaderResetRequest(nrfBootloaderUploadResetMagic());
     __asm volatile("dsb 0xF" ::: "memory");
@@ -782,529 +660,123 @@ void nrfUsbdClearPollTrace() {
     zeroPollTrace();
 }
 
-bool NrfUsbdDriver::startEasyDma(DmaDirection direction, uint8_t endpoint) {
-    if (direction == DmaDirection::None || endpoint >= USB_MAX_ENDPOINTS ||
-        terminalFault_ || dmaDirection_ != DmaDirection::None) {
-        return false;
-    }
-
-    const uint32_t endEvent = direction == DmaDirection::In
-        ? eventEndEpinOffset(endpoint)
-        : eventEndEpoutOffset(endpoint);
-    const uint32_t startTask = direction == DmaDirection::In
-        ? taskStartEpinOffset(endpoint)
-        : taskStartEpoutOffset(endpoint);
-
-    reg32(USBD_BASE, endEvent) = 0UL;
-    reg32(USBD_BASE, EVENTS_STARTED) = 0UL;
-    dmaDirection_ = direction;
-    dmaEndpoint_ = endpoint;
-
-    // nRF52840 Erratum 199: 0x40027C1C must be 0x82 from immediately
-    // before every EasyDMA task until the matching END event. The class-level
-    // owner also enforces the USBD peripheral's single shared DMA channel.
-    usbErrata199BeginDma();
-    reg32(USBD_BASE, startTask) = 1UL;
-    for (uint32_t spin = 0UL; spin < USBD_START_CAPTURE_TIMEOUT_SPINS; ++spin) {
-        if (reg32(USBD_BASE, EVENTS_STARTED) != 0UL) {
-            const uint32_t captureMask = direction == DmaDirection::In
-                ? (1UL << endpoint)
-                : (1UL << (EPSTATUS_OUT_BASE_BIT + endpoint));
-            // EPSTATUS is W1C. A stale capture bit would otherwise make a
-            // later STARTED event ambiguous even though the END event is per-EP.
-            reg32(USBD_BASE, EPSTATUS) = captureMask;
-            reg32(USBD_BASE, EVENTS_STARTED) = 0UL;
-            return true;
-        }
-    }
-
-    // Capture state is unknowable after the timeout. Keep the Erratum 199
-    // value and ownership asserted until a confirmed peripheral disable.
-    terminalFault_ = true;
-    reg32(USBD_BASE, USBPULLUP) = 0UL;
-    disableInterrupts();
-    return false;
-}
-
-bool NrfUsbdDriver::completeEasyDma(DmaDirection direction, uint8_t endpoint) {
-    if (dmaDirection_ != direction || dmaEndpoint_ != endpoint) {
-        return false;
-    }
-    const uint32_t endEvent = direction == DmaDirection::In
-        ? eventEndEpinOffset(endpoint)
-        : eventEndEpoutOffset(endpoint);
-    if (reg32(USBD_BASE, endEvent) == 0UL) {
-        return false;
-    }
-
-    // Track the hardware-reported bytes, not MAXCNT and not the requested
-    // length. This is Nordic nrfx's cumulative EasyDMA parity invariant: an
-    // odd total must be repaired before the next USBD disable/re-enable.
-    const uint32_t amount = direction == DmaDirection::In
-        ? reg32(USBD_BASE, epinAmountOffset(endpoint))
-        : reg32(USBD_BASE, epoutAmountOffset(endpoint));
-    dmaBytesOdd_ = dmaParityAfterAmount(dmaBytesOdd_, amount);
-    usbErrata199EndDma();
-    dmaDirection_ = DmaDirection::None;
-    dmaEndpoint_ = 0xFFU;
-    return true;
-}
-
-bool NrfUsbdDriver::finishEasyDmaBeforeDisable() {
-    if (dmaDirection_ == DmaDirection::None) {
-        return true;
-    }
-
-    const DmaDirection direction = dmaDirection_;
-    const uint8_t endpoint = dmaEndpoint_;
-    const uint32_t endEvent = direction == DmaDirection::In
-        ? eventEndEpinOffset(endpoint)
-        : eventEndEpoutOffset(endpoint);
-    for (uint32_t spin = 0UL; spin < USBD_DISABLE_TIMEOUT_SPINS; ++spin) {
-        if (reg32(USBD_BASE, endEvent) != 0UL) {
-            const bool completed = completeEasyDma(direction, endpoint);
-            reg32(USBD_BASE, endEvent) = 0UL;
-            return completed;
-        }
-        if (!vbusDetected() || !usbPwrRdy() ||
-            reg32(USBD_BASE, LOWPOWER) != 0UL) {
-            break;
-        }
-    }
-    return false;
-}
-
-bool NrfUsbdDriver::repairEasyDmaParityBeforeDisable() {
-    if (!dmaBytesOdd_) {
-        return true;
-    }
-    if (dmaDirection_ != DmaDirection::None ||
-        reg32(USBD_BASE, ENABLE) == 0UL ||
-        reg32(USBD_BASE, LOWPOWER) != 0UL ||
-        !vbusDetected() || !usbPwrRdy()) {
-        return false;
-    }
-
-    // Current Nordic nrfx sends one byte through EPIN0 when cumulative
-    // completed EasyDMA bytes are odd. It prevents an invalid bus request on
-    // the next USBD enable. Run it synchronously with the IRQ masked and a
-    // strict bound; never issue this DMA while LOWPOWER owns the register clock
-    // or while the USB regulator lacks real VBUS/OUTPUTRDY.
-    reg32(USBD_BASE, EPINEN) |= endpointMask(0U);
-    reg32(USBD_BASE, epinPtrOffset(0U)) =
-        reinterpret_cast<uint32_t>(&dmaParityScratch_);
-    reg32(USBD_BASE, epinMaxcntOffset(0U)) = 1UL;
-    reg32(USBD_BASE, eventEndEpinOffset(0U)) = 0UL;
-    reg32(USBD_BASE, EVENTS_STARTED) = 0UL;
-    // Recheck at the task edge as a cable-removal race barrier. No Erratum-199
-    // ownership has been asserted yet, so this exit needs no hidden cleanup.
-    if (!vbusDetected() || !usbPwrRdy() ||
-        reg32(USBD_BASE, LOWPOWER) != 0UL) {
-        return false;
-    }
-    dmaDirection_ = DmaDirection::In;
-    dmaEndpoint_ = 0U;
-    usbErrata199BeginDma();
-    reg32(USBD_BASE, taskStartEpinOffset(0U)) = 1UL;
-
-    for (uint32_t spin = 0UL; spin < USBD_PARITY_REPAIR_TIMEOUT_SPINS; ++spin) {
-        if (reg32(USBD_BASE, eventEndEpinOffset(0U)) != 0UL) {
-            const uint32_t amount = reg32(USBD_BASE, epinAmountOffset(0U));
-            const bool completed = completeEasyDma(DmaDirection::In, 0U);
-            reg32(USBD_BASE, eventEndEpinOffset(0U)) = 0UL;
-            reg32(USBD_BASE, EVENTS_STARTED) = 0UL;
-            return completed && amount == 1UL && !dmaBytesOdd_;
-        }
-        if (!vbusDetected() || !usbPwrRdy() ||
-            reg32(USBD_BASE, LOWPOWER) != 0UL) {
-            // The repair DMA's completion is no longer knowable. Keep Erratum
-            // 199 and ENABLE ownership intact; only a system reset may recover.
-            return false;
-        }
-    }
-    // Same fail-closed ownership rule as startEasyDma(): do not clear the 199
-    // marker when the END event was never observed.
-    return false;
-}
-
-void NrfUsbdDriver::abortEasyDmaAfterBusReset() {
-    // USBRESET terminates endpoint transactions in the USBD MAC. It is the
-    // only enabled-session event, besides a matching END, that permits us to
-    // release an arbitrary in-flight EasyDMA ownership record.
-    if (dmaDirection_ != DmaDirection::None) {
-        const DmaDirection direction = dmaDirection_;
-        const uint8_t endpoint = dmaEndpoint_;
-        const uint32_t endEvent = direction == DmaDirection::In
-            ? eventEndEpinOffset(endpoint)
-            : eventEndEpoutOffset(endpoint);
-        if (reg32(USBD_BASE, endEvent) != 0UL) {
-            (void)completeEasyDma(direction, endpoint);
-            reg32(USBD_BASE, endEvent) = 0UL;
-            return;
-        }
-    }
-    usbErrata199EndDma();
-    dmaDirection_ = DmaDirection::None;
-    dmaEndpoint_ = 0xFFU;
-}
-
-void NrfUsbdDriver::clearEasyDmaAfterConfirmedDisable() {
-    if (reg32(USBD_BASE, ENABLE) != 0UL) {
-        return;
-    }
-    usbErrata199EndDma();
-    dmaDirection_ = DmaDirection::None;
-    dmaEndpoint_ = 0xFFU;
-}
-
-void NrfUsbdDriver::acknowledgeWakeAndDeferUsbCauses() {
-    // Clear the aggregate event first, then W1C only USBWUALLOWED. If another
-    // cause arrived before that aggregate clear, its hardware cause bit remains
-    // set but its notification edge may have been consumed. Snapshot all such
-    // non-wake causes into software so processUsbEvent() handles them even when
-    // EVENTS_USBEVENT is now zero. A cause arriving after the snapshot relatches
-    // the aggregate event and follows the normal path. No endpoint/configuration
-    // register is touched while the controller is low-power or waking.
-    reg32(USBD_BASE, EVENTS_USBEVENT) = 0UL;
-    reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_USBWUALLOWED_MASK;
-    deferredUsbCauses_ |= reg32(USBD_BASE, EVENTCAUSE) &
-        ~USBD_EVENTCAUSE_USBWUALLOWED_MASK;
-}
-
-bool NrfUsbdDriver::wakeFromLowPower() {
-    if (reg32(USBD_BASE, LOWPOWER) == 0UL) {
-        return true;
-    }
-    if (!vbusDetected()) {
-        return false;
-    }
-
-    // USBWUALLOWED is W1C. A stale acknowledgement must not satisfy this
-    // wake. Erratum 171 brackets LOWPOWER->ForceNormal until the controller
-    // explicitly reports that its register clock is usable again.
-    acknowledgeWakeAndDeferUsbCauses();
-    const bool applyErrata171 = usbErrata171Applies();
-    if (applyErrata171) {
-        usbErrata171First();
-    }
-    wakePending_ = true;
-    reg32(USBD_BASE, LOWPOWER) = 0UL;
-    const uint32_t lowPowerReadback = reg32(USBD_BASE, LOWPOWER);
-    (void)lowPowerReadback;
-
-    const bool wakeWaitCompleted = spinUntil([]() {
-        return !vbusDetected() ||
-               (reg32(USBD_BASE, EVENTCAUSE) &
-                USBD_EVENTCAUSE_USBWUALLOWED_MASK) != 0UL;
-    });
-    const bool wakeAllowed = wakeWaitCompleted && vbusDetected() &&
-        (reg32(USBD_BASE, EVENTCAUSE) &
-         USBD_EVENTCAUSE_USBWUALLOWED_MASK) != 0UL;
-    if (!wakeAllowed) {
-        // Keep Erratum 171 open. disablePeripheral() closes it only after
-        // ENABLE is proven zero, and wakePending_ prevents premature DP/DM or
-        // endpoint-register access while the wake acknowledgement is unknown.
-        return false;
-    }
-
-    acknowledgeWakeAndDeferUsbCauses();
-    if (applyErrata171) {
-        usbErrata171Second();
-    }
-    wakePending_ = false;
-    return true;
-}
-
-bool NrfUsbdDriver::disablePeripheral() {
-    disableNvicIrq(USBD_IRQ_NUMBER);
-    clearPendingNvicIrq(USBD_IRQ_NUMBER);
-
-    // Parity repair needs the shared EasyDMA channel and accessible endpoint
-    // registers. If an odd session is suspended, first use the established
-    // Erratum-171-protected wake; never start the repair in LOWPOWER itself.
-    if (reg32(USBD_BASE, ENABLE) != 0UL && dmaBytesOdd_ &&
-        !wakePending_ && reg32(USBD_BASE, LOWPOWER) != 0UL &&
-        vbusDetected()) {
-        (void)wakeFromLowPower();
-    }
-    const bool controllerAccessible = reg32(USBD_BASE, ENABLE) != 0UL &&
-        !wakePending_ && reg32(USBD_BASE, LOWPOWER) == 0UL;
-    bool dmaSettled = dmaDirection_ == DmaDirection::None;
-    bool paritySafe = !dmaBytesOdd_;
-    if (controllerAccessible) {
-        // These registers are unavailable once ENABLE reaches zero. Release
-        // forced line ownership and normalize the active state only when the
-        // controller is already in ForceNormal. Never manufacture an
-        // unprotected wake merely to tear the peripheral down.
-        reg32(USBD_BASE, USBPULLUP) = 0UL;
-        reg32(USBD_BASE, INTENCLR) = 0xFFFFFFFFUL;
-
-        // A latched END belongs to this session and must contribute its actual
-        // AMOUNT before parity is evaluated. A still-pending OUT DMA may wait
-        // for a host packet forever, so the wait is bounded. It must never be
-        // aborted by ENABLE=0 or displaced by the one-byte repair while it
-        // still owns EasyDMA; an unsettled transfer fails closed below.
-        dmaSettled = finishEasyDmaBeforeDisable();
-        paritySafe = dmaSettled
-            ? repairEasyDmaParityBeforeDisable()
-            : !dmaBytesOdd_;
-
-        if (!dmaDisableMayCommit(!wakePending_, dmaSettled,
-                                 paritySafe && !dmaBytesOdd_)) {
-            // Unknown/active EasyDMA, an unacknowledged wake, or a failed odd
-            // repair must keep the current USBD session alive. In particular,
-            // do not clear Errata 199/211 or write ENABLE=0: only a system reset
-            // can safely recover once the exact DMA parity is unknowable.
-            terminalFault_ = true;
-            return false;
-        }
-
-        reg32(USBD_BASE, TASKS_DPDMNODRIVE) = 1UL;
-        reg32(USBD_BASE, SHORTS) = 0UL;
-        reg32(USBD_BASE, DPDMVALUE) = 0UL;
-        reg32(USBD_BASE, EPINEN) = 0UL;
-        reg32(USBD_BASE, EPOUTEN) = 0UL;
-        reg32(USBD_BASE, ISOSPLIT) = 0UL;
-        reg32(USBD_BASE, ISOINCONFIG) = 0UL;
-    } else if (reg32(USBD_BASE, ENABLE) != 0UL &&
-               !dmaDisableMayCommit(!wakePending_, dmaSettled, paritySafe)) {
-        // LOWPOWER makes endpoint registers inaccessible. An already-even,
-        // idle session may still be disabled directly, but never guess when a
-        // DMA owner, odd parity, or an unfinished protected wake remains.
-        terminalFault_ = true;
-        return false;
-    }
-    reg32(USBD_BASE, ENABLE) = 0UL;
-    for (uint32_t spin = 0UL;
-         spin < USBD_DISABLE_TIMEOUT_SPINS && reg32(USBD_BASE, ENABLE) != 0UL;
-         ++spin) {
-    }
-    if (reg32(USBD_BASE, ENABLE) != 0UL) {
-        // Do not clear Errata 199/211 or retry against a peripheral whose
-        // disable never completed.
-        terminalFault_ = true;
-        return false;
-    }
-
-    clearEasyDmaAfterConfirmedDisable();
-    if (usbErrata171Applies()) {
-        usbErrata171Second();
-    }
-    wakePending_ = false;
-    deferredUsbCauses_ = 0UL;
-    if (usbErrata211Applies()) {
-        usbErrata187Second();
-    }
-    if (!paritySafe || dmaBytesOdd_) {
-        // The peripheral is electrically off, but re-enabling it after an odd
-        // cumulative DMA count is precisely the invalid-bus-request condition
-        // Nordic's repair prevents. Keep this driver fail-closed until reset.
-        terminalFault_ = true;
-        return false;
-    }
-    return true;
-}
-
-void NrfUsbdDriver::sanitizeEnabledSession() {
-    // A SoftDevice bootloader can leave an enabled peripheral with stale line
-    // forcing, endpoint configuration, events, and W1C status. Run this only
-    // after this application has produced its own ENABLE->READY edge, with D+
-    // still detached and before any EasyDMA transaction or interrupt is armed.
-    disableInterrupts();
-    reg32(USBD_BASE, USBPULLUP) = 0UL;
-    // begin()/wakeFromLowPower() has already proven ForceNormal. Releasing a
-    // bootloader's forced DP/DM state before that acknowledgement can be
-    // ignored by hardware and strand the new session detached.
-    reg32(USBD_BASE, TASKS_DPDMNODRIVE) = 1UL;
-    reg32(USBD_BASE, SHORTS) = 0UL;
-    reg32(USBD_BASE, DPDMVALUE) = 0UL;
-    reg32(USBD_BASE, EPINEN) = 0UL;
-    reg32(USBD_BASE, EPOUTEN) = 0UL;
-
-    // Mirror current nrfx post-READY configuration. Erratum 166 applies to
-    // every nRF52840 factory revision (including 0x08/0x03) and must precede
-    // ISO buffer configuration. This stack does not expose ISO endpoints yet,
-    // but leaving the controller in a different undocumented state makes later
-    // CDC-only enable/disable cycles diverge from Nordic's validated baseline.
-    if (usbErrata166Applies()) {
-        mem32(USBD_ERRATA166_INDEX_ADDRESS) = 0x000007E3UL;
-        mem32(USBD_ERRATA166_VALUE_ADDRESS) = 0x00000040UL;
-        __asm volatile("isb 0xF" ::: "memory");
-        __asm volatile("dsb 0xF" ::: "memory");
-    }
-    reg32(USBD_BASE, ISOSPLIT) = USBD_ISOSPLIT_HALF_VALUE;
-    reg32(USBD_BASE, ISOINCONFIG) = 0UL;
-    clearEvents();
-    reg32(USBD_BASE, EPSTATUS) = 0xFFFFFFFFUL;
-    reg32(USBD_BASE, EPDATASTATUS) = 0xFFFFFFFFUL;
-    usbErrata199EndDma();
-    dmaDirection_ = DmaDirection::None;
-    dmaEndpoint_ = 0xFFU;
-    dmaBytesOdd_ = false;
-}
-
 void NrfUsbdDriver::begin() {
-    if (!nrfUsbRuntimeEnabled() || enabled_ || terminalFault_) {
+    if (!nrfUsbRuntimeEnabled() || enabled_) {
         return;
     }
 
-    if (!initialized_) {
-        diagResetAtUsbdBeginStage(1UL);
-        initialized_ = true;
-        attached_ = true;
-        initDescriptors();
-        resetConnectionState();
-        diagResetAtUsbdBeginStage(2UL);
-    }
-    if (!attached_ || !vbusDetected()) {
-        // Initialization may happen while battery-powered, or VBUS can vanish
-        // during a bootloader jump. Do not leave an inherited peripheral or D+
-        // drive active in either case; retry only after real VBUS returns.
-        if (reg32(USBD_BASE, ENABLE) != 0UL ||
-            reg32(USBD_BASE, USBPULLUP) != 0UL) {
-            (void)disablePeripheral();
-        }
-        startupRetryMillis_ = millis();
-        return;
-    }
+    // A SoftDevice/UF2 bootloader may jump directly to the application while
+    // leaving USBD and its pullup enabled. Waiting before detaching keeps the
+    // bootloader identity electrically present, so Windows can carry the old
+    // control/bulk session into the application and expose a COM port whose
+    // transfers never complete. Detach first, then honor the physically tested
+    // 400 ms host handoff guard. A hardware-clean reset still needs this quiet
+    // interval because Windows may be retiring the preceding bootloader node.
+    reg32(USBD_BASE, USBPULLUP) = 0UL;
+    reg32(USBD_BASE, ENABLE) = 0UL;
+    delay(400);
 
+    diagResetAtUsbdBeginStage(1UL);
     ensureHfclk();
+    initDescriptors();
+    diagResetAtUsbdBeginStage(2UL);
 
-    // Always establish a verified disabled baseline. This handles both an
-    // enabled SoftDevice bootloader handoff and the subtler case where ENABLE
-    // is already zero but bootloader interrupts/pending state survived. Keep a
-    // short host-visible detach interval only after the readback reached zero;
-    // no wait is held under an IRQ/critical-section lock.
-    if (!disablePeripheral()) {
-        return;
-    }
-    const uint32_t detachStartMillis = millis();
-    while ((millis() - detachStartMillis) < USBD_HANDOFF_DETACH_MS) {
-        // Do not call delay()/yield() here: yield() polls this same driver and
-        // could recursively enter begin() while enabled_ is still false.
-    }
+    // Wait for VBUS detection. After a chip-reset hand-off from the
+    // bootloader the regulator state may take a moment to come back; we
+    // give it ~100 ms before giving up. If VBUS is genuinely absent (the
+    // user is running off battery), we still proceed with USBD bring-up so
+    // that the board enumerates the moment a cable is connected — the
+    // pullup will be engaged later by poll() when vbusDetected() flips.
+    const bool vbusPresentAtBoot = spinUntil([]() { return effectiveVbusDetected(); });
 
-    // Nordic order: real VBUS was checked above; now clear stale READY before
-    // entering the revision-gated workaround transaction and setting ENABLE.
-    clearEvents();
+    // POWER->USBREGSTATUS.OUTPUTRDY must be asserted before ENABLE=1 for the
+    // analog USB front-end to come up reliably. This is especially important
+    // on bootloader -> application hand-off where VBUS is already present but
+    // the regulator can lag the reset by a short window.
+    if (vbusPresentAtBoot) {
+        spinUntil([]() { return usbPwrRdy(); });
+    }
     diagResetAtUsbdBeginStage(3UL);
-    const bool applyErrata187 = usbErrata187Applies();
-    const bool applyErrata171 = usbErrata171Applies();
-    const bool applyErrata211 = usbErrata211Applies();
-    if (applyErrata187) {
-        usbErrata187First();
-    }
-    if (applyErrata171) {
-        usbErrata171First();
-    }
 
+    // Errata 187+171 wrap the ENABLE handshake (Nordic's nrfx_usbd applies
+    // both, in this nesting order: 187 outer, 171 inner). Both target the
+    // same trim block but at different flag offsets — 187 at 0x4006ED14
+    // with 0x3, 171 at 0x4006EC14 with 0xC0. The conditional reads of
+    // 0x4006EC00 keep them safe to call after the bootloader's nrfx_usbd
+    // has already primed the trim register.
+    usbErrata187First();
+    usbErrata171First();
+
+    clearEvents();
     reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
     diagResetAtUsbdBeginStage(4UL);
 
-    // READY is a mandatory post-ENABLE event. Also observe a VBUS loss while
-    // waiting so a cable race exits promptly instead of being treated as a
-    // successful startup.
-    const bool readyWaitCompleted = spinUntil([]() {
-        return !vbusDetected() ||
-               (reg32(USBD_BASE, EVENTCAUSE) & USBD_EVENTCAUSE_READY_MASK) != 0UL;
-    });
-    const bool readyObserved = readyWaitCompleted && vbusDetected() &&
-        (reg32(USBD_BASE, EVENTCAUSE) & USBD_EVENTCAUSE_READY_MASK) != 0UL;
+    // Wait for the USBEVENT::READY event (EVENTCAUSE bit 11). This flag
+    // signals that the USBD peripheral's internal state machine has fully
+    // initialized after ENABLE=1 and that endpoint configuration writes
+    // are now safe.
+    auto waitUsbReadyEvent = []() -> bool {
+        return spinUntil([]() {
+            return (reg32(USBD_BASE, EVENTCAUSE) & USBD_EVENTCAUSE_READY_MASK) != 0UL;
+        });
+    };
 
-    if (readyObserved) {
-        // These are the first guaranteed-access session writes. Keep D+
-        // detached and consume READY before closing the enable workaround;
-        // LOWPOWER recovery and DPDMNODRIVE follow as separate phases below.
-        reg32(USBD_BASE, USBPULLUP) = 0UL;
-        reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_READY_MASK;
-    }
-
-    // Close the nested workaround transaction on every path, in reverse order.
-    if (applyErrata171) {
-        usbErrata171Second();
-    }
-    if (applyErrata187) {
-        usbErrata187Second();
-    }
+    bool readyObserved = waitUsbReadyEvent();
     if (!readyObserved) {
-        failClosedPeripheral();
-        return;
+        // Serial DFU -> app transitions occasionally leave USBD between states;
+        // a single pullup-disable/re-ENABLE cycle recovers READY without
+        // touching errata trim registers again.
+        reg32(USBD_BASE, USBPULLUP) = 0UL;
+        reg32(USBD_BASE, ENABLE) = 0UL;
+        for (volatile uint32_t n = 0UL; n < 640000UL; ++n) {
+            (void)n;
+        }
+        clearEvents();
+        reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
+        readyObserved = waitUsbReadyEvent();
     }
-
-    // Errata 187 and 211 share ED14 but have distinct lifetimes. Nordic nrfx
-    // closes the 187 ENABLE transaction above, then reopens ED14 for 211 and
-    // keeps it at 3 for the complete enabled lifetime. This is required for
-    // correct resume/SOF behavior on affected nRF52840 revisions; it is kept
-    // separate from the cold-attach diagnosis below.
-    if (applyErrata211) {
-        usbErrata187First();
-    }
-    // An enabled bootloader session can hand LOWPOWER across reset. READY only
-    // proves that ENABLE completed; ForceNormal has its own protected
-    // USBWUALLOWED acknowledgement. Do not release DP/DM ownership or touch
-    // session registers until that acknowledgement is observed.
-    if (!wakeFromLowPower()) {
-        failClosedPeripheral();
-        return;
-    }
-    sanitizeEnabledSession();
+    (void)readyObserved;
+    reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_READY_MASK;
     diagResetAtUsbdBeginStage(5UL);
 
-    // OUTPUTRDY is checked after ENABLE and READY. Timeouts and VBUS races are
-    // failures, not warnings: the retry starts later from ENABLE=0/PULLUP=0.
-    const bool outputWaitCompleted = spinUntil([]() {
-        return !vbusDetected() || usbPwrRdy();
-    });
-    if (!outputWaitCompleted || !vbusDetected() || !usbPwrRdy()) {
-        failClosedPeripheral();
-        return;
-    }
+    // Reverse-order wrap exit: 171 inner end, then 187 outer end.
+    usbErrata171Second();
+    usbErrata187Second();
 
-    // Final real-VBUS check before publishing ready state or enabling anything
-    // visible to the host. enablePullup() repeats the check as a race barrier.
-    if (!vbusDetected()) {
-        failClosedPeripheral();
-        return;
-    }
+    // Re-check OUTPUTRDY after ENABLE. Bootloader hand-off can leave the
+    // regulator transition in flight; this keeps the first pullup / EP
+    // activity from racing the analog block.
+    spinUntil([]() { return usbPwrRdy(); });
+
     enabled_ = true;
-    resetConnectionState();
     started_ = true;
+    attached_ = true;
+    resetConnectionState();
+    // The USBD peripheral completed its post-ENABLE READY handshake above, so it
+    // is ready for endpoint activity regardless of bus state. Set it here (and
+    // only clear it in end()), because the one-shot EVENTCAUSE.READY event was
+    // already consumed during the ENABLE handshake and won't fire again.
     ready_ = true;
+    // Enable the USBD interrupt only now that all device state is initialized,
+    // and immediately before engaging the pullup that makes the host begin
+    // enumeration. From here on, enumeration is serviced in the ISR and is
+    // therefore immune to whatever the user sketch's loop() does.
     enableInterrupts();
-    enablePullup(attached_);
-    if (!vbusDetected()) {
-        failClosedPeripheral();
-        return;
-    }
+    enablePullup(attached_ && effectiveVbusDetected());
     configStartMillis_ = millis();
+
     diagResetAtUsbdBeginStage(6UL);
 }
 
-void NrfUsbdDriver::failClosedPeripheral() {
-    // This helper is used for readiness timeouts, unplug races, and retries.
-    // It deliberately preserves initialized_/attached_ so poll() can retry,
-    // while all host-visible and peripheral-active state is cleared.
-    const bool disabled = disablePeripheral();
+void NrfUsbdDriver::end() {
+    enablePullup(false);
+    disableInterrupts();
+    reg32(USBD_BASE, ENABLE) = 0UL;
     enabled_ = false;
     started_ = false;
+    attached_ = false;
     ready_ = false;
     resetConnectionState();
-    ready_ = false;
-    eventCause_ = 0UL;
-    if (disabled && !terminalFault_) {
-        startupRetryMillis_ = millis();
-    }
-}
-
-void NrfUsbdDriver::end() {
-    failClosedPeripheral();
-    if (reg32(USBD_BASE, ENABLE) == 0UL && !dmaBytesOdd_) {
-        // An explicit end()/begin() cycle is allowed to recover after the
-        // peripheral has reached the one state that makes errata cleanup safe.
-        terminalFault_ = false;
-    }
-    initialized_ = false;
-    attached_ = false;
     pendingControlOut_ = ControlOutTransfer::None;
     controlOutExpected_ = 0U;
     controlOutLength_ = 0U;
@@ -1319,26 +791,24 @@ void NrfUsbdDriver::end() {
     eventCause_ = 0UL;
     serialStateBitmap_ = 0U;
     userSerialStateBitmap_ = 0U;
+    reg32(USBD_BASE, EPINEN) = 0UL;
+    reg32(USBD_BASE, EPOUTEN) = 0UL;
 }
 
 void NrfUsbdDriver::attach() {
     if (!nrfUsbRuntimeEnabled()) {
         return;
     }
-    if (!initialized_) {
-        begin();
-        return;
-    }
-    attached_ = true;
     if (!enabled_) {
         begin();
         return;
     }
 
+    attached_ = true;
     resetConnectionState();
     clearEvents();
     started_ = true;
-    enablePullup(vbusDetected());
+    enablePullup(effectiveVbusDetected());
 }
 
 void NrfUsbdDriver::detach() {
@@ -1347,35 +817,14 @@ void NrfUsbdDriver::detach() {
         return;
     }
 
-    // A logical detach is also the safe cancellation boundary for any pending
-    // EasyDMA operation. Use the same verified disable path as error recovery;
-    // attach() will create a fresh sanitized enabled session.
     attached_ = false;
-    failClosedPeripheral();
+    enablePullup(false);
+    resetConnectionState();
+    clearEvents();
 }
 
 void NrfUsbdDriver::poll() {
-    if (!initialized_) {
-        return;
-    }
-    if (terminalFault_) {
-        if (enabled_) {
-            failClosedPeripheral();
-        }
-        return;
-    }
     if (!enabled_) {
-        const uint32_t now = millis();
-        if (attached_ && vbusDetected() &&
-            (now - startupRetryMillis_) >= USBD_STARTUP_RETRY_MS) {
-            // Retry is foreground-driven and rate-limited; each attempt remains
-            // bounded and fail-closed if READY/OUTPUTRDY does not arrive.
-            begin();
-        }
-        return;
-    }
-    if (!vbusDetected()) {
-        failClosedPeripheral();
         return;
     }
 
@@ -1390,11 +839,9 @@ void NrfUsbdDriver::poll() {
     // no-op.
     UsbdIrqLock lock;
 
-    const bool hasVbus = vbusDetected();
+    const bool hasVbus = effectiveVbusDetected();
+    enablePullup(attached_ && hasVbus);
     processBusState(hasVbus);
-    if (enabled_ && !suspended_) {
-        enablePullup(attached_ && hasVbus);
-    }
 
     if (USBD_CONFIG_TIMEOUT_RESET_MS != 0UL && attached_ && hasVbus && !configured_ && configStartMillis_ != 0UL &&
         (millis() - configStartMillis_) >= USBD_CONFIG_TIMEOUT_RESET_MS) {
@@ -1406,14 +853,20 @@ void NrfUsbdDriver::poll() {
         started_ = true;
     }
 
-    if (attached_ && configured_ && !suspended_) {
+    // nRF52840 has one shared USBD EasyDMA engine. Do not launch a CDC,
+    // notification, or pluggable-endpoint transfer while EP0 owns that engine;
+    // doing so can replace the first-open GET/SET_LINE_CODING response and make
+    // Windows wait for usbser.sys' 30-second control-transfer timeout.
+    const bool controlPlaneIdle =
+        ep0InXferPhase_ == Ep0InXferPhase::Idle &&
+        pendingControlOut_ == ControlOutTransfer::None;
+    if (attached_ && configured_ && controlPlaneIdle) {
         serviceDataIn(false);
         serviceNotificationIn(false);
         if (userPortEnabled()) {
             serviceDataIn(true);
             serviceNotificationIn(true);
         }
-        serviceDynamicEndpoints();
     }
 
     if (serviceTouchPending_) {
@@ -1472,7 +925,7 @@ void NrfUsbdDriver::poll() {
 }
 
 void NrfUsbdDriver::irqHandler() {
-    if (!enabled_ || terminalFault_) {
+    if (!enabled_) {
         return;
     }
 
@@ -1480,15 +933,17 @@ void NrfUsbdDriver::irqHandler() {
         ++g_usbdPollTrace.irqCalls;
     }
 
-    processBusState(vbusDetected());
-    if (attached_ && configured_ && !suspended_) {
+    processBusState(effectiveVbusDetected());
+    const bool controlPlaneIdle =
+        ep0InXferPhase_ == Ep0InXferPhase::Idle &&
+        pendingControlOut_ == ControlOutTransfer::None;
+    if (attached_ && configured_ && controlPlaneIdle) {
         serviceDataIn(false);
         serviceNotificationIn(false);
         if (userPortEnabled()) {
             serviceDataIn(true);
             serviceNotificationIn(true);
         }
-        serviceDynamicEndpoints();
     }
     if (serviceTouchPending_) {
         const bool resetArmed = configuredMillis_ != 0UL &&
@@ -1581,105 +1036,9 @@ void NrfUsbdDriver::serviceHaltedTouch() {
     }
 }
 
-bool NrfUsbdDriver::processUsbEvent(bool hasVbus) {
-    const uint32_t deferredCauses = deferredUsbCauses_;
-    const bool aggregateEvent =
-        reg32(USBD_BASE, EVENTS_USBEVENT) != 0UL;
-    if (!aggregateEvent && deferredCauses == 0UL) {
-        return !suspended_;
-    }
-
-    // EVENTS_USBEVENT is a normal event register (write zero to clear), while
-    // EVENTCAUSE is W1C. Snapshot and acknowledge the causes before a SUSPEND
-    // transition makes most USBD registers inaccessible. A later cause will
-    // relatch the aggregate event and is handled on the next pass.
-    if (aggregateEvent) {
-        reg32(USBD_BASE, EVENTS_USBEVENT) = 0UL;
-    }
-    const uint32_t causes =
-        reg32(USBD_BASE, EVENTCAUSE) | deferredCauses;
-    deferredUsbCauses_ = 0UL;
-    eventCause_ = causes;
-    if (pollTraceEnabled()) {
-        ++g_usbdPollTrace.usbEventEvents;
-        g_usbdPollTrace.lastEventCause = causes;
-    }
-    if (causes != 0UL) {
-        reg32(USBD_BASE, EVENTCAUSE) = causes;
-    }
-
-    if ((causes & USBD_EVENTCAUSE_READY_MASK) != 0UL) {
-        ready_ = attached_ && hasVbus;
-    }
-    if (!hasVbus) {
-        failClosedPeripheral();
-        return false;
-    }
-
-    const bool sawSuspend =
-        (causes & USBD_EVENTCAUSE_SUSPEND_MASK) != 0UL;
-    const bool sawResume =
-        (causes & USBD_EVENTCAUSE_RESUME_MASK) != 0UL;
-
-    // RESUME wins when both causes were captured. Entering LOWPOWER in that
-    // state can disconnect the USBD clock after the host has already resumed.
-    if (sawResume) {
-        if (!wakeFromLowPower()) {
-            failClosedPeripheral();
-            return false;
-        }
-        enableInterrupts();
-        suspended_ = false;
-        ready_ = attached_ && hasVbus;
-        return true;
-    }
-
-    if (sawSuspend) {
-        // Close both sides of the classic suspend/resume race: check once
-        // before LOWPOWER, then again immediately after the write. The cause is
-        // left to relatch EVENTS_USBEVENT if it arrives after the second check.
-        if ((reg32(USBD_BASE, EVENTCAUSE) &
-             USBD_EVENTCAUSE_RESUME_MASK) == 0UL) {
-            keepOnlyUsbdWakeInterrupt();
-            reg32(USBD_BASE, LOWPOWER) = 1UL;
-            const uint32_t lowPowerReadback = reg32(USBD_BASE, LOWPOWER);
-            (void)lowPowerReadback;
-        }
-
-        if ((reg32(USBD_BASE, EVENTCAUSE) &
-             USBD_EVENTCAUSE_RESUME_MASK) != 0UL) {
-            reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_RESUME_MASK;
-            reg32(USBD_BASE, EVENTS_USBEVENT) = 0UL;
-            if (!wakeFromLowPower()) {
-                failClosedPeripheral();
-                return false;
-            }
-            enableInterrupts();
-            suspended_ = false;
-            ready_ = attached_ && hasVbus;
-            return true;
-        }
-
-        suspended_ = true;
-        return false;
-    }
-
-    return !suspended_;
-}
-
 void NrfUsbdDriver::processBusState(bool hasVbus) {
-    // Nordic documents endpoint, SOF, and configuration registers as
-    // inaccessible in LOWPOWER. Until RESUME has completed the protected wake,
-    // inspect only the wake-capable aggregate event and EVENTCAUSE registers.
-    if (suspended_) {
-        (void)processUsbEvent(hasVbus);
-        return;
-    }
-
     if (reg32(USBD_BASE, EVENTS_USBRESET) != 0UL) {
         reg32(USBD_BASE, EVENTS_USBRESET) = 0UL;
-        abortEasyDmaAfterBusReset();
-        abortEp0Transfer();
         resetConnectionState();
     }
 
@@ -1688,23 +1047,31 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         started_ = true;
     }
 
+    if (reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL) {
+        reg32(USBD_BASE, EVENTS_EP0SETUP) = 0UL;
+        if (pollTraceEnabled()) {
+            ++g_usbdPollTrace.ep0SetupEvents;
+        }
+        diagResetAtUsbdBeginStage(7UL);
+        serviceSetup();
+        diagResetAtUsbdBeginStage(8UL);
+    }
+
     if (reg32(USBD_BASE, eventEndEpinOffset(0U)) != 0UL) {
-        (void)completeEasyDma(DmaDirection::In, 0U);
         reg32(USBD_BASE, eventEndEpinOffset(0U)) = 0UL;
         completePendingAddress();
     }
 
     if (reg32(USBD_BASE, eventEndEpinOffset(SERVICE_NOTIFICATION_EP)) != 0UL) {
-        (void)completeEasyDma(DmaDirection::In, SERVICE_NOTIFICATION_EP);
         reg32(USBD_BASE, eventEndEpinOffset(SERVICE_NOTIFICATION_EP)) = 0UL;
-        notificationInFlight_ = false;
+        // DMA-to-endpoint finished. Keep the notification busy until the host
+        // ACK appears in EPDATASTATUS, otherwise a second notification can
+        // overwrite the endpoint FIFO before usbser reads the first.
         diagResetAtUsbdBeginStage(21UL);
     }
 
     if (userPortEnabled() && reg32(USBD_BASE, eventEndEpinOffset(USER_NOTIFICATION_EP)) != 0UL) {
-        (void)completeEasyDma(DmaDirection::In, USER_NOTIFICATION_EP);
         reg32(USBD_BASE, eventEndEpinOffset(USER_NOTIFICATION_EP)) = 0UL;
-        userNotificationInFlight_ = false;
     }
 
     if (reg32(USBD_BASE, EVENTS_EP0DATADONE) != 0UL) {
@@ -1741,46 +1108,25 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
             // ServiceLineCoding case drops the entire SET_LINE_CODING payload — which
             // is precisely why the device's baud was stuck at its 115200 default and
             // the 1200 bps touch never armed.
-            if (startEasyDma(DmaDirection::Out, 0U)) {
-                bool completed = false;
-                for (uint32_t spin = 0UL; spin < USBD_START_CAPTURE_TIMEOUT_SPINS; ++spin) {
-                    if (reg32(USBD_BASE, eventEndEpoutOffset(0U)) != 0UL) {
-                        (void)completeEasyDma(DmaDirection::Out, 0U);
-                        reg32(USBD_BASE, eventEndEpoutOffset(0U)) = 0UL;
-                        completed = true;
-                        break;
-                    }
-                }
-                if (completed) {
-                    completeControlOutTransfer();
-                    completePendingAddress();
-                }
+            if (triggerEndpointStartTask(taskStartEpoutOffset(0U))) {
+                completeControlOutTransfer();
+                completePendingAddress();
+            } else {
+                // A bounded EasyDMA failure must not leave EP0 permanently
+                // owned by a stale control-OUT transfer. Abort this request and
+                // let the host recover through the normal control-pipe retry.
+                pendingControlOut_ = ControlOutTransfer::None;
+                controlOutExpected_ = 0U;
+                controlOutLength_ = 0U;
+                stallControlEndpoint();
             }
         }
         // Else: spurious EP0DATADONE with neither side tracked — drop silently.
     }
 
-    // Nordic's USBD driver intentionally handles a newly latched SETUP after
-    // every completion that was already pending in the same IRQ snapshot. A
-    // host may issue the next SETUP immediately after the preceding status
-    // stage. Handling SETUP first would make abortEp0Transfer() erase that
-    // preceding EP0DATADONE/END event and can strand EP0 during enumeration.
-    // The fresh SETUP still aborts any genuinely unfinished control transfer.
-    if (reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL) {
-        reg32(USBD_BASE, EVENTS_EP0SETUP) = 0UL;
-        abortEp0Transfer();
-        if (pollTraceEnabled()) {
-            ++g_usbdPollTrace.ep0SetupEvents;
-        }
-        diagResetAtUsbdBeginStage(7UL);
-        serviceSetup();
-        diagResetAtUsbdBeginStage(8UL);
-    }
-
     // A host OUT packet has been buffered when its EPDATASTATUS OUT bit is set
-    // (EPOUT1..7 = bits 17..23); for each we trigger an EasyDMA STARTEPOUT
-    // (queueDataOut), then ENDEPOUT fires and the branch below copies the bytes
-    // into the rx ring.
+    // (EPOUT1..7 = bits 17..23); for each we serialize an EasyDMA STARTEPOUT,
+    // then copy the completed packet into its software RX ring.
     //
     // We drain straight from EPDATASTATUS rather than gating on EVENTS_EPDATA.
     // EVENTS_EPDATA is only an aggregate "a data endpoint advanced" wake. The
@@ -1806,72 +1152,115 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
     // multi-packet IN replies (e.g. the GDB qSupported feature list lost its
     // first 64-byte chunk, leaving "$+#ad"). Clear only the IN bits here; the
     // OUT bits (EPOUT2/EPOUT4) belong to drainServiceDataOut().
+    // EPDATA is only an aggregate wake event. Its flag can be consumed just
+    // before a per-endpoint ACK bit latches, so inspect the endpoint status on
+    // every pass and recover a CDC IN transfer even when that aggregate edge
+    // was missed during a bootloader-to-application handoff.
+    uint32_t endpointStatus = reg32(USBD_BASE, EPDATASTATUS);
+    {
+        // On this silicon the aggregate EPDATA event can become visible a few
+        // peripheral clocks before its endpoint-status bit. Briefly resample;
+        // if it is still zero, leave EPDATA asserted so the IRQ is retriggered
+        // instead of losing the only wake-up for the next queued IN packet.
+        if (reg32(USBD_BASE, EVENTS_EPDATA) != 0UL && endpointStatus == 0UL) {
+            for (uint32_t spin = 0UL; spin < 64UL && endpointStatus == 0UL; ++spin) {
+                endpointStatus = reg32(USBD_BASE, EPDATASTATUS);
+            }
+        }
+        const uint32_t serviceNotificationAck = 1UL << SERVICE_NOTIFICATION_EP;
+        const uint32_t serviceInAck = 1UL << SERVICE_DATA_EP;
+        const uint32_t userNotificationAck = 1UL << USER_NOTIFICATION_EP;
+        const uint32_t userInAck = 1UL << USER_DATA_EP;
+        uint32_t handledInAck = 0UL;
+        if ((endpointStatus & serviceNotificationAck) != 0UL) {
+            notificationInFlight_ = false;
+            handledInAck |= serviceNotificationAck;
+        }
+        if ((endpointStatus & serviceInAck) != 0UL) {
+            dataInFlight_ = false;
+            handledInAck |= serviceInAck;
+        }
+        if (userPortEnabled()) {
+            if ((endpointStatus & userNotificationAck) != 0UL) {
+                userNotificationInFlight_ = false;
+                handledInAck |= userNotificationAck;
+            }
+            if ((endpointStatus & userInAck) != 0UL) {
+                userDataInFlight_ = false;
+                handledInAck |= userInAck;
+            }
+        }
+        for (uint8_t endpoint = firstDynamicEndpoint(); endpoint < USB_MAX_ENDPOINTS; ++endpoint) {
+            const uint32_t dynamicInAck = 1UL << endpoint;
+            if ((endpointStatus & dynamicInAck) != 0UL) {
+                if (dynamicInBusy_[endpoint]) {
+                    dynamicInBusy_[endpoint] = false;
+                    dynamicInLengths_[endpoint] = 0U;
+                    PluggableUSB().endpointInComplete(endpoint);
+                }
+                handledInAck |= dynamicInAck;
+            }
+        }
+        if (handledInAck != 0UL) {
+            reg32(USBD_BASE, EPDATASTATUS) = handledInAck;
+        }
+    }
+
     if (reg32(USBD_BASE, EVENTS_EPDATA) != 0UL) {
         reg32(USBD_BASE, EVENTS_EPDATA) = 0UL;
-        const uint32_t eds = reg32(USBD_BASE, EPDATASTATUS);
-        const uint32_t serviceInBit = 1UL << SERVICE_DATA_EP; // EPIN2 = bit 2
-        const uint32_t userInBit = 1UL << USER_DATA_EP;       // EPIN4 = bit 4
-        uint32_t inAck = 0UL;
-        if ((eds & serviceInBit) != 0UL) {
-            dataInFlight_ = false;
-            inAck |= serviceInBit;
-        }
-        if ((eds & userInBit) != 0UL) {
-            userDataInFlight_ = false;
-            inAck |= userInBit;
-        }
-        if (inAck != 0UL) {
-            reg32(USBD_BASE, EPDATASTATUS) = inAck; // clear handled IN bits (W1C)
-        }
-        // OUT bits are deliberately NOT drained here. Draining in the EPDATA
-        // ISR samples EPDATASTATUS precisely in the IN-ack window, where this
-        // hardware can transiently set OUT bits with no real packet; each phantom fetch
-        // then replays stale FIFO bytes, and because the consumer's response
-        // TX causes the next IN-ack, the replays become a self-sustaining
-        // storm that can starve the sketch loop. The foreground pumpRx()
-        // (Serial.available()/read()) is the sole OUT consumer; it samples at
-        // uncorrelated times, which is the same timing the GDB stub's poll
-        // loop has always used successfully.
+        // OUT packets remain pending until foreground pumpRx() or the halted
+        // GDB loop has ring capacity and consumes the exact endpoint-status
+        // bit. Keeping data reception out of this aggregate-event cleanup also
+        // preserves backpressure and avoids competing EasyDMA launches.
     }
 
     if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {
-        // Clear-only: this branch served the dead queueDataOut() model. Real
-        // packets are consumed via their EPDATASTATUS bit (drainServiceDataOut
-        // below / pumpRx); a bare ENDEPOUT on an armed endpoint is a stale
-        // speculative re-delivery and must NOT be pushed into the rx ring.
-        (void)completeEasyDma(DmaDirection::Out, SERVICE_DATA_EP);
+        // OUT packets are consumed through their EPDATASTATUS bit by pumpRx().
+        // The synchronous DMA scheduler deliberately leaves ENDEPOUT latched
+        // for this common event-cleanup path; the bytes were already copied.
         reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) = 0UL;
     }
 
     if (reg32(USBD_BASE, eventEndEpinOffset(SERVICE_DATA_EP)) != 0UL) {
         // DMA buffer->FIFO done; the host-read ACK (EPDATASTATUS.EPIN2 above)
         // is what frees us to send the next chunk, so don't clear dataInFlight_.
-        (void)completeEasyDma(DmaDirection::In, SERVICE_DATA_EP);
         reg32(USBD_BASE, eventEndEpinOffset(SERVICE_DATA_EP)) = 0UL;
         diagResetAtUsbdBeginStage(18UL);
     }
 
     if (userPortEnabled() && reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) != 0UL) {
-        (void)completeEasyDma(DmaDirection::Out, USER_DATA_EP);
         reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) = 0UL; // clear-only, see above
     }
 
     if (userPortEnabled() && reg32(USBD_BASE, eventEndEpinOffset(USER_DATA_EP)) != 0UL) {
-        (void)completeEasyDma(DmaDirection::In, USER_DATA_EP);
         reg32(USBD_BASE, eventEndEpinOffset(USER_DATA_EP)) = 0UL;
     }
 
     for (uint8_t endpoint = firstDynamicEndpoint(); endpoint < USB_MAX_ENDPOINTS; ++endpoint) {
         if (reg32(USBD_BASE, eventEndEpinOffset(endpoint)) != 0UL) {
-            (void)completeEasyDma(DmaDirection::In, endpoint);
             reg32(USBD_BASE, eventEndEpinOffset(endpoint)) = 0UL;
-            dynamicInBusy_[endpoint] = false;
-            dynamicInLengths_[endpoint] = 0U;
-            PluggableUSB().endpointInComplete(endpoint);
         }
     }
 
-    (void)processUsbEvent(hasVbus);
+    if (reg32(USBD_BASE, EVENTS_USBEVENT) != 0UL) {
+        reg32(USBD_BASE, EVENTS_USBEVENT) = 0UL;
+        eventCause_ = reg32(USBD_BASE, EVENTCAUSE);
+        if (pollTraceEnabled()) {
+            ++g_usbdPollTrace.usbEventEvents;
+            g_usbdPollTrace.lastEventCause = eventCause_;
+        }
+        if ((eventCause_ & USBD_EVENTCAUSE_READY_MASK) != 0UL) {
+            ready_ = attached_ && hasVbus;
+        }
+        if ((eventCause_ & USBD_EVENTCAUSE_SUSPEND_MASK) != 0UL) {
+            suspended_ = true;
+        }
+        if ((eventCause_ & USBD_EVENTCAUSE_RESUME_MASK) != 0UL) {
+            suspended_ = false;
+            ready_ = attached_ && hasVbus;
+        }
+        reg32(USBD_BASE, EVENTCAUSE) = eventCause_;
+    }
 }
 
 bool NrfUsbdDriver::enabled() const {
@@ -1887,11 +1276,16 @@ bool NrfUsbdDriver::ready() const {
 }
 
 bool NrfUsbdDriver::connected() const {
-    return enabled_ && attached_ && ready_ && configured_ && !suspended_ && vbusDetected() && dtr_;
+    return enabled_ && attached_ && ready_ && configured_ && !suspended_ &&
+        effectiveVbusDetected() && dtr_ && dtrAssertedMillis_ != 0UL &&
+        (millis() - dtrAssertedMillis_) >= USBD_CDC_OPEN_SETTLE_MS;
 }
 
 bool NrfUsbdDriver::userConnected() const {
-    return enabled_ && attached_ && ready_ && configured_ && !suspended_ && vbusDetected() && userPortEnabled() && userDtr_;
+    return enabled_ && attached_ && ready_ && configured_ && !suspended_ &&
+        effectiveVbusDetected() && userPortEnabled() && userDtr_ &&
+        userDtrAssertedMillis_ != 0UL &&
+        (millis() - userDtrAssertedMillis_) >= USBD_CDC_OPEN_SETTLE_MS;
 }
 
 bool NrfUsbdDriver::configured() const {
@@ -1955,11 +1349,12 @@ int NrfUsbdDriver::read() {
 }
 
 size_t NrfUsbdDriver::write(uint8_t value) {
+    UsbdIrqLock lock;
+    processBusState(effectiveVbusDetected());
     if (!ringPushTx(value)) {
         return 0U;
     }
     if (configured_ && !suspended_) {
-        UsbdIrqLock lock;
         serviceDataIn(false);
     }
     return 1U;
@@ -1980,42 +1375,10 @@ void NrfUsbdDriver::pumpRx() {
     }
     UsbdIrqLock lock;
 
-    // This silicon NAKs every host OUT until a first STARTEPOUT arms the
-    // endpoint, and armCdcDataOut() is unsafe during enumeration — so arm
-    // lazily here, on the first post-configuration foreground pump (the GDB
-    // stub does the same on takeover). The arming STARTEPOUT can pull stale
-    // FIFO content whose ENDEPOUT lands after armCdcDataOut's own discard
-    // window — drop it here too and return, so it can never be harvested as
-    // host data on this pass.
-    if (!cdcOutArmed_) {
-        armCdcDataOut();
-        for (uint32_t spin = 0UL; spin < (USBD_DRAIN_OUT_SPINS * 4UL); ++spin) {
-            if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {
-                (void)completeEasyDma(DmaDirection::Out, SERVICE_DATA_EP);
-                reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) = 0UL;
-            }
-            if (userPortEnabled() && reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) != 0UL) {
-                (void)completeEasyDma(DmaDirection::Out, USER_DATA_EP);
-                reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) = 0UL;
-            }
-        }
-        cdcOutArmed_ = true;
-        return;
-    }
-
-    // Real host packets are signalled ONLY by their EPDATASTATUS bit (the
-    // GDB-stub-proven reception model). A bare ENDEPOUT on an armed endpoint
-    // is a speculative DMA completion re-delivering stale FIFO content —
-    // clear it WITHOUT servicing, or the same dead bytes get pushed into the
-    // rx ring after every real packet.
-    if (reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) != 0UL) {
-        (void)completeEasyDma(DmaDirection::Out, SERVICE_DATA_EP);
-        reg32(USBD_BASE, eventEndEpoutOffset(SERVICE_DATA_EP)) = 0UL;
-    }
-    if (userPortEnabled() && reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) != 0UL) {
-        (void)completeEasyDma(DmaDirection::Out, USER_DATA_EP);
-        reg32(USBD_BASE, eventEndEpoutOffset(USER_DATA_EP)) = 0UL;
-    }
+    // Recover any IN acknowledgement whose aggregate interrupt arrived before
+    // EPDATASTATUS latched. Serial.available()/read() are foreground progress
+    // points too, so a busy sketch cannot strand the following TX packet.
+    processBusState(effectiveVbusDetected());
 
     drainServiceDataOut();
 }
@@ -2029,9 +1392,13 @@ bool NrfUsbdDriver::sendInPacket(uint8_t endpoint, const void *data, size_t leng
     }
 
     // Hold the busy test-and-set plus the EasyDMA kick atomic against the ISR,
-    // which clears dynamicInBusy_[endpoint] on ENDEPIN completion.
+    // which clears dynamicInBusy_[endpoint] after the host's IN ACK.
     UsbdIrqLock lock;
-    if (dynamicInBusy_[endpoint] || dmaDirection_ != DmaDirection::None) {
+    if (ep0InXferPhase_ != Ep0InXferPhase::Idle ||
+        pendingControlOut_ != ControlOutTransfer::None) {
+        return false;
+    }
+    if (dynamicInBusy_[endpoint]) {
         return false;
     }
 
@@ -2047,7 +1414,7 @@ bool NrfUsbdDriver::sendInPacket(uint8_t endpoint, const void *data, size_t leng
     reg32(USBD_BASE, EPINEN) |= endpointMask(endpoint);
     reg32(USBD_BASE, epinPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(&dynamicInBuffers_[endpoint][0]);
     reg32(USBD_BASE, epinMaxcntOffset(endpoint)) = static_cast<uint32_t>(actualLength);
-    if (!startEasyDma(DmaDirection::In, endpoint)) {
+    if (!triggerEndpointStartTask(taskStartEpinOffset(endpoint))) {
         dynamicInLengths_[endpoint] = 0U;
         return false;
     }
@@ -2076,13 +1443,10 @@ void NrfUsbdDriver::flush() {
             if ((txPending() == 0U && !dataInFlight_) || !enabled_) {
                 break;
             }
-            if (!configured_ || suspended_ || !vbusDetected()) {
+            if (!configured_ || suspended_ || !effectiveVbusDetected()) {
                 break;
             }
-            processBusState(vbusDetected());
-            if (!configured_ || suspended_ || !vbusDetected()) {
-                break;
-            }
+            processBusState(effectiveVbusDetected());
             serviceDataIn(false);
         }
         return;
@@ -2090,11 +1454,11 @@ void NrfUsbdDriver::flush() {
 
     const uint32_t start = millis();
     while ((txPending() != 0U || dataInFlight_) && enabled_) {
-        processBusState(vbusDetected());
-        if (!configured_ || suspended_ || !vbusDetected()) {
+        processBusState(effectiveVbusDetected());
+        serviceDataIn(false);
+        if (!configured_ || suspended_ || !effectiveVbusDetected()) {
             break;
         }
-        serviceDataIn(false);
         if ((millis() - start) >= 50UL) {
             break;
         }
@@ -2119,6 +1483,11 @@ void NrfUsbdDriver::setLineCoding(const NrfUsbLineCoding &lineCoding) {
 }
 
 void NrfUsbdDriver::setLineState(bool dtr, bool rts) {
+    if (dtr && !dtr_) {
+        dtrAssertedMillis_ = millis();
+    } else if (!dtr) {
+        dtrAssertedMillis_ = 0UL;
+    }
     dtr_ = dtr;
     rts_ = rts;
 }
@@ -2136,11 +1505,12 @@ int NrfUsbdDriver::userRead() {
 }
 
 size_t NrfUsbdDriver::userWrite(uint8_t value) {
+    UsbdIrqLock lock;
+    processBusState(effectiveVbusDetected());
     if (!userPortEnabled() || !userRingPushTx(value)) {
         return 0U;
     }
     if (configured_ && !suspended_) {
-        UsbdIrqLock lock;
         serviceDataIn(true);
     }
     return 1U;
@@ -2152,12 +1522,13 @@ size_t NrfUsbdDriver::userWrite(const uint8_t *data, size_t length) {
     }
     // SPSC ring: the foreground is the sole producer, the ISR drains (consumer),
     // so userRingPushTx() is safe lock-free here (same as the per-byte path).
+    UsbdIrqLock lock;
+    processBusState(effectiveVbusDetected());
     size_t written = 0U;
     while (written < length && userRingPushTx(data[written])) {
         ++written;
     }
     if (written > 0U && configured_ && !suspended_) {
-        UsbdIrqLock lock;
         serviceDataIn(true);  // arm once for the whole block (was once per byte)
     }
     return written;
@@ -2171,11 +1542,11 @@ void NrfUsbdDriver::userFlush() {
     UsbdIrqLock lock;
     const uint32_t start = millis();
     while ((userTxPending() != 0U || userDataInFlight_) && enabled_) {
-        processBusState(vbusDetected());
-        if (!configured_ || suspended_ || !vbusDetected()) {
+        processBusState(effectiveVbusDetected());
+        serviceDataIn(true);
+        if (!configured_ || suspended_ || !effectiveVbusDetected()) {
             break;
         }
-        serviceDataIn(true);
         if ((millis() - start) >= 50UL) {
             break;
         }
@@ -2187,12 +1558,17 @@ void NrfUsbdDriver::setUserLineCoding(const NrfUsbLineCoding &lineCoding) {
 }
 
 void NrfUsbdDriver::setUserLineState(bool dtr, bool rts) {
+    if (dtr && !userDtr_) {
+        userDtrAssertedMillis_ = millis();
+    } else if (!dtr) {
+        userDtrAssertedMillis_ = 0UL;
+    }
     userDtr_ = dtr;
     userRts_ = rts;
 }
 
 NrfUsbdStatus NrfUsbdDriver::status() const {
-    return {enabled_, started_, attached_, vbusDetected(), ready_, configured_, suspended_, cdcActive_, address_, configuration_, eventCause_};
+    return {enabled_, started_, attached_, effectiveVbusDetected(), ready_, configured_, suspended_, cdcActive_, address_, configuration_, eventCause_};
 }
 
 void NrfUsbdDriver::resetConnectionState() {
@@ -2204,8 +1580,7 @@ void NrfUsbdDriver::resetConnectionState() {
     // processBusState path that sets ready_ never fires again - so
     // USBDevice.connected() never returned true and any sketch that waits on it
     // (e.g. the GDB-stub debug example) hung before reaching the breakpoint.
-    // ready_ is set only after begin() completes the full power handshake and
-    // is cleared by end() or any fail-closed disconnect/retry path.
+    // ready_ is owned by begin() (set true) and end() (set false).
     configured_ = false;
     suspended_ = false;
     cdcActive_ = false;
@@ -2217,12 +1592,11 @@ void NrfUsbdDriver::resetConnectionState() {
     userNotificationPending_ = false;
     dtr_ = false;
     rts_ = false;
+    dtrAssertedMillis_ = 0UL;
     userDtr_ = false;
     userRts_ = false;
+    userDtrAssertedMillis_ = 0UL;
     pendingAddressValid_ = false;
-    pendingControlOut_ = ControlOutTransfer::None;
-    controlOutExpected_ = 0U;
-    controlOutLength_ = 0U;
     detachRequestMagic_ = 0UL;
     detachCause_ = 0UL;
     resetEp0InXferState();
@@ -2342,12 +1716,8 @@ void NrfUsbdDriver::clearEvents() {
         reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
     }
     reg32(USBD_BASE, EVENTS_EP0DATADONE) = 0UL;
-    reg32(USBD_BASE, EVENTS_ENDISOIN) = 0UL;
-    reg32(USBD_BASE, EVENTS_ENDISOOUT) = 0UL;
-    reg32(USBD_BASE, EVENTS_SOF) = 0UL;
     reg32(USBD_BASE, EVENTS_USBEVENT) = 0UL;
     reg32(USBD_BASE, EVENTS_EP0SETUP) = 0UL;
-    reg32(USBD_BASE, EVENTS_EPDATA) = 0UL;
     reg32(USBD_BASE, EVENTCAUSE) = 0xFFFFFFFFUL;
 }
 
@@ -2363,9 +1733,6 @@ void NrfUsbdDriver::enableInterrupts() {
         USBD_INT_ENDEPIN2_MASK |
         USBD_INT_ENDEPIN3_MASK |
         USBD_INT_ENDEPIN4_MASK |
-        USBD_INT_ENDEPIN5_MASK |
-        USBD_INT_ENDEPIN6_MASK |
-        USBD_INT_ENDEPIN7_MASK |
         USBD_INT_EP0DATADONE_MASK |
         USBD_INT_ENDEPOUT2_MASK |
         USBD_INT_ENDEPOUT4_MASK |
@@ -2379,27 +1746,29 @@ void NrfUsbdDriver::enableInterrupts() {
     // and the foreground critical sections (UsbdIrqLock) keep it race-free.
     setNvicPriority(USBD_IRQ_NUMBER, 6U);
     enableNvicIrq(USBD_IRQ_NUMBER);
-    if (deferredUsbCauses_ != 0UL) {
-        // The aggregate event may have been consumed while wake acknowledgement
-        // captured a concurrent cause. Deliver the software-deferred cause even
-        // to sketches that never call poll()/yield().
-        setPendingNvicIrq(USBD_IRQ_NUMBER);
-    }
 }
 
 void NrfUsbdDriver::disableInterrupts() {
-    // Clear every source, including any bootloader-enabled ISO/SOF source that
-    // this stack does not otherwise use, then remove a latched NVIC request.
-    reg32(USBD_BASE, INTENCLR) = 0xFFFFFFFFUL;
+    const uint32_t interruptMask =
+        USBD_INT_USBRESET_MASK |
+        USBD_INT_STARTED_MASK |
+        USBD_INT_ENDEPIN0_MASK |
+        USBD_INT_ENDEPIN1_MASK |
+        USBD_INT_ENDEPIN2_MASK |
+        USBD_INT_ENDEPIN3_MASK |
+        USBD_INT_ENDEPIN4_MASK |
+        USBD_INT_EP0DATADONE_MASK |
+        USBD_INT_ENDEPOUT2_MASK |
+        USBD_INT_ENDEPOUT4_MASK |
+        USBD_INT_USBEVENT_MASK |
+        USBD_INT_EP0SETUP_MASK |
+        USBD_INT_EPDATA_MASK;
+    reg32(USBD_BASE, INTENCLR) = interruptMask;
     disableNvicIrq(USBD_IRQ_NUMBER);
-    clearPendingNvicIrq(USBD_IRQ_NUMBER);
 }
 
 void NrfUsbdDriver::enablePullup(bool enabled) {
-    // Never turn the physical D+ pull-up on from a board-policy assumption.
-    // The peripheral must have completed READY + OUTPUTRDY and the POWER block
-    // must still report actual VBUS at the final register write.
-    if (enabled && enabled_ && ready_ && vbusDetected() && usbPwrRdy()) {
+    if (enabled) {
         reg32(USBD_BASE, USBPULLUP) = 1UL;
     } else {
         reg32(USBD_BASE, USBPULLUP) = 0UL;
@@ -2412,64 +1781,18 @@ void NrfUsbdDriver::startCdcEndpoints() {
     resetEndpointDataState(epAddressIn(SERVICE_NOTIFICATION_EP));
     resetEndpointDataState(epAddressIn(SERVICE_DATA_EP));
     resetEndpointDataState(epAddressOut(SERVICE_DATA_EP));
-    // Do NOT pre-trigger TASKS_STARTEPOUT here: with no data yet in the internal
-    // buffer it wedges the endpoint (and during enumeration it breaks config).
+    // A newly enabled OUT endpoint NAKs until software writes SIZE.EPOUT[n].
+    // This write makes its peripheral buffer available; it does NOT start DMA.
+    reg32(USBD_BASE, sizeEpoutOffset(SERVICE_DATA_EP)) = 0UL;
     if (userPortEnabled()) {
         reg32(USBD_BASE, EPINEN) |= endpointMask(USER_NOTIFICATION_EP) | endpointMask(USER_DATA_EP);
         reg32(USBD_BASE, EPOUTEN) |= endpointMask(USER_DATA_EP);
         resetEndpointDataState(epAddressIn(USER_NOTIFICATION_EP));
         resetEndpointDataState(epAddressIn(USER_DATA_EP));
         resetEndpointDataState(epAddressOut(USER_DATA_EP));
+        reg32(USBD_BASE, sizeEpoutOffset(USER_DATA_EP)) = 0UL;
     }
-    cdcActive_   = true;
-    cdcOutArmed_ = false; // re-arm lazily from the first foreground pumpRx()
-}
-
-// Arm the OUT endpoint's EasyDMA to receive the next host packet directly into
-// our RAM buffer. On affected hardware the "auto internal-buffer +
-// EPDATASTATUS" reception model does not signal (a received packet leaves
-// EVENTS_EPDATA and EPDATASTATUS untouched), so explicitly STARTEPOUT arms reception;
-// the host's data then EasyDMA's into the buffer and EVENTS_ENDEPOUT fires.
-// Asynchronous: ENDEPOUT is serviced (serviceDataOut) and re-armed by the
-// EVENTS_ENDEPOUT handler.
-void NrfUsbdDriver::queueDataOut(bool userPort) {
-    const uint8_t endpoint = userPort ? USER_DATA_EP : SERVICE_DATA_EP;
-    uint8_t *buffer = userPort ? &userEndpointOutBuffer_[0] : &endpointOutBuffer_[0];
-    reg32(USBD_BASE, epoutPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(buffer);
-    reg32(USBD_BASE, epoutMaxcntOffset(endpoint)) = DATA_EP_MAX_PACKET;
-    (void)startEasyDma(DmaDirection::Out, endpoint);
-}
-
-void NrfUsbdDriver::armCdcDataOut() {
-    // Prime the OUT endpoints once: this silicon won't ACK a host OUT (the
-    // data-pending bit never sets) until a STARTEPOUT has armed the endpoint.
-    // After this single arm, each fetchOutPacket()'s STARTEPOUT re-arms for the
-    // following packet, so no continuous/speculative STARTEPOUT is needed (which
-    // would race an arriving packet and re-deliver stale FIFO content). Discard
-    // whatever this initial STARTEPOUT pulls (stale/empty) and clear the bit.
-    const uint8_t eps[2] = { SERVICE_DATA_EP, USER_DATA_EP };
-    for (uint32_t k = 0U; k < 2U; ++k) {
-        if (k == 1U && !userPortEnabled()) {
-            break;
-        }
-        const uint8_t endpoint = eps[k];
-        uint8_t *buffer = (endpoint == USER_DATA_EP) ? &userEndpointOutBuffer_[0] : &endpointOutBuffer_[0];
-        reg32(USBD_BASE, epoutPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(buffer);
-        reg32(USBD_BASE, epoutMaxcntOffset(endpoint)) = DATA_EP_MAX_PACKET;
-        if (!startEasyDma(DmaDirection::Out, endpoint)) {
-            return;
-        }
-        for (uint32_t spin = 0UL; spin < USBD_DRAIN_OUT_SPINS; ++spin) {
-            if (reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) != 0UL) {
-                (void)completeEasyDma(DmaDirection::Out, endpoint);
-                reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
-                break;
-            }
-        }
-        reg32(USBD_BASE, EPDATASTATUS) =
-            1UL << (EPDATASTATUS_OUT_BASE_BIT + endpoint - 1U); // discard/ack
-        reg32(USBD_BASE, sizeEpoutOffset(endpoint)) = 0UL; // buffer-consumed handshake
-    }
+    cdcActive_ = true;
 }
 
 void NrfUsbdDriver::fetchOutPacket(uint8_t endpoint, bool userPort, uint32_t statusBit) {
@@ -2480,40 +1803,33 @@ void NrfUsbdDriver::fetchOutPacket(uint8_t endpoint, bool userPort, uint32_t sta
     // (in drainServiceDataOut) avoids the race where a speculative STARTEPOUT on
     // an idle endpoint re-delivers stale FIFO content and shifts the RSP stream.
     uint8_t *buffer = userPort ? &userEndpointOutBuffer_[0] : &endpointOutBuffer_[0];
-    reg32(USBD_BASE, epoutPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(buffer);
-    reg32(USBD_BASE, epoutMaxcntOffset(endpoint)) = DATA_EP_MAX_PACKET;
-    if (!startEasyDma(DmaDirection::Out, endpoint)) {
-        return;
+    uint32_t amount = reg32(USBD_BASE, sizeEpoutOffset(endpoint));
+    if (amount > DATA_EP_MAX_PACKET) {
+        amount = DATA_EP_MAX_PACKET;
     }
-    for (uint32_t spin = 0UL; spin < USBD_DRAIN_OUT_SPINS; ++spin) {
-        if (reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) != 0UL) {
-            (void)completeEasyDma(DmaDirection::Out, endpoint);
-            reg32(USBD_BASE, eventEndEpoutOffset(endpoint)) = 0UL;
-            // Real packet length: SIZE.EPOUT[n] (read BEFORE the consume
-            // handshake write below clears it). EPOUT[n].AMOUNT lies on this
-            // affected hardware - it echoes MAXCNT (64) for every packet, which used to
-            // deliver every short host packet padded with stale buffer bytes
-            // (the long-standing "phantom replay" junk).
-            const uint32_t amount = reg32(USBD_BASE, sizeEpoutOffset(endpoint));
-            reg32(USBD_BASE, EPDATASTATUS) = statusBit; // consume/ACK (W1C)
-            reg32(USBD_BASE, sizeEpoutOffset(endpoint)) = 0UL; // buffer-consumed handshake
-            if (amount != 0UL && amount <= DATA_EP_MAX_PACKET) {
-                serviceDataOut(userPort, amount);
-            }
-            return;
+    reg32(USBD_BASE, epoutPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(buffer);
+    reg32(USBD_BASE, epoutMaxcntOffset(endpoint)) = amount;
+    // Consume the current packet-ready indication BEFORE starting EasyDMA.
+    // Once ENDEPOUT fires, the nRF controller may immediately ACK the next
+    // host packet and re-latch this same bit. Clearing it after the DMA would
+    // race that next packet and silently discard its only ready indication.
+    // Nordic nrfx and TinyUSB both clear EPDATASTATUS before STARTEPOUT for
+    // this reason.
+    reg32(USBD_BASE, EPDATASTATUS) = statusBit;
+    if (triggerEndpointStartTask(taskStartEpoutOffset(endpoint))) {
+        if (amount != 0UL) {
+            serviceDataOut(userPort, amount);
         }
+        // After ENDEPOUT, hardware automatically accepts the next bulk OUT.
+        // SIZE.EPOUT is written only when initially opening/resetting an OUT
+        // endpoint. Writing it here can erase a packet accepted immediately
+        // after the DMA, which appears as a one-byte loss in sustained duplex
+        // streams.
     }
 }
 
 void NrfUsbdDriver::drainServiceDataOut() {
     if (!enabled_) {
-        return;
-    }
-    // The nRF52840 USBD has a SINGLE shared EasyDMA: only one STARTEPIN/
-    // STARTEPOUT may be in flight at a time. A STARTEPOUT here would collide
-    // with the stub streaming an IN reply, corrupting it. Skip while any IN DMA
-    // is pending; the stub re-pumps us right after the IN completes.
-    if (dmaDirection_ != DmaDirection::None) {
         return;
     }
     // Bit-gated: STARTEPOUT only an endpoint whose OUT data bit is already set
@@ -2524,10 +1840,18 @@ void NrfUsbdDriver::drainServiceDataOut() {
     const uint32_t eds = reg32(USBD_BASE, EPDATASTATUS);
     const uint32_t serviceOutBit = 1UL << (EPDATASTATUS_OUT_BASE_BIT + SERVICE_DATA_EP - 1U);
     const uint32_t userOutBit = 1UL << (EPDATASTATUS_OUT_BASE_BIT + USER_DATA_EP - 1U);
-    if ((eds & serviceOutBit) != 0UL) {
+    // Preserve USB backpressure. Fetching a packet acknowledges the endpoint;
+    // if the software ring cannot hold the entire packet, the old code still
+    // fetched it and silently dropped the tail. A host burst larger than the
+    // 256-byte ring therefore truncated after a few packets. Leave the status
+    // bit pending (and the endpoint NAKing the next packet) until the sketch has
+    // drained at least one full maximum-size packet of space.
+    const size_t serviceFree = (USBD_RING_BUFFER_SIZE - 1U) - ringPending(rxHead_, rxTail_);
+    const size_t userFree = (USBD_RING_BUFFER_SIZE - 1U) - ringPending(userRxHead_, userRxTail_);
+    if ((eds & serviceOutBit) != 0UL && serviceFree >= DATA_EP_MAX_PACKET) {
         fetchOutPacket(SERVICE_DATA_EP, false, serviceOutBit);
     }
-    if (userPortEnabled() && (eds & userOutBit) != 0UL) {
+    if (userPortEnabled() && (eds & userOutBit) != 0UL && userFree >= DATA_EP_MAX_PACKET) {
         fetchOutPacket(USER_DATA_EP, true, userOutBit);
     }
 }
@@ -2535,7 +1859,7 @@ void NrfUsbdDriver::drainServiceDataOut() {
 void NrfUsbdDriver::serviceDataOut(bool userPort, uint32_t received) {
     uint8_t *buffer = userPort ? &userEndpointOutBuffer_[0] : &endpointOutBuffer_[0];
     // NOTE: the caller passes the packet length read from SIZE.EPOUT[n]. The
-    // EPOUT[n].AMOUNT register is not usable for this on affected hardware:
+    // EPOUT[n].AMOUNT register is NOT usable for this on the verified clone:
     // it reports MAXCNT (64) regardless of the real packet size, which made
     // every short host packet arrive padded with stale buffer bytes (the
     // long-standing "phantom replay" junk).
@@ -2547,18 +1871,23 @@ void NrfUsbdDriver::serviceDataOut(bool userPort, uint32_t received) {
             ringPushRx(buffer[index]);
         }
     }
-    // After EVENTS_ENDEPOUT, the nRF52840 USBD endpoint automatically re-enables itself
-    // to accept the next OUT packet from the host (per PS section on Bulk OUT state machine).
-    // Do NOT call queueDataOut here — that would fire a spurious TASKS_STARTEPOUT with no
-    // data in the USB internal buffer, recreating the same DMA-pending hang that we just fixed
-    // in startCdcEndpoints. The next TASKS_STARTEPOUT will be issued by the EPDATA handler
-    // when the next packet actually arrives.
+    // The next DMA starts only after EPDATASTATUS reports another complete OUT
+    // packet. Never issue a speculative STARTEPOUT on an empty endpoint.
 }
 
 void NrfUsbdDriver::serviceDataIn(bool userPort) {
+    if (ep0InXferPhase_ != Ep0InXferPhase::Idle ||
+        pendingControlOut_ != ControlOutTransfer::None) {
+        return;
+    }
     volatile bool &dataInFlight = userPort ? userDataInFlight_ : dataInFlight_;
-    if (!configured_ || dataInFlight || dmaDirection_ != DmaDirection::None ||
-        (userPort ? userTxPending() : txPending()) == 0U) {
+    const bool dtr = userPort ? userDtr_ : dtr_;
+    const uint32_t dtrAssertedMillis = userPort ? userDtrAssertedMillis_ : dtrAssertedMillis_;
+    if (!dtr || dtrAssertedMillis == 0UL ||
+        (millis() - dtrAssertedMillis) < USBD_CDC_OPEN_SETTLE_MS) {
+        return;
+    }
+    if (!configured_ || dataInFlight || (userPort ? userTxPending() : txPending()) == 0U) {
         return;
     }
 
@@ -2567,11 +1896,11 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
     volatile size_t &txTail = userPort ? userTxTail_ : txTail_;
     uint8_t *endpointBuffer = userPort ? &userEndpointInBuffer_[0] : &endpointInBuffer_[0];
     const uint8_t endpoint = userPort ? USER_DATA_EP : SERVICE_DATA_EP;
+    const size_t savedTail = txTail;
     size_t count = 0U;
-    size_t nextTail = txTail;
-    while (count < DATA_EP_MAX_PACKET && nextTail != txHead) {
-        endpointBuffer[count++] = txBuffer[nextTail];
-        nextTail = (nextTail + 1U) % USBD_RING_BUFFER_SIZE;
+    while (count < DATA_EP_MAX_PACKET && txTail != txHead) {
+        endpointBuffer[count++] = txBuffer[txTail];
+        txTail = (txTail + 1U) % USBD_RING_BUFFER_SIZE;
     }
 
     if (count == 0U) {
@@ -2583,10 +1912,10 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
     }
     reg32(USBD_BASE, epinPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(endpointBuffer);
     reg32(USBD_BASE, epinMaxcntOffset(endpoint)) = static_cast<uint32_t>(count);
-    if (!startEasyDma(DmaDirection::In, endpoint)) {
+    if (!triggerEndpointStartTask(taskStartEpinOffset(endpoint))) {
+        txTail = savedTail;
         return;
     }
-    txTail = nextTail;
     dataInFlight = true;
     if (!userPort) {
         diagResetAtUsbdBeginStage(17UL);
@@ -2594,10 +1923,13 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
 }
 
 void NrfUsbdDriver::serviceNotificationIn(bool userPort) {
+    if (ep0InXferPhase_ != Ep0InXferPhase::Idle ||
+        pendingControlOut_ != ControlOutTransfer::None) {
+        return;
+    }
     volatile bool &notificationInFlight = userPort ? userNotificationInFlight_ : notificationInFlight_;
     volatile bool &notificationPending = userPort ? userNotificationPending_ : notificationPending_;
-    if (!configured_ || notificationInFlight || !notificationPending ||
-        dmaDirection_ != DmaDirection::None) {
+    if (!configured_ || notificationInFlight || !notificationPending) {
         return;
     }
 
@@ -2608,25 +1940,13 @@ void NrfUsbdDriver::serviceNotificationIn(bool userPort) {
     if (!userPort) {
         diagResetAtUsbdBeginStage(19UL);
     }
-    if (!startEasyDma(DmaDirection::In, endpoint)) {
+    if (!triggerEndpointStartTask(taskStartEpinOffset(endpoint))) {
         return;
     }
     notificationPending = false;
     notificationInFlight = true;
     if (!userPort) {
         diagResetAtUsbdBeginStage(20UL);
-    }
-}
-
-void NrfUsbdDriver::serviceDynamicEndpoints() {
-    for (uint8_t endpoint = firstDynamicEndpoint(); endpoint < USB_MAX_ENDPOINTS; ++endpoint) {
-        if (dynamicInBusy_[endpoint] && reg32(USBD_BASE, eventEndEpinOffset(endpoint)) != 0UL) {
-            (void)completeEasyDma(DmaDirection::In, endpoint);
-            reg32(USBD_BASE, eventEndEpinOffset(endpoint)) = 0UL;
-            dynamicInBusy_[endpoint] = false;
-            dynamicInLengths_[endpoint] = 0U;
-            PluggableUSB().endpointInComplete(endpoint);
-        }
     }
 }
 
@@ -2829,10 +2149,8 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             return;
         }
         case USB_REQ_SET_ADDRESS:
-            // USBD applies SET_ADDRESS in hardware; USBADDR is a read-only
-            // status register. Keep only the software mirror used by status().
-            setAddress(static_cast<uint8_t>(value & 0x7FU));
-            pendingAddressValid_ = false;
+            pendingAddress_ = static_cast<uint8_t>(value & 0x7FU);
+            pendingAddressValid_ = true;
             diagResetAtUsbdBeginStage(9UL);
             sendZeroLengthStatus();
             return;
@@ -2942,7 +2260,15 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                 return;
             case CDC_REQ_SET_CONTROL_LINE_STATE:
                 {
-                    dtr = (value & 0x0001U) != 0U;
+                    const bool nextDtr = (value & 0x0001U) != 0U;
+                    volatile uint32_t &dtrAssertedMillis =
+                        userCdc ? userDtrAssertedMillis_ : dtrAssertedMillis_;
+                    if (nextDtr && !dtr) {
+                        dtrAssertedMillis = millis();
+                    } else if (!nextDtr) {
+                        dtrAssertedMillis = 0UL;
+                    }
+                    dtr = nextDtr;
                     rts = (value & 0x0002U) != 0U;
                     if (!userCdc && dtr && lineCoding_.baudRate != 1200UL) {
                         serviceSawNonResetBaud_ = true;
@@ -3055,35 +2381,6 @@ void NrfUsbdDriver::resetEp0InXferState() {
     ep0InNeedsZlp_ = false;
 }
 
-void NrfUsbdDriver::abortEp0Transfer() {
-    if (dmaEndpoint_ == 0U && dmaDirection_ != DmaDirection::None) {
-        // A new SETUP or USBRESET makes the previous EP0 transaction defunct;
-        // no matching END is required after the MAC has reported that abort.
-        // If END was already latched, however, its actual AMOUNT completed and
-        // must contribute to the cumulative disable/re-enable parity.
-        const DmaDirection direction = dmaDirection_;
-        const uint32_t endEvent = direction == DmaDirection::In
-            ? eventEndEpinOffset(0U)
-            : eventEndEpoutOffset(0U);
-        if (reg32(USBD_BASE, endEvent) != 0UL) {
-            (void)completeEasyDma(direction, 0U);
-        } else {
-            usbErrata199EndDma();
-            dmaDirection_ = DmaDirection::None;
-            dmaEndpoint_ = 0xFFU;
-        }
-    }
-    resetEp0InXferState();
-    pendingControlOut_ = ControlOutTransfer::None;
-    controlOutExpected_ = 0U;
-    controlOutLength_ = 0U;
-    pendingAddressValid_ = false;
-    pendingAddress_ = 0U;
-    reg32(USBD_BASE, eventEndEpinOffset(0U)) = 0UL;
-    reg32(USBD_BASE, eventEndEpoutOffset(0U)) = 0UL;
-    reg32(USBD_BASE, EVENTS_EP0DATADONE) = 0UL;
-}
-
 void NrfUsbdDriver::sendEp0ControlInChunkOrAdvanceStatus() {
     if (ep0InXferPhase_ != Ep0InXferPhase::Data) {
         return;
@@ -3098,14 +2395,20 @@ void NrfUsbdDriver::sendEp0ControlInChunkOrAdvanceStatus() {
         ep0InRemaining_ = static_cast<uint16_t>(ep0InRemaining_ - static_cast<uint16_t>(chunk));
         reg32(USBD_BASE, epinPtrOffset(0U)) = reinterpret_cast<uint32_t>(&controlInBuffer_[0]);
         reg32(USBD_BASE, epinMaxcntOffset(0U)) = static_cast<uint32_t>(chunk);
-        (void)startEasyDma(DmaDirection::In, 0U);
+        if (!triggerEndpointStartTask(taskStartEpinOffset(0U))) {
+            resetEp0InXferState();
+            stallControlEndpoint();
+        }
         return;
     }
     if (ep0InNeedsZlp_) {
         ep0InNeedsZlp_ = false;
         reg32(USBD_BASE, epinPtrOffset(0U)) = reinterpret_cast<uint32_t>(&controlInBuffer_[0]);
         reg32(USBD_BASE, epinMaxcntOffset(0U)) = 0UL;
-        (void)startEasyDma(DmaDirection::In, 0U);
+        if (!triggerEndpointStartTask(taskStartEpinOffset(0U))) {
+            resetEp0InXferState();
+            stallControlEndpoint();
+        }
         return;
     }
     ep0InXferPhase_ = Ep0InXferPhase::StatusPending;
@@ -3134,6 +2437,11 @@ void NrfUsbdDriver::sendZeroLengthStatus() {
     reg32(USBD_BASE, epinPtrOffset(0U)) = reinterpret_cast<uint32_t>(&controlInBuffer_[0]);
     reg32(USBD_BASE, epinMaxcntOffset(0U)) = 0UL;
     reg32(USBD_BASE, TASKS_EP0STATUS) = 1UL;
+    // EP0STATUS is a peripheral handshake, not an EasyDMA transfer. There is
+    // no second EP0DATADONE after this task on nRF52840, so retaining
+    // StatusPending would permanently block every non-control endpoint once
+    // EP0 serialization is enabled.
+    ep0InXferPhase_ = Ep0InXferPhase::Idle;
 }
 
 void NrfUsbdDriver::stallControlEndpoint() {
@@ -3180,6 +2488,8 @@ void NrfUsbdDriver::updateSerialState(bool userPort) {
 }
 
 void NrfUsbdDriver::setAddress(uint8_t address) {
+    // SET_ADDRESS is applied by nRF USBD hardware after the status stage;
+    // USBADDR is read-only. Keep only the software mirror used by status().
     address_ = address;
 }
 

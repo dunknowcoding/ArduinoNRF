@@ -663,7 +663,19 @@ function Resolve-AdafruitBootloaderControlPort {
         }
     }
 
-    $ports = @(Get-SerialPortInventory -Fresh:$Fresh)
+    # Prefer the exact VID/PID registry snapshot. It is scoped to currently
+    # present COM names and preserves the composite stable identity without a
+    # full Get-PnpDevice enumeration while Windows is retiring runtime nodes.
+    $fastSnapshot = Get-NiusFastUsbSerialRegistrySnapshot `
+        -Vid $BootloaderVid `
+        -ProductId $BootloaderPid `
+        -PreferredCompositeStableId $PreferredCompositeStableId
+    if ($fastSnapshot.Available) {
+        $ports = @($fastSnapshot.Matches)
+    }
+    else {
+        $ports = @(Get-SerialPortInventory -Fresh:$Fresh)
+    }
     if ($ports.Count -eq 0) {
         return [pscustomobject]@{
             Port = $fallbackPort

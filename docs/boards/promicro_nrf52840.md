@@ -28,7 +28,7 @@
 - manual bootloader entry on `COM3` can flash the board
 - after the first flash, the board returns to user mode
 - with `usbcdc=enabled`, the board exposes separate user and service CDC paths
-- selecting the user CDC for upload is rejected; the service CDC hands-free reupload path works repeatedly without manual reset
+- selecting either CDC for upload resolves to the same device's service interface; hands-free reupload works repeatedly without manual reset
 - UF2 upload from DFU mode works with both `bootloader=auto` and explicit UF2 menu selection
 - explicit Adafruit serial DFU from DFU mode works while another UF2 drive is mounted
 - `Upload Method -> Enter UF2 drive only (no upload)` mounts the selected board and stops before copying firmware

@@ -1216,10 +1216,6 @@ void NrfGdbStubClass::serve() {
         poll();
     }
 
-    // Arm the CDC OUT endpoints once so the first host (gdb) packet is accepted;
-    // thereafter each fetch re-arms, and poll()'s bit-gated drain delivers.
-    nrfUsbdDriver().armCdcDataOut();
-
     while (true) {
         // Halted at a breakpoint or between GDB packets: keep any sketch-armed
         // watchdog alive so the debug session isn't reset out from under us.

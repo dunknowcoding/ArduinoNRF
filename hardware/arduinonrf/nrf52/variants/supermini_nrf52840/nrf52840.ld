@@ -2,10 +2,11 @@ ENTRY(Reset_Handler)
 
 __nrf_reserved_flash_bytes = DEFINED(__nrf_reserved_flash_bytes) ? __nrf_reserved_flash_bytes : 0;
 __nrf_app_start = DEFINED(__nrf_app_start) ? __nrf_app_start : 0;
+__nrf_program_flash_bytes = DEFINED(__nrf_program_flash_bytes) ? __nrf_program_flash_bytes : (1024K - __nrf_app_start - __nrf_reserved_flash_bytes);
 
 MEMORY
 {
-  FLASH (rx)  : ORIGIN = __nrf_app_start, LENGTH = 1024K - __nrf_app_start - __nrf_reserved_flash_bytes
+  FLASH (rx)  : ORIGIN = __nrf_app_start, LENGTH = __nrf_program_flash_bytes
   RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 256K
 }
 

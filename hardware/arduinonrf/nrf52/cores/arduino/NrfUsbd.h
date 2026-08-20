@@ -104,32 +104,21 @@ public:
     void setStubHalted(bool halted);
     void serviceHaltedTouch();
 
-    // ISR-mode TX nudge for the GDB stub. While halted the stub lets the USBD
-    // ISR service USB (instead of busy-polling, which raced on EVENTS_EPDATA /
-    // EasyDMA). The ISR advances an in-flight IN transfer on ENDEPIN, but a TX
-    // the stub just queued has no pending USB event to start it, so the stub
-    // calls this to kick serviceDataIn(). It is PRIMASK-guarded so it cannot
-    // race the USBD ISR's own serviceDataIn().
+    // TX nudge for the GDB stub. A reply newly queued by the halted stub has no
+    // pending USB event to start it, so the stub calls this to kick
+    // serviceDataIn(). It is PRIMASK-guarded against the USBD ISR.
     void kickServiceDataIn();
 
-    // Speculatively drain the service-CDC OUT endpoint. This silicon does not
-    // signal a received host OUT packet via EPDATASTATUS/EVENTS_EPDATA, so the
-    // halted GDB stub cannot wait for an event — it calls this each poll to
-    // STARTEPOUT and copy any bytes the host delivered into the rx ring. Only
-    // safe to call post-enumeration (it breaks SET_CONFIGURATION if used during
-    // enumeration), which is exactly the stub-halted context.
+    // Drain only CDC OUT endpoints whose EPDATASTATUS bit proves that a complete
+    // host packet is buffered. The GDB stub calls this while halted because the
+    // aggregate EPDATA interrupt may be masked or consumed before its polling
+    // loop observes it.
     void drainServiceDataOut();
-
-    // Prime the CDC OUT endpoints once on stub takeover so the first host OUT is
-    // accepted (this silicon needs an initial STARTEPOUT to arm reception).
-    void armCdcDataOut();
 
     // Foreground RX pump for sketches: bit-gated drain of both CDC OUT
     // endpoints, PRIMASK-guarded against the ISR. Serial.available()/read()
-    // call this so host->device bulk OUT works without the GDB stub's poll
-    // loop — on this silicon a received OUT packet does not reliably raise
-    // EVENTS_EPDATA, so an ISR-only model strands the packet (the endpoint
-    // NAKs every later OUT and host writes time out).
+    // call this so host->device bulk OUT makes foreground progress even if an
+    // aggregate EPDATA edge was already consumed.
     void pumpRx();
 
 private:
@@ -145,40 +134,20 @@ private:
         StatusPending,
     };
 
-    enum class DmaDirection : uint8_t {
-        None,
-        In,
-        Out,
-    };
-
     void resetEp0InXferState();
-    void abortEp0Transfer();
     void sendEp0ControlInChunkOrAdvanceStatus();
 
     void initDescriptors();
     void clearEvents();
-    void sanitizeEnabledSession();
     void enableInterrupts();
     void disableInterrupts();
-    bool disablePeripheral();
-    bool wakeFromLowPower();
-    void acknowledgeWakeAndDeferUsbCauses();
-    bool processUsbEvent(bool hasVbus);
-    bool startEasyDma(DmaDirection direction, uint8_t endpoint);
-    bool completeEasyDma(DmaDirection direction, uint8_t endpoint);
-    bool finishEasyDmaBeforeDisable();
-    bool repairEasyDmaParityBeforeDisable();
-    void abortEasyDmaAfterBusReset();
-    void clearEasyDmaAfterConfirmedDisable();
     void enablePullup(bool enabled);
     void processBusState(bool hasVbus);
     void startCdcEndpoints();
-    void queueDataOut(bool userPort);
     void fetchOutPacket(uint8_t endpoint, bool userPort, uint32_t statusBit);
     void serviceDataOut(bool userPort, uint32_t received);
     void serviceDataIn(bool userPort);
     void serviceNotificationIn(bool userPort);
-    void serviceDynamicEndpoints();
     void serviceSetup();
     void completeControlOutTransfer();
     void handleStandardRequest(uint8_t request, uint16_t value, uint16_t index, uint16_t length);
@@ -203,8 +172,6 @@ private:
     void resetDynamicEndpoints();
     void queueSerialStateNotification(bool userPort);
     void updateSerialState(bool userPort);
-    void failClosedPeripheral();
-    volatile bool initialized_ = false;
     volatile bool enabled_ = false;
     volatile bool started_ = false;
     volatile bool attached_ = false;
@@ -213,20 +180,14 @@ private:
     volatile bool suspended_ = false;
     volatile bool dtr_ = false;
     volatile bool rts_ = false;
+    volatile uint32_t dtrAssertedMillis_ = 0;
     volatile bool cdcActive_ = false;
-    volatile bool cdcOutArmed_ = false; // OUT endpoints armed since last config
-    volatile bool terminalFault_ = false;
-    volatile bool wakePending_ = false;
-    volatile DmaDirection dmaDirection_ = DmaDirection::None;
-    volatile uint8_t dmaEndpoint_ = 0xFFU;
-    volatile bool dmaBytesOdd_ = false;
-    uint32_t dmaParityScratch_ = 0UL;
-
     volatile bool dataInFlight_ = false;
     volatile bool notificationInFlight_ = false;
     volatile bool notificationPending_ = false;
     volatile bool userDtr_ = false;
     volatile bool userRts_ = false;
+    volatile uint32_t userDtrAssertedMillis_ = 0;
     volatile bool userDataInFlight_ = false;
     volatile bool userNotificationInFlight_ = false;
     volatile bool userNotificationPending_ = false;
@@ -248,14 +209,12 @@ private:
     // following DTR-drop arm the touch even if the host's single-port sequence
     // (usbcdc=disabled) made the 1200 baud and the DTR-drop non-coincident.
     volatile uint32_t serviceSaw1200Millis_ = 0;
-    volatile uint32_t startupRetryMillis_ = 0;
     volatile uint8_t ignoredResetTouchCount_ = 0;
     volatile uint8_t address_ = 0;
     volatile uint8_t configuration_ = 0;
     volatile uint8_t pendingAddress_ = 0;
     volatile uint32_t configStartMillis_ = 0;
     volatile uint32_t configuredMillis_ = 0;
-    volatile uint32_t deferredUsbCauses_ = 0;
     NrfUsbLineCoding lineCoding_ = {115200UL, 0U, 0U, 8U};
     NrfUsbLineCoding userLineCoding_ = {115200UL, 0U, 0U, 8U};
     ControlOutTransfer pendingControlOut_ = ControlOutTransfer::None;

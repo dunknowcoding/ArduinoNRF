@@ -33,8 +33,19 @@ function Clear-NiusStaleBridges {
     # time, so terminate any other powershell running this exact script.
     try {
         $self = $PID
+        # Match only another bridge process launched with PowerShell -File.
+        # A parent shell (Arduino IDE, terminal, or test runner) can contain the
+        # script name in its -Command text; killing that parent orphaned this
+        # bridge and made the launch appear to fail even though the TCP listener
+        # survived. Exact -File matching preserves the caller and still removes
+        # a stale bridge that really owns the service CDC handle.
+        $bridgeFilePattern = '(?i)(?:^|\s)-File\s+(?:"[^"]*usb_gdbstub_bridge\.ps1"|\S*usb_gdbstub_bridge\.ps1)(?:\s|$)'
         $others = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.ProcessId -ne $self -and $_.CommandLine -and ($_.CommandLine -match 'usb_gdbstub_bridge\.ps1') })
+            Where-Object {
+                $_.ProcessId -ne $self -and $_.CommandLine -and
+                ($_.CommandLine -match $bridgeFilePattern) -and
+                ($_.CommandLine -notmatch '(?i)\s-(?:Command|EncodedCommand)\b')
+            })
         foreach ($p in $others) {
             Write-BridgeLog ('terminating stale bridge PID {0} (was holding the port)' -f $p.ProcessId)
             try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch { }
@@ -198,7 +209,10 @@ try {
     Write-BridgeLog ('opening serial port {0} @ {1} baud' -f $SerialPort, $BaudRate)
     $serial = New-Object System.IO.Ports.SerialPort $SerialPort, $BaudRate, ([System.IO.Ports.Parity]::None), 8, ([System.IO.Ports.StopBits]::One)
     $serial.Handshake = [System.IO.Ports.Handshake]::None
-    $serial.ReadTimeout = 50
+    # Issue bounded reads instead of polling BytesToRead. On Windows usbser the
+    # managed BytesToRead property can remain zero until a read IRP is posted,
+    # even though the device has already produced an RSP reply.
+    $serial.ReadTimeout = 10
     # Generous write timeout: right after gdb connects, the halted stub may take
     # a few hundred ms to (re)enumerate and start servicing its CDC OUT endpoint,
     # during which a host write NAKs. A 50 ms timeout threw mid-handshake and
@@ -263,9 +277,25 @@ try {
     Write-Host 'GDB client connected. Forwarding traffic. Press Ctrl+C to stop.'
 
     $buffer = New-Object byte[] 4096
+    $serialReadBuffer = New-Object byte[] 4096
+    # Keep one native overlapped read posted at all times. usbser can leave
+    # SerialPort.BytesToRead at zero until a ReadFile request exists, and the
+    # synchronous SerialPort.Read timeout is not reliable for this composite
+    # CDC path. BaseStream.ReadAsync posts that request without blocking TCP.
+    $serialReadTask = $serial.BaseStream.ReadAsync(
+        $serialReadBuffer, 0, $serialReadBuffer.Length)
 
     while ($client.Connected) {
         $didWork = $false
+
+        # TcpClient.Connected reports the state of the last socket operation,
+        # not the current peer state. Detect a graceful close explicitly so a
+        # finished/failed GDB client cannot leave an orphan bridge holding CDC.
+        if ($client.Client.Poll(0, [System.Net.Sockets.SelectMode]::SelectRead) -and
+            $client.Client.Available -eq 0) {
+            Write-BridgeLog 'GDB client disconnected; ending bridge session'
+            break
+        }
 
         if ($networkStream.DataAvailable) {
             $fromTcp = $networkStream.Read($buffer, 0, $buffer.Length)
@@ -299,20 +329,21 @@ try {
             $didWork = $true
         }
 
-        $serialBytes = $serial.BytesToRead
-        if ($serialBytes -gt 0) {
-            $readLength = [Math]::Min($serialBytes, $buffer.Length)
-            $fromSerial = $serial.Read($buffer, 0, $readLength)
-            if ($fromSerial -gt 0) {
-                if ($LogTraffic) {
-                    Write-Host ('[serial->tcp] {0}' -f (Format-Bytes -Buffer $buffer -Length $fromSerial))
-                }
-                Write-BridgeLog ('mcu->gdb {0}B: {1}' -f $fromSerial, (Format-Bytes -Buffer $buffer -Length ([Math]::Min($fromSerial, 96))))
-
-                $networkStream.Write($buffer, 0, $fromSerial)
-                $networkStream.Flush()
-                $didWork = $true
+        if ($serialReadTask.IsCompleted) {
+            $fromSerial = $serialReadTask.GetAwaiter().GetResult()
+            if ($fromSerial -le 0) {
+                break
             }
+            if ($LogTraffic) {
+                Write-Host ('[serial->tcp] {0}' -f (Format-Bytes -Buffer $serialReadBuffer -Length $fromSerial))
+            }
+            Write-BridgeLog ('mcu->gdb {0}B: {1}' -f $fromSerial, (Format-Bytes -Buffer $serialReadBuffer -Length ([Math]::Min($fromSerial, 96))))
+
+            $networkStream.Write($serialReadBuffer, 0, $fromSerial)
+            $networkStream.Flush()
+            $didWork = $true
+            $serialReadTask = $serial.BaseStream.ReadAsync(
+                $serialReadBuffer, 0, $serialReadBuffer.Length)
         }
 
         if (-not $didWork) {

@@ -65,7 +65,7 @@ before any manual `.uf2` copy.
 |---|---|
 | Adafruit **`update-*` bootloader UF2** (family `0xd663823c`) | Bootloader replacement package, not a sketch. Changes MBR/bootloader/UICR; reboots into app mode. See [In-field UF2 bootloader update](#in-field-uf2-bootloader-update-no-softdevice--nicenano) below. |
 | **Tools -> Burn Bootloader** (SWD) | Package ships board-specific SWD bootloader images. For `promicro_nrf52840`, the default S140 recovery image is `promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex`; its no-SoftDevice recovery image is `promicro_nrf52840_bootloader-0.11.0_nosd.hex`. For nice!nano-family entries, burn `nice_nano_bootloader-0.6.0_s140_6.1.1.hex`. After burning an S140 v6 image, use the **S140 v6 `(0x26000)`** rows above; after burning a noSD image, use a **no SoftDevice `(0x1000)`** row. |
-| **Nordic Open DFU** (`usb_dongle_nrf52840`) | Different protocol; not Adafruit UF2. Use Nordic tooling. |
+| **Nordic PCA10059 USB serial DFU** (`usb_dongle_nrf52840`) | No UF2 volume. Uses the package's Secure-DFU serial transport with app start `0x1000` and no-SoftDevice requirement `0x00`. |
 | **Seeed XIAO** UF2 labels | Volume label / model differ (`XIAO-BOOT`, etc.) but S140 v6/v7 **app-start rules are the same**; pick the matching `(0x26000)` / `(0x27000)` / `(0x1000)` entry for your board definition. |
 
 If a future community bootloader introduces a **new app start** not listed here, add
@@ -73,9 +73,15 @@ a new **Bootloader / DFU** menu entry in the board definition following the
 existing naming pattern (`<transport>, <SoftDevice or layout note> (0xXXXX)`)
 and do not add a parallel menu axis keyed only on `UF2 Bootloader X.Y.Z`.
 
-### Nordic Open DFU
+### Nordic PCA10059 USB serial DFU
 
-The `usb_dongle_nrf52840` target (PCA10059) uses Nordic Open DFU, not Adafruit serial DFU. Use Nordic tooling such as `nrfutil` or nRF Connect for Desktop rather than the package's default `niusdfu` flow for that board.
+The `usb_dongle_nrf52840` target (PCA10059) uses Nordic Secure DFU over its
+USB CDC bootloader interface (`0x1915:0x521F`), not the USB DFU class handled by
+`dfu-util`. The package therefore generates a standard application DFU package
+with no-SoftDevice requirement `0x00` and sends it through the serial-DFU path.
+The MBR reserves `0x0000..0x0FFF`; the application starts at `0x1000`, package
+storage occupies the final 16 KiB below `0xE0000`, and the onboard bootloader
+remains untouched at `0xE0000..0xFFFFF`.
 
 ### SWD / J-Link / OpenOCD
 

@@ -36,10 +36,17 @@ device core exposes specifically for it:
 - `NrfUsbdDriver::setStubHalted()` — tells the driver it is being pumped from the
   halted DebugMon loop (so the 1200-touch uses a poll-counter, not frozen
   `millis()`, and an upload to a halted board can't brick flash).
-- `serviceHaltedTouch()` / `kickServiceDataIn()` / `drainServiceDataOut()` /
-  `armCdcDataOut()` — let the stub move GDB packets over the service CDC while the
-  application (and SysTick) are stopped, since this silicon does not raise
-  `EVENTS_EPDATA` reliably for received OUT packets.
+- `serviceHaltedTouch()` / `kickServiceDataIn()` / `drainServiceDataOut()` let
+  the stub move GDB packets over the service CDC while the application (and
+  SysTick) are stopped. OUT readiness is taken from `EPDATASTATUS`; packet size
+  is read from `SIZE.EPOUT` before the shared EasyDMA engine is armed.
+
+EP0, both CDC functions, notifications, and optional dynamic endpoints share
+one serialized EasyDMA arbiter. OUT endpoints are opened once and re-armed by
+the peripheral after a completed transfer; IN endpoints remain busy until the
+host ACK is observed in `EPDATASTATUS`. This prevents control/data overlap,
+premature buffer reuse, and packet loss under simultaneous upload, logging, and
+debug traffic.
 
 So debugging rides the *same* enumeration-from-ISR USB core as `Serial` and the
 uploader; there is no second USB implementation. Application `Serial` (user CDC)

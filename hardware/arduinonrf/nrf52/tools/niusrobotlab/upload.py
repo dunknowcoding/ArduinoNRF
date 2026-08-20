@@ -16,9 +16,9 @@ out of the box on a stock Python install.
 """
 from __future__ import annotations
 import argparse
-import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import subprocess
@@ -49,53 +49,149 @@ def linux_tty_usb_identity(port: str):
             continue
         serial_file = parent / "serial"
         serial = serial_file.read_text(errors="ignore").strip() if serial_file.exists() else ""
+        interface_number = None
+        for interface in (node,) + tuple(node.parents):
+            number_file = interface / "bInterfaceNumber"
+            if number_file.exists():
+                try:
+                    interface_number = int(number_file.read_text().strip(), 16)
+                except ValueError:
+                    pass
+                break
         return (
             int(vid_file.read_text().strip(), 16),
             int(pid_file.read_text().strip(), 16),
             serial,
             "/dev/" + tty,
+            interface_number,
         )
     return None
 
 
-def mac_usb_devices():
+def mac_serial_devices():
+    """Return USB-backed macOS serial endpoints from the IOUSB registry tree.
+
+    The selected /dev/cu.* endpoint must be tied to its parent USB device and
+    interface number; counting VID/PID matches from system_profiler cannot tell
+    two CDC interfaces on one composite device apart.
+    """
     try:
         raw = subprocess.run(
-            ["system_profiler", "SPUSBDataType", "-json"],
+            ["ioreg", "-a", "-p", "IOUSB"],
             check=True,
             capture_output=True,
-            text=True,
+            text=False,
             timeout=30,
         ).stdout
-        root = json.loads(raw)
-    except (OSError, subprocess.SubprocessError, ValueError):
+        root = plistlib.loads(raw)
+    except (OSError, subprocess.SubprocessError, ValueError,
+            plistlib.InvalidFileException):
         return []
 
     devices = []
 
-    def walk(value):
-        if isinstance(value, dict):
-            vid_text = str(value.get("vendor_id", ""))
-            pid_text = str(value.get("product_id", ""))
-            vid_match = re.search(r"0x([0-9a-fA-F]{4})", vid_text)
-            pid_match = re.search(r"0x([0-9a-fA-F]{4})", pid_text)
-            if vid_match and pid_match:
-                devices.append(
-                    (
-                        int(vid_match.group(1), 16),
-                        int(pid_match.group(1), 16),
-                        str(value.get("serial_num", "")),
-                        str(value.get("_name", "USB device")),
-                    )
-                )
-            for child in value.values():
-                walk(child)
-        elif isinstance(value, list):
-            for child in value:
-                walk(child)
+    def first_value(value, names, default=None):
+        for name in names:
+            if name in value:
+                return value[name]
+        return default
 
-    walk(root)
+    def as_int(value):
+        if isinstance(value, int):
+            return value
+        text = str(value or "").strip()
+        try:
+            return int(text, 0)
+        except ValueError:
+            match = re.search(r"0x([0-9a-fA-F]+)", text)
+            return int(match.group(1), 16) if match else None
+
+    def walk(value, inherited=None):
+        if not isinstance(value, dict):
+            return
+        current = dict(inherited or {})
+        vid = as_int(first_value(value, ("idVendor", "USB Vendor ID")))
+        pid = as_int(first_value(value, ("idProduct", "USB Product ID")))
+        serial = first_value(
+            value,
+            ("USB Serial Number", "kUSBSerialNumberString", "serial_num"),
+        )
+        interface_number = as_int(first_value(
+            value, ("bInterfaceNumber", "USB Interface Number")
+        ))
+        if vid is not None:
+            current["vid"] = vid
+        if pid is not None:
+            current["pid"] = pid
+        if serial is not None:
+            current["serial"] = str(serial)
+        if interface_number is not None:
+            current["interface"] = interface_number
+        port = first_value(value, ("IOCalloutDevice", "IODialinDevice"))
+        if port and "vid" in current and "pid" in current:
+            devices.append((
+                current["vid"], current["pid"], current.get("serial", ""),
+                str(port), current.get("interface"),
+            ))
+        for child in value.get("IORegistryEntryChildren", []):
+            walk(child, current)
+
+    for item in root if isinstance(root, list) else [root]:
+        walk(item)
     return devices
+
+
+def same_mac_serial_endpoint(left: str, right: str) -> bool:
+    def suffix(value):
+        name = os.path.basename(value)
+        return re.sub(r"^(?:cu|tty)\.", "", name)
+    return suffix(left) == suffix(right)
+
+
+def resolve_service_serial_port(
+    port: str,
+    runtime_vid: int,
+    runtime_pid: int,
+    serial: str,
+) -> str:
+    """Map a selected USER CDC to interface zero on the same USB composite."""
+    if sys.platform.startswith("linux"):
+        selected = linux_tty_usb_identity(port)
+        if not selected or (selected[0], selected[1]) != (runtime_vid, runtime_pid):
+            return port
+        candidates = []
+        for tty_node in Path("/sys/class/tty").glob("*"):
+            identity = linux_tty_usb_identity("/dev/" + tty_node.name)
+            if not identity:
+                continue
+            if (identity[0], identity[1]) != (runtime_vid, runtime_pid):
+                continue
+            if serial and identity[2] != serial:
+                continue
+            if identity[4] == 0:
+                candidates.append(identity[3])
+        if len(candidates) == 1:
+            return candidates[0]
+        if selected[4] == 0:
+            return selected[3]
+        fail("cannot uniquely resolve SERVICE CDC interface zero for " + port, code=4)
+    if sys.platform == "darwin":
+        selected = [d for d in mac_serial_devices()
+                    if same_mac_serial_endpoint(d[3], port)]
+        if len(selected) != 1 or (selected[0][0], selected[0][1]) != (
+                runtime_vid, runtime_pid):
+            return port
+        candidates = [
+            d[3] for d in mac_serial_devices()
+            if (d[0], d[1]) == (runtime_vid, runtime_pid)
+            and (not serial or d[2] == serial) and d[4] == 0
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if selected[0][4] == 0:
+            return selected[0][3]
+        fail("cannot uniquely resolve SERVICE CDC interface zero for " + port, code=4)
+    return port
 
 
 def capture_target_serial(
@@ -120,11 +216,18 @@ def capture_target_serial(
             )
         return identity[2]
     if sys.platform == "darwin":
-        matches = [d for d in mac_usb_devices() if (d[0], d[1]) in allowed]
+        matches = [d for d in mac_serial_devices()
+                   if same_mac_serial_endpoint(d[3], port)]
         if len(matches) != 1:
             fail(
-                "cannot uniquely scope the selected macOS target; expected exactly one "
-                f"runtime/bootloader match, found {len(matches)}",
+                "cannot uniquely scope the selected macOS serial endpoint; expected "
+                f"exactly one match for {port}, found {len(matches)}",
+                code=4,
+            )
+        if (matches[0][0], matches[0][1]) not in allowed:
+            fail(
+                "selected serial endpoint matches neither the configured runtime nor "
+                "bootloader USB identity",
                 code=4,
             )
         return matches[0][2]
@@ -141,18 +244,20 @@ def wait_for_runtime(runtime_vid: int, runtime_pid: int, serial: str, timeout_s:
                 if identity and identity[0] == runtime_vid and identity[1] == runtime_pid:
                     if not serial or identity[2] == serial:
                         candidates.append(identity)
-            if len(candidates) == 1:
+            service = [d for d in candidates if d[4] == 0]
+            if len(service) == 1 or (bool(serial) and bool(candidates)):
                 return True
         elif sys.platform == "darwin":
             candidates = [
-                d for d in mac_usb_devices()
+                d for d in mac_serial_devices()
                 if d[0] == runtime_vid and d[1] == runtime_pid and (not serial or d[2] == serial)
             ]
-            if len(candidates) == 1:
+            service = [d for d in candidates if d[4] == 0]
+            if len(service) == 1 or (bool(serial) and bool(candidates)):
                 return True
-        # system_profiler is substantially more expensive than sysfs. Avoid
-        # spawning it four times per second while retaining responsive Linux
-        # polling.
+        # IORegistry enumeration is substantially more expensive than sysfs.
+        # Avoid spawning it four times per second while retaining responsive
+        # Linux polling.
         time.sleep(1.0 if sys.platform == "darwin" else 0.25)
     return False
 
@@ -200,6 +305,14 @@ def main() -> int:
     target_serial = capture_target_serial(
         args.port, boot_vid, boot_pid, runtime_vid, runtime_pid
     )
+    control_port = resolve_service_serial_port(
+        args.port, runtime_vid, runtime_pid, target_serial
+    )
+    if control_port != args.port:
+        sys.stderr.write(
+            f"[nius-upload] selected {args.port}; using same-device SERVICE CDC "
+            f"{control_port} for bootloader touch and DFU\n"
+        )
 
     verbose_flag = ["--verbose"] if args.verbose else []
 
@@ -225,7 +338,7 @@ def main() -> int:
         dfu = [nrfutil] + verbose_flag + [
             "dfu", "serial",
             "-pkg", pkg,
-            "-p", args.port,
+            "-p", control_port,
             "-b", str(args.baud),
             "--singlebank",
         ]

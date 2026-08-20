@@ -114,9 +114,6 @@ void NrfUsbSerialBackend::poll() {
 
 void NrfUsbSerialBackend::configureFromSystemProfile() {
     if (nrfUsbRuntimeEnabled()) {
-        // begin() owns the bootloader handoff: it verifies ENABLE=0 and places
-        // the short detach interval after that edge. Delaying here would leave
-        // an inherited bootloader USBD session enabled and unserviced.
         nrfUsbdDriver().begin();
     }
     if (nrfUsbUserPortEnabled()) {

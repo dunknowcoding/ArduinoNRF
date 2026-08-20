@@ -16,7 +16,7 @@ summarized below, and the authoritative pin/peripheral truth lives in
 - **pitaya_go_nrf52840** — Makerdiary Pitaya Go model.
 - **devboard_nrf52840** — generic nRF52840 dev board; official Nordic DK route is SWD/J-Link.
 - **devboard_nrf52833** — generic nRF52833 dev board; SWD-first package model.
-- **usb_dongle_nrf52840** — PCA10059 USB dongle; Nordic Open DFU, not the package's UF2 / Adafruit serial-DFU path.
+- **usb_dongle_nrf52840** — PCA10059 USB dongle; Nordic Secure DFU over USB CDC with its official MBR and bootloader partition boundaries.
 
 ## Evidence shorthand
 

@@ -48,9 +48,9 @@ Identities below were corrected against the upstream `Adafruit_nRF52_Bootloader`
 | `nrfmicro_nrf52840` | `0x1209:0x5284` | `0x1209:0x5285` | Adafruit serial DFU | `NRFMICRO` / `nRF52840-nRFMicro-v0` | joric open-hardware identity. Some DIY/JLCPCB builds are flashed with nice!nano IDs instead — verify before relying on the VID:PID. |
 | `xiao_nrf52840` | `0x2886:0x0044` | `0x2886:0x8044` | Adafruit serial DFU (Seeed) | `XIAO-BOOT` / `nRF52840-SeeedXiao-v1` | Seeed XIAO nRF52840. Sense variant uses `0x2886:0x0045/0x8045` (covered in the auto-detect table). |
 | `pitaya_go_nrf52840` | `0x2886:0xF00E` | `0x2886:0xF00E` | Adafruit serial DFU | `PITAYAGO` / `PITAYAGO` | Makerdiary Pitaya Go. |
-| `mini_nrf52840` | `auto` | `auto` | varies | varies | ⚠️ No canonical identity — auto-detect; identity depends on whichever bootloader the seller flashed. |
-| `devboard_nrf52840` | `auto` | `auto` | varies | varies | ⚠️ The official Nordic nRF52840-DK uses **SEGGER J-Link OB** (VID `0x1366`), not a USB DFU bootloader — flash via SWD on the DK. AliExpress "dev boards" vary. |
-| `usb_dongle_nrf52840` | `0x1915:0x521F` | n/a | **Nordic Open DFU** (CDC ACM) | (no UF2 volume) | ⚠️ **Pipeline-incompatible**: this dongle uses Nordic's Open Bootloader (not Adafruit serial DFU). Flash it with Nordic `nrfutil` or **nRF Connect for Desktop → Programmer**. This core's upload pipeline is not the right tool for the PCA10059. |
+| `mini_nrf52840` | `auto` | `auto` | varies | varies | ⚠️ No canonical identity or layout. The bare/SWD default is linked at `0x0`; select an explicit USB bootloader layout before compiling. Auto upload rejects a detected link-address mismatch. |
+| `devboard_nrf52840` | `auto` | `auto` | varies | varies | ⚠️ Bare/SWD default. The official Nordic nRF52840-DK uses **SEGGER J-Link OB** (VID `0x1366`), not a USB DFU bootloader; AliExpress "dev boards" need an explicit matching USB layout. |
+| `usb_dongle_nrf52840` | `0x1915:0x521F` | package runtime identity | **Nordic Secure DFU over USB CDC** | (no UF2 volume) | Modeled with the official MBR/app/storage/bootloader boundaries and the package's serial-DFU transport; physical upload remains to be verified on this board. |
 | `devboard_nrf52833` | n/a | n/a | varies | varies | ⚠️ Generic nRF52833 dev board — identity varies by seller. |
 
 ### What changed in this audit
@@ -62,7 +62,7 @@ Identities below were corrected against the upstream `Adafruit_nRF52_Bootloader`
 | nRFMicro | `0x1915:0x5288` + `nordic-dfu` (wrong type) | `0x1209:0x5284/0x5285` + `adafruit-dfu` ✅ |
 | XIAO | `0x1915:0x5283` + empty UF2 metadata | `0x2886:0x0044/0x8044` + `XIAO-BOOT` ✅ |
 | Pitaya Go | `0x1915:0x5284` + `nordic-dfu` (wrong type) | `0x2886:0xF00E` + `adafruit-dfu` + `PITAYAGO` ✅ |
-| USB Dongle | `0x1915:0x5285` + `uf2` (wrong type) | `0x1915:0x521F` + `nordic-dfu` + flagged incompatible ✅ |
+| USB Dongle | `0x1915:0x5285` + `uf2` (wrong type) | `0x1915:0x521F` + Nordic USB serial DFU + `0x1000..0xE0000` partition contract |
 | Mini | `0x1915:0x5282` (placeholder) | `auto` + flagged variable |
 | Generic devboard | `0x1915:0x5280` (placeholder) | `auto` + flagged variable / DK uses J-Link |
 
@@ -78,7 +78,8 @@ property of the bootloader plus reserved flash layout:
 | No SoftDevice / MBR only | `0x1000` | UF2 `INFO_UF2.TXT` reports `SoftDevice: not found`, or the board was flashed with a bootloader/MBR-only image. |
 | SoftDevice S140 v6 | `0x26000` | Adafruit/nice!nano-style S140 v6 bootloader layout. This is the normal nice!nano v2 public layout. |
 | SoftDevice S140 v7 / legacy | `0x27000` | Bootloaders using the larger S140 v7 layout, including Seeed XIAO-style UF2 profiles. |
-| Bare / Nordic DFU | `0x0` | True bare-metal or Nordic USB DFU profiles without an MBR/SoftDevice-reserved application offset. |
+| Bare application / SWD | `0x0` | Targets with no MBR, SoftDevice, or USB bootloader reservation. |
+| Nordic PCA10059 USB serial DFU | `0x1000` | Official dongle MBR at the bottom of flash; application plus package storage remain below the onboard bootloader at `0xE0000`. |
 
 Why the ProMicro/nice!nano clone can look contradictory: the UF2 drive label,
 model and VID:PID can still say `NICENANO` / `nice!nano`, but the actual flash
@@ -90,9 +91,10 @@ at `0x26000` may upload successfully but will not run.
 `upload.ps1` reads the UF2 `SoftDevice` field when a UF2 volume is visible and
 fails fast if the mounted bootloader layout conflicts with the Arduino IDE
 option used for compilation. On Windows this applies to **UF2 upload**, **serial
-DFU**, and the **UF2→serial fallback**; serial DFU polls for the selected
-board's UF2 drive and refuses transfer when layout evidence is missing or
-mismatched. Because Arduino compiles before upload, the wrapper cannot repair a
+DFU**, and the **UF2→serial fallback**. A serial-only bootloader has no
+`INFO_UF2.TXT`; its selected recipe supplies the exact link address and
+SoftDevice requirement, while any already-mounted identity-scoped UF2 metadata
+is still checked immediately. Because Arduino compiles before upload, the wrapper cannot repair a
 mismatched app start after the fact; choose the matching `Bootloader / DFU`
 entry and compile again.
 
@@ -111,7 +113,9 @@ transport with an app linked for the wrong SoftDevice boundary.
 ## 🔭 What's not (yet) covered
 
 - **Nordic nRF52840-DK (official, with J-Link OB)**: flash via SWD using OpenOCD / J-Link / pyOCD; this core's USB hands-free path doesn't apply.
-- **Nordic nRF52840 USB Dongle (PCA10059)**: use Nordic's tooling.
+- **Nordic nRF52840 USB Dongle (PCA10059)**: the layout and serial transport are
+  modeled from Nordic sources, but the upload still needs physical verification
+  on a dongle.
 - **Single-cable USB-CDC GDB-stub debug** is verified on the ProMicro clone only. The Adafruit-fork clones (nice!nano / SuperMini / Pitaya / XIAO / nRFMicro) share the necessary firmware infrastructure (DebugMonitor + USB CDC), so it's expected to work, but it has not been re-verified on those boards in this revision.
 - **Windows UF2 stable-ID matching** is verified with two ProMicro/nice!nano-class boards mounted at the same time. Linux/macOS still use the serial-DFU Python path in this revision.
 

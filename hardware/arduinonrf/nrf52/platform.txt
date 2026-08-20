@@ -1,5 +1,5 @@
 name=ArduinoNRF
-version=0.3.16
+version=0.4.0
 
 compiler.path={runtime.tools.arm-none-eabi-gcc.path}/bin/
 compiler.c.cmd=arm-none-eabi-gcc
@@ -82,9 +82,10 @@ tools.niusjlink.program.params.quiet=-ArduinoIdeVerboseUpload 'false'
 
 tools.niusdfu.upload.pattern="{runtime.tools.dfu-util.path}/bin/dfu-util" {upload.verbose} -d {upload.usb_vid}:{upload.usb_pid} -a {upload.dfu_alt} -D "{build.path}/{build.project_name}.bin" -R
 # The platform uploaders own the 1200-bps transition and the identity-scoped
-# bootloader wait. Keep upload.use_1200bps_touch=false so Arduino CLI cannot
-# race that state machine or substitute a peer board's newly appeared port.
-tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -NrfutilExe '{runtime.tools.adafruit-nrfutil.path}/adafruit-nrfutil.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbVid '{upload.runtime_usb_vid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort '{upload.wait_for_upload_port}' -EnterBootloaderOnly '{upload.enter_bootloader_only}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
+# bootloader wait and post-transfer identity check. Keep both generic Arduino
+# CLI hooks false in boards.txt so the CLI cannot add a second touch or a
+# redundant port wait after this uploader has already verified the target.
+tools.niusdfu.upload.pattern.windows=powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{runtime.platform.path}/tools/niusrobotlab/upload.ps1' -Mode dfu -Tool '{runtime.tools.dfu-util.path}/dfu-util.exe' -NrfutilExe '{runtime.tools.adafruit-nrfutil.path}/adafruit-nrfutil.exe' -UsbVid '{upload.usb_vid}' -UsbPid '{upload.usb_pid}' -RuntimeUsbVid '{upload.runtime_usb_vid}' -RuntimeUsbPid '{upload.runtime_usb_pid}' -Alt '{upload.dfu_alt}' -Bin '{build.path}/{build.project_name}.bin' -Hex '{build.path}/{build.project_name}.hex' -Port '{serial.port}' -UseTouch1200 'true' -WaitForUploadPort 'true' -EnterBootloaderOnly '{upload.enter_bootloader_only}' -Board '{build.variant}' -BootloaderMode '{upload.bootloader_mode}' -Uf2FamilyId '{upload.uf2_family_id}' -Uf2AppStart '{upload.uf2_app_start}' -Uf2VolumeLabel '{upload.uf2_volume_label}' -Uf2Model '{upload.uf2_model}' -Uf2BoardId '{upload.uf2_board_id}' -SdReq '{upload.adafruit_sd_req}' {upload.verbose}"
 # Linux / macOS: Adafruit's standard cross-platform path - adafruit-nrfutil genpkg
 # + dfu serial - driven by a small stdlib-only Python script. Requires
 # adafruit-nrfutil on PATH (pip3 install --user adafruit-nrfutil). The Arduino

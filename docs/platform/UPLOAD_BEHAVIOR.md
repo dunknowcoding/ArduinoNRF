@@ -47,7 +47,7 @@ choices because it has no native USB upload path in this package.
 - Arduino board recipes keep `upload.use_1200bps_touch=false`; this prevents
   Arduino CLI from issuing a second, unscoped touch before the identity-aware
   wrapper runs.
-- `Bootloader / DFU → Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use `adafruit-nrfutil`.
+- `Bootloader / DFU → Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use the packaged serial-DFU tool.
 - UF2 drives are matched to the selected serial port by stable USB identity. If two boards expose the same volume label, the wrapper refuses ambiguous matches instead of choosing the first drive.
 - For bootloaders whose USB PID differs from the application PID, the wrapper
   accepts the selected board's scoped UF2 volume as transition proof. It never
@@ -63,18 +63,21 @@ choices because it has no native USB upload path in this package.
   `0x27000`). If that layout conflicts with the app start used by the selected
   Arduino IDE `Bootloader / DFU` option, upload fails before copying firmware.
   This applies to **UF2 deploy**, **serial DFU**, and the **UF2→serial fallback**
-  path. Serial DFU now **requires** a scoped UF2 volume with `INFO_UF2.TXT` on
-  the selected board before transfer; the wrapper polls up to ~12s (and may
-  re-touch 1200 bps once) and fails with `layout` if layout evidence is missing
-  or mismatched. **No firmware is written** when the pre-flash guard fires; the
-  board stays in UF2/DFU. This is intentional: Arduino compiles before upload,
-  so the wrapper cannot safely relocate an already-linked image.
+  path. Serial-only bootloaders do not expose mass storage, so that path makes
+  an immediate identity-scoped `INFO_UF2.TXT` check when a matching volume is
+  already available, without delaying an otherwise valid serial transfer. When
+  no UF2 metadata exists, the exact app start and SoftDevice requirement come
+  from the selected board recipe. A discovered mismatch remains terminal before
+  firmware is written; Arduino compiles before upload, so the wrapper cannot
+  safely relocate an already-linked image.
 - **Layout guard** (`layout` failure): compares the IDE `Bootloader / DFU` app
   start (`0x1000` / `0x26000` / `0x27000`) against `INFO_UF2.TXT` on the
   selected board's UF2 drive (matched by stable USB identity, not drive letter).
   Disable with `NIUS_DISABLE_LAYOUT_GUARD=1` (not recommended).
-- **Misflash guard** (`misflash` failure): after serial DFU, direct UF2, or
-  Nordic DFU, waits for the selected board to return in application mode. If USB never comes back
+- **Misflash guard** (`misflash` failure): after serial DFU or direct UF2, waits
+  for the selected board to return in application mode. The fast path checks
+  the expected VID/PID and preserved physical-device identity without opening
+  the newly enumerated application COM. If USB never comes back
   (typical when app start was wrong), the wrapper attempts 1200 bps touch / UF2
   recovery and fails with an IDE-visible message. Disable with
   `NIUS_DISABLE_MISFLASH_GUARD=1`.
@@ -103,8 +106,9 @@ choices because it has no native USB upload path in this package.
   the bootloader exposes interface 2 as mass storage, while TaichiUSB exposes it
   as the user CDC port. Reusing one PID and chip serial for both descriptor
   layouts makes Windows retain the wrong per-interface driver binding.
-- After serial DFU, the upload wrapper accepts the selected runtime COM when it
-  returns or a newly enumerated COM with the expected runtime VID/PID. Windows
+- After serial DFU, the upload wrapper accepts the selected runtime interface
+  when it returns with the expected runtime VID/PID and physical-device
+  identity. Windows
   may assign a different number when the bootloader and application expose
   different composite interfaces; that remap is not an upload failure.
 - The runtime DFU interface is hidden by default. Hands-free upload uses the
@@ -118,6 +122,9 @@ choices because it has no native USB upload path in this package.
 - `upload.py` accepts the selected port only when it matches either the board
   recipe's runtime identity or its bootloader identity; the script then owns
   the 1200-bps transition through `adafruit-nrfutil`.
+- On a dual-CDC runtime, a selected user endpoint is remapped to interface zero
+  only when Linux sysfs or the macOS IOUSB registry proves it is a sibling on
+  the same USB composite. Ambiguous mappings fail closed.
 - A successful transfer is not sufficient by itself. The selected device's USB
   serial must return with the declared runtime VID/PID before upload succeeds.
 - Ambiguous same-identity devices fail closed instead of allowing a peer board

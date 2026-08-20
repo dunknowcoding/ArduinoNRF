@@ -7,7 +7,7 @@
 [![platform](https://img.shields.io/badge/platform-Arduino-00979D)](https://www.arduino.cc/)
 [![mcu](https://img.shields.io/badge/MCU-nRF52840%20%2F%20nRF52833-0a7bbb)](https://www.nordicsemi.com/)
 [![boards](https://img.shields.io/badge/boards-10-success)](#-supported-boards)
-[![version](https://img.shields.io/badge/version-0.3.16-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.3.16)
+[![version](https://img.shields.io/badge/version-0.4.0-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.4.0)
 [![upload](https://img.shields.io/badge/upload-no%20button%2C%20one%20cable-brightgreen)](#-hands-free-uploads)
 [![debug](https://img.shields.io/badge/debug-USB%20CDC%20GDB%20stub-orange)](#-single-cable-debugging)
 [![ble](https://img.shields.io/badge/BLE-NimBLE%20GATT%20verified-blueviolet)](#-bluetooth-low-energy-nimble)
@@ -30,8 +30,8 @@ The cheap nRF52840 clones (AliExpress "ProMicro nRF52840", SuperMini, nRFMicro, 
 | 🐞 | **Single-cable debugging** | Click **Debug** in Arduino IDE 2 and get **breakpoints, step in/over/out, registers, memory, watchpoints and pause** — all over the *same* USB cable, with **no external SWD/J-Link probe**. |
 | 🧩 | **10 board definitions, one package** | ProMicro (*verified on hardware*), nice!nano v2, SuperMini, nRFMicro, XIAO, nRF52833/nRF52840 dev boards and more — installed from one Board Manager URL. |
 | 📋 | **Truth-oriented metadata** | ADC, PWM, BLE and bus capabilities are documented as *verified*, not aspirational. No silent overclaiming. |
-| 🛡️ | **Robust upload pipeline** | Double-click-safe, coexists with a live debug session, rejects the wrong COM with a clear message, and caches slow port scans for speed. |
-| 🥋 | **TaichiUSB — own USB stack** | A clean-room nRF52840 USB device stack (**not TinyUSB**): enumeration runs from the USBD ISR, so the COM port survives whatever your `setup()`/`loop()` does. |
+| 🛡️ | **Robust upload pipeline** | Double-click-safe, coexists with a live debug session, resolves the exact same-device service COM, and caches slow port scans for speed. |
+| 🥋 | **TaichiUSB — own USB stack** | A clean-room nRF52840 USB device stack (**not TinyUSB**): enumeration runs from the USBD ISR, so ordinary blocking `setup()`/`loop()` work does not starve the COM port while interrupts remain enabled. |
 
 ---
 
@@ -53,7 +53,7 @@ ArduinoNRF is also listed on the [Arduino unofficial third-party boards wiki](ht
 
 **Tools → Board → ArduinoNRF nRF52** → e.g. *AliExpress ProMicro nRF52840*. Select the board's COM port under **Tools → Port**.
 
-> 💡 With `usbcdc=enabled` the board shows **two** COM ports: a **user** port (your `Serial`) and a **service/maintenance** port. Use the **service** port (usually the lower COM index / `MI_00`) for uploads and debugging — picking the user port is rejected with a clear message.
+> 💡 With `usbcdc=enabled` the board shows **two** COM ports: a **user** port (your `Serial`) and a **service/maintenance** port. Debugging uses the service port (`MI_00`). Uploading may start from either port: the uploader resolves the same device's service interface by USB identity before touching it.
 
 ### 3. Upload
 
@@ -73,7 +73,7 @@ The host-side pipeline (`upload.ps1`) is hardened against the messy real world:
 
 - **Double-click safe** — a per-port lock makes a second Upload fail fast *before* any touch, so two uploads can never interleave and corrupt flash.
 - **Coexists with debugging** — if a debug session holds the port, the upload signals the debug bridge to release it, then proceeds.
-- **Wrong-port guard** — selecting the *user* CDC instead of the service CDC is rejected with an actionable message; your firmware is never touched.
+- **Same-device port resolution** — selecting the *user* CDC safely remaps to that exact composite device's service CDC; ambiguous peers fail closed before firmware is touched.
 - **UF2-aware** — on Windows, `Auto-detect` prefers the selected board's mounted UF2 drive when it is present, and falls back only to the requested serial-DFU path.
 - **Multi-board safe** — UF2 volumes are matched to the selected upload COM by stable USB identity, so two `NICENANO` drives do not collide.
 - **Fast** — slow Windows PnP enumerations are cached during the stable pre-touch window (~3 s saved per upload).
@@ -166,10 +166,10 @@ Identities were re-checked against the upstream `Adafruit_nRF52_Bootloader` `boa
 | nRFMicro | `0x1209:0x5284` | Adafruit serial DFU | joric open-hardware; some DIY units carry nice!nano IDs instead |
 | Seeed XIAO nRF52840 (+ Sense) | `0x2886:0x0044` / `0x0045` | Adafruit serial DFU (Seeed) | Identity corrected, UF2 = `XIAO-BOOT` |
 | Makerdiary Pitaya Go | `0x2886:0xF00E` | Adafruit serial DFU | Identity corrected, UF2 = `PITAYAGO` |
-| Mini nRF52840 (AliExpress) | `auto` | varies | ⚠️ No canonical identity — auto-detect |
-| Generic nRF52840 Dev Board | `auto` | varies | ⚠️ Official Nordic DK uses **SWD via J-Link**, not USB DFU |
+| Mini nRF52840 (AliExpress) | `auto` | varies | ⚠️ No canonical layout — select the matching explicit bootloader entry; auto mode rejects link-address mismatches |
+| Generic nRF52840 Dev Board | `auto` | varies | ⚠️ Bare/SWD default; select an explicit bootloader layout for USB. Official Nordic DK uses **SWD via J-Link** |
 | Generic nRF52833 Development Board | `auto` | varies | ⚠️ Seller identity varies; packaged, but not yet re-verified on hardware in this revision |
-| nRF52840 USB Dongle (PCA10059) | `0x1915:0x521F` | **Nordic Open DFU** | ⚠️ **Use Nordic `nrfutil` / nRF Connect — this pipeline does not apply** |
+| nRF52840 USB Dongle (PCA10059) | `0x1915:0x521F` | **Nordic USB serial DFU** | Correct `0x1000..0xE0000` partition contract; modeled pending physical upload verification |
 
 Per-board reference notes live in **[docs/boards/](docs/boards/)**; the support matrix is in **[docs/platform/BOARD_SUPPORT_STATUS.md](docs/platform/BOARD_SUPPORT_STATUS.md)**.
 
@@ -200,7 +200,7 @@ Linux/macOS setup: `pip3 install --user adafruit-nrfutil`, then (Linux only) ins
 | **Zigbee / 802.15.4** | 🚧 **Official onboard Zigbee is now a sidecar target.** The nRF52840 own-radio path tracks Nordic's nCS Zigbee R23 add-on through `hardware/arduinonrf/nrf52/tools/ncs_zigbee/`; the reference target is a no-SoftDevice ProMicro-class board over SWD, with no bootloader reflashing. ✅ **Working Arduino-sketch path remains the external CC2530 module.** Flash it with the built-in **[`libraries/CCDebugger/`](hardware/arduinonrf/nrf52/libraries/CCDebugger/)**, then drive it over UART with **[ArduinoNRF-Zigbee](https://github.com/dunknowcoding/ArduinoNRF-Zigbee)**. `libraries/Zigbee/` is still an experimental placeholder (`ZIGBEE_NOT_VENDORED`). Guide: **[docs/platform/ZIGBEE.md](docs/platform/ZIGBEE.md)**. |
 | **Thread (OpenThread)** | ✅ **Working IPv6 mesh on the nRF52840's own radio** via the separate **[NiusThread](https://github.com/dunknowcoding/ArduinoNRF-Thread)** library: full OpenThread FTD (vendored, with mbedtls) on a bare-metal 802.15.4 RADIO driver — no SoftDevice, no nrfx, no external module. HW-verified two-node mesh (Leader + Child → Router) with bidirectional UDP multicast. The in-package [`libraries/Thread/`](hardware/arduinonrf/nrf52/libraries/Thread/) is now a thin shim that keeps `#include <Thread.h>` working. Guide: **[docs/platform/THREAD.md](docs/platform/THREAD.md)**. |
 | **EEPROM** | ✅ Emulated (see EEPROM examples) |
-| **USB device stack** | ✅ **TaichiUSB** — self-developed clean-room nRF52840 USBD stack (dual CDC + DFU + PluggableUSB), ISR-driven enumeration so the port survives a blocking sketch, **block-write CDC at ~300 KB/s**; **not TinyUSB**. See [docs/platform/TAICHIUSB.md](docs/platform/TAICHIUSB.md). |
+| **USB device stack** | ✅ **TaichiUSB** — self-developed clean-room nRF52840 USBD stack (dual CDC + DFU + PluggableUSB), ISR-driven enumeration so ordinary blocking sketch work does not starve the port while interrupts remain enabled, **block-write CDC at ~300 KB/s**; **not TinyUSB**. See [docs/platform/TAICHIUSB.md](docs/platform/TAICHIUSB.md). |
 | **Upload** | ✅ Hands-free UF2 or serial-DFU on the maintenance CDC; SWD/OpenOCD also available |
 | **Debug** | ✅ USB-CDC GDB stub (no probe) on ProMicro; SWD route for boards with pads |
 
