@@ -308,6 +308,14 @@ inline bool nvicIrqEnabled(uint32_t irqNumber) {
     return (reg32(NVIC_ISER_BASE, (irqNumber / 32UL) * 4UL) & (1UL << (irqNumber % 32UL))) != 0UL;
 }
 
+constexpr bool shouldRestoreUsbdIrq(bool wasEnabled, uint32_t peripheralMask) {
+    return wasEnabled && peripheralMask != 0UL;
+}
+
+static_assert(shouldRestoreUsbdIrq(true, 1UL));
+static_assert(!shouldRestoreUsbdIrq(true, 0UL));
+static_assert(!shouldRestoreUsbdIrq(false, 1UL));
+
 // NVIC priority registers are byte-addressable, one byte per IRQ. The nRF52840
 // (Cortex-M4) implements the top 3 bits of the 8-bit field, so a logical
 // priority 0..7 lives in bits [7:5].
@@ -345,7 +353,11 @@ public:
         }
     }
     ~UsbdIrqLock() {
-        if (reenable_) {
+        // A critical-section body may retire the controller after observing
+        // VBUS loss. disableInterrupts() then clears the peripheral mask as
+        // well as the NVIC bit; do not undo that lifecycle decision merely
+        // because the IRQ was enabled when this guard was entered.
+        if (shouldRestoreUsbdIrq(reenable_, reg32(USBD_BASE, INTENSET))) {
             enableNvicIrq(USBD_IRQ_NUMBER);
         }
     }

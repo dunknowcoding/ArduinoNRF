@@ -42,6 +42,8 @@ in the USBD interrupt and do not depend on the sketch loop.
 `begin()` and an already-live `attach()` are idempotent and serialized against
 the SysTick startup service. Repeating either call cannot silently clear an
 active USB configuration while the pull-up remains visible to the host.
+Foreground service locks also preserve a VBUS-loss shutdown: they restore the
+USBD NVIC route only while the peripheral interrupt mask is still owned.
 
 ## Source layout
 
