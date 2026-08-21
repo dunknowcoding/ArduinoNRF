@@ -66,6 +66,7 @@ def linux_tty_usb_identity(port: str):
             serial,
             "/dev/" + tty,
             interface_number,
+            str(parent),
         )
     return None
 
@@ -121,6 +122,9 @@ def mac_serial_devices():
         interface_number = as_int(first_value(
             value, ("bInterfaceNumber", "USB Interface Number")
         ))
+        location_id = as_int(first_value(
+            value, ("locationID", "locationId", "USB Location ID")
+        ))
         if vid is not None:
             current["vid"] = vid
         if pid is not None:
@@ -129,11 +133,13 @@ def mac_serial_devices():
             current["serial"] = str(serial)
         if interface_number is not None:
             current["interface"] = interface_number
+        if location_id is not None:
+            current["stable_id"] = f"location:{location_id:08x}"
         port = first_value(value, ("IOCalloutDevice", "IODialinDevice"))
         if port and "vid" in current and "pid" in current:
             devices.append((
                 current["vid"], current["pid"], current.get("serial", ""),
-                str(port), current.get("interface"),
+                str(port), current.get("interface"), current.get("stable_id", ""),
             ))
         for child in value.get("IORegistryEntryChildren", []):
             walk(child, current)
@@ -150,11 +156,21 @@ def same_mac_serial_endpoint(left: str, right: str) -> bool:
     return suffix(left) == suffix(right)
 
 
+def matches_target_scope(identity, serial: str, stable_id: str) -> bool:
+    """Prefer physical USB topology; use serial only when topology is unavailable."""
+    if stable_id:
+        return len(identity) > 5 and identity[5] == stable_id
+    if serial:
+        return identity[2] == serial
+    return False
+
+
 def resolve_service_serial_port(
     port: str,
     runtime_vid: int,
     runtime_pid: int,
     serial: str,
+    stable_id: str,
 ) -> str:
     """Map a selected USER CDC to interface zero on the same USB composite."""
     if sys.platform.startswith("linux"):
@@ -168,7 +184,7 @@ def resolve_service_serial_port(
                 continue
             if (identity[0], identity[1]) != (runtime_vid, runtime_pid):
                 continue
-            if serial and identity[2] != serial:
+            if not matches_target_scope(identity, serial, stable_id):
                 continue
             if identity[4] == 0:
                 candidates.append(identity[3])
@@ -186,7 +202,7 @@ def resolve_service_serial_port(
         candidates = [
             d[3] for d in mac_serial_devices()
             if (d[0], d[1]) == (runtime_vid, runtime_pid)
-            and (not serial or d[2] == serial) and d[4] == 0
+            and matches_target_scope(d, serial, stable_id) and d[4] == 0
         ]
         if len(candidates) == 1:
             return candidates[0]
@@ -196,13 +212,13 @@ def resolve_service_serial_port(
     return port
 
 
-def capture_target_serial(
+def capture_target_identity(
     port: str,
     boot_vid: int,
     boot_pid: int,
     runtime_vid: int,
     runtime_pid: int,
-) -> str:
+) -> tuple[str, str]:
     allowed = {(boot_vid, boot_pid), (runtime_vid, runtime_pid)}
     if sys.platform.startswith("linux"):
         identity = linux_tty_usb_identity(port)
@@ -216,7 +232,9 @@ def capture_target_serial(
                 f"{runtime_vid:04X}:{runtime_pid:04X} or {boot_vid:04X}:{boot_pid:04X}",
                 code=4,
             )
-        return identity[2]
+        if not identity[2] and not identity[5]:
+            fail("selected serial port has no stable USB topology or serial identity", code=4)
+        return identity[2], identity[5]
     if sys.platform == "darwin":
         matches = [d for d in mac_serial_devices()
                    if same_mac_serial_endpoint(d[3], port)]
@@ -232,11 +250,19 @@ def capture_target_serial(
                 "bootloader USB identity",
                 code=4,
             )
-        return matches[0][2]
+        if not matches[0][2] and not matches[0][5]:
+            fail("selected serial endpoint has no stable USB topology or serial identity", code=4)
+        return matches[0][2], matches[0][5]
     fail("unsupported host for identity-verified serial DFU: " + sys.platform, code=4)
 
 
-def wait_for_runtime(runtime_vid: int, runtime_pid: int, serial: str, timeout_s: float) -> bool:
+def wait_for_runtime(
+    runtime_vid: int,
+    runtime_pid: int,
+    serial: str,
+    stable_id: str,
+    timeout_s: float,
+) -> bool:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         if sys.platform.startswith("linux"):
@@ -244,18 +270,19 @@ def wait_for_runtime(runtime_vid: int, runtime_pid: int, serial: str, timeout_s:
             for tty_node in Path("/sys/class/tty").glob("*"):
                 identity = linux_tty_usb_identity("/dev/" + tty_node.name)
                 if identity and identity[0] == runtime_vid and identity[1] == runtime_pid:
-                    if not serial or identity[2] == serial:
+                    if matches_target_scope(identity, serial, stable_id):
                         candidates.append(identity)
             service = [d for d in candidates if d[4] == 0]
-            if len(service) == 1 or (bool(serial) and bool(candidates)):
+            if len(service) == 1 or ((bool(serial) or bool(stable_id)) and bool(candidates)):
                 return True
         elif sys.platform == "darwin":
             candidates = [
                 d for d in mac_serial_devices()
-                if d[0] == runtime_vid and d[1] == runtime_pid and (not serial or d[2] == serial)
+                if d[0] == runtime_vid and d[1] == runtime_pid
+                and matches_target_scope(d, serial, stable_id)
             ]
             service = [d for d in candidates if d[4] == 0]
-            if len(service) == 1 or (bool(serial) and bool(candidates)):
+            if len(service) == 1 or ((bool(serial) or bool(stable_id)) and bool(candidates)):
                 return True
         # IORegistry enumeration is substantially more expensive than sysfs.
         # Avoid spawning it four times per second while retaining responsive
@@ -265,6 +292,18 @@ def wait_for_runtime(runtime_vid: int, runtime_pid: int, serial: str, timeout_s:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--selftest"]:
+        serialless = (0x239A, 0x00B3, "", "/dev/ttyACM0", 0, "/sys/devices/usb1/1-2")
+        changed_serial = (0x239A, 0x0001, "runtime", "/dev/ttyACM1", 0, "/sys/devices/usb1/1-2")
+        peer = (0x239A, 0x0001, "runtime", "/dev/ttyACM2", 0, "/sys/devices/usb1/1-3")
+        assert matches_target_scope(serialless, "", "/sys/devices/usb1/1-2")
+        assert matches_target_scope(changed_serial, "bootloader", "/sys/devices/usb1/1-2")
+        assert not matches_target_scope(peer, "bootloader", "/sys/devices/usb1/1-2")
+        assert matches_target_scope(changed_serial, "runtime", "")
+        assert not matches_target_scope(changed_serial, "peer", "")
+        print("upload.py selftest: PASS")
+        return 0
+
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--mode", default="dfu", choices=["dfu"], help="upload mode (only adafruit serial-DFU is supported here)")
     ap.add_argument("--hex", required=True, help="path to compiled .hex (input to adafruit-nrfutil genpkg)")
@@ -321,11 +360,11 @@ def main() -> int:
             code=3,
         )
 
-    target_serial = capture_target_serial(
+    target_serial, target_stable_id = capture_target_identity(
         args.port, boot_vid, boot_pid, runtime_vid, runtime_pid
     )
     control_port = resolve_service_serial_port(
-        args.port, runtime_vid, runtime_pid, target_serial
+        args.port, runtime_vid, runtime_pid, target_serial, target_stable_id
     )
     if control_port != args.port:
         sys.stderr.write(
@@ -374,7 +413,9 @@ def main() -> int:
             fail("adafruit serial DFU timed out", code=5)
         if rc != 0:
             return rc
-        if not wait_for_runtime(runtime_vid, runtime_pid, target_serial, runtime_timeout):
+        if not wait_for_runtime(
+            runtime_vid, runtime_pid, target_serial, target_stable_id, runtime_timeout
+        ):
             fail(
                 "transfer completed, but the selected board did not enumerate as runtime "
                 f"{runtime_vid:04X}:{runtime_pid:04X}",

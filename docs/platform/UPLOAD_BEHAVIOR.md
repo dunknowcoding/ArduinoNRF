@@ -133,8 +133,11 @@ choices because it has no native USB upload path in this package.
 - On a dual-CDC runtime, a selected user endpoint is remapped to interface zero
   only when Linux sysfs or the macOS IOUSB registry proves it is a sibling on
   the same USB composite. Ambiguous mappings fail closed.
-- A successful transfer is not sufficient by itself. The selected device's USB
-  serial must return with the declared runtime VID/PID before upload succeeds.
+- A successful transfer is not sufficient by itself. When available, Linux sysfs or
+  the macOS IOUSB registry must return the selected physical USB topology with the
+  declared runtime VID/PID before upload succeeds. Exact USB serial is the fallback
+  when topology is unavailable, so serial-less boards and bootloader/runtime serial
+  changes remain scoped without allowing a peer board to satisfy the check.
 - Ambiguous same-identity devices fail closed instead of allowing a peer board
   to satisfy target detection or post-upload verification.
 - Generic boards whose base recipe says `auto` must select an explicit
