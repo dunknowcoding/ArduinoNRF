@@ -128,6 +128,11 @@ choices because it has no native USB upload path in this package.
 - `upload.py` accepts the selected port only when it matches either the board
   recipe's runtime identity or its bootloader identity; the script then owns
   the 1200-bps transition through `adafruit-nrfutil`.
+- The Arduino recipe passes the selected bootloader transport explicitly.
+  Adafruit serial-DFU and Adafruit-compatible UF2 layouts use the verified serial
+  service. `auto` and Nordic USB DFU fail before image or USB access rather than
+  silently invoking an incompatible protocol; use an explicit supported layout
+  or SWD until those distinct transports have their own verified wrappers.
 - The script validates the actual Intel HEX framing, vector table, link address,
   and maximum application range before resolving or touching a USB device.
 - On a dual-CDC runtime, a selected user endpoint is remapped to interface zero

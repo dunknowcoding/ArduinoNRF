@@ -464,6 +464,12 @@ def main() -> int:
     ap.add_argument("--pid", default="0x00B3", help="expected bootloader USB PID")
     ap.add_argument("--runtime-vid", required=True, help="expected application USB VID")
     ap.add_argument("--runtime-pid", required=True, help="expected application USB PID")
+    ap.add_argument(
+        "--bootloader-mode",
+        default="adafruit-dfu",
+        choices=["adafruit-dfu", "uf2", "nordic-dfu", "auto"],
+        help="selected board bootloader transport contract",
+    )
     ap.add_argument("--app-start", required=True, help="required application vector address")
     ap.add_argument("--max-size", required=True, help="maximum application bytes from --app-start")
     ap.add_argument("--runtime-timeout", default="30", help="seconds to wait for identity-verified application USB")
@@ -475,6 +481,24 @@ def main() -> int:
     ap.add_argument("--nrfutil", default="adafruit-nrfutil", help="adafruit-nrfutil executable name or path")
     ap.add_argument("--verbose", action="store_true", help="pass --verbose to adafruit-nrfutil")
     args = ap.parse_args()
+
+    # This wrapper implements the Adafruit serial protocol. Adafruit-compatible
+    # UF2 bootloaders expose the same serial DFU service and are safe here, but
+    # Nordic USB DFU is a different protocol and auto-detection would require
+    # mutating discovery after the runtime endpoint disappears. Reject both
+    # before image or USB access instead of silently invoking the wrong tool.
+    if args.bootloader_mode == "auto":
+        fail(
+            "select an explicit Bootloader / DFU layout on Linux or macOS; "
+            "transport auto-detection is intentionally disabled",
+            code=2,
+        )
+    if args.bootloader_mode == "nordic-dfu":
+        fail(
+            "Nordic USB DFU is not implemented by the Adafruit serial uploader; "
+            "select a verified UF2/Adafruit-DFU layout or an SWD upload method",
+            code=2,
+        )
 
     if args.vid.strip().lower() == "auto" or args.pid.strip().lower() == "auto":
         fail(
