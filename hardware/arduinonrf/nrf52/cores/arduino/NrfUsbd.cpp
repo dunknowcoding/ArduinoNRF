@@ -218,6 +218,12 @@ constexpr bool ep0DataDoneMayCommit(bool newerSetupPending) {
     return !newerSetupPending;
 }
 
+constexpr bool configurationRequestAllowed(uint8_t address) {
+    // SET/GET_CONFIGURATION are valid only after SET_ADDRESS completed. A
+    // default-state request must not construct endpoint/session state.
+    return address != 0U;
+}
+
 static_assert(suspendedAfterUsbEvent(false, USBD_EVENTCAUSE_SUSPEND_MASK));
 static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_SUSPEND_MASK |
@@ -226,6 +232,8 @@ static_assert(readyAfterUsbEvent(false, true, true, USBD_EVENTCAUSE_READY_MASK))
 static_assert(!readyAfterUsbEvent(true, true, false, USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(ep0DataDoneMayCommit(false));
 static_assert(!ep0DataDoneMayCommit(true));
+static_assert(!configurationRequestAllowed(0U));
+static_assert(configurationRequestAllowed(1U));
 constexpr uint32_t USBD_TRACE_MAGIC = 0x55444254UL;
 constexpr uint32_t USBD_DTOGGLE_VALUE_POS = 8UL;
 constexpr uint32_t USBD_DTOGGLE_NOP = 0UL;
@@ -2628,7 +2636,8 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             return;
         case USB_REQ_SET_CONFIGURATION:
             if (requestType != (USB_DIR_OUT | USB_REQ_RECIPIENT_DEVICE) ||
-                value > 1U || index != 0U || length != 0U) {
+                value > 1U || index != 0U || length != 0U ||
+                !configurationRequestAllowed(address_)) {
                 stallControlEndpoint();
                 return;
             }
@@ -2694,7 +2703,8 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             return;
         case USB_REQ_GET_CONFIGURATION:
             if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) ||
-                value != 0U || index != 0U || length != 1U) {
+                value != 0U || index != 0U || length != 1U ||
+                !configurationRequestAllowed(address_)) {
                 stallControlEndpoint();
                 return;
             }
