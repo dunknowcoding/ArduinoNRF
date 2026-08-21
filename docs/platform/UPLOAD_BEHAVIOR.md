@@ -41,6 +41,14 @@ set `NIUS_CMSIS_DAP_SERIAL` to the exact adapter serial. These selectors are pas
 before target initialization; they are not inferred from a board COM port. Firmware
 paths embedded in OpenOCD commands are Tcl-escaped before any probe is opened.
 
+Normal SWD upload, **Upload Using Programmer**, and **Burn Bootloader** all use
+the same validated wrappers on Windows, Linux, and macOS; the former raw OpenOCD
+mutation recipes are not exposed as an alternate bypass. Before a bootloader
+recover/erase, the complete Intel HEX must pass checksum/overlap/EOF checks, fit
+the selected physical flash and UICR ranges, provide valid MBR and bootloader
+vectors for the selected SRAM, contain a valid page-aligned UICR bootloader
+address, and leave `UICR.APPROTECT` erased. Only then may `nrf52_recover` run.
+
 Arduino IDE 2 SWD Debug follows the selected `Upload Method`: CMSIS-DAP keeps
 the OpenOCD server, while the J-Link upload method switches the debug server
 metadata to Arduino IDE's `jlink` server type.

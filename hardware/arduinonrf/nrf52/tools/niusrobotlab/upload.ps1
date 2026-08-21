@@ -52,6 +52,8 @@ param(
     [AllowEmptyString()]
     [string]$RamEnd = '',
     [AllowEmptyString()]
+    [string]$FlashEnd = '',
+    [AllowEmptyString()]
     [string]$Uf2VolumeLabel = '',
     [AllowEmptyString()]
     [string]$Uf2Model = '',
@@ -2771,6 +2773,34 @@ function Assert-NiusBootloaderHexApprotectPolicy {
     }
 }
 
+function Assert-NiusBootloaderImage {
+    param(
+        [string]$HexPath,
+        [string]$TargetFlashEnd,
+        [string]$TargetRamEnd
+    )
+
+    if ([string]::IsNullOrWhiteSpace($TargetFlashEnd) -or
+        [string]::IsNullOrWhiteSpace($TargetRamEnd)) {
+        throw 'Bootloader recovery requires exact target flash and SRAM ceilings.'
+    }
+    $python = Resolve-PythonLaunch
+    $validator = Join-Path $PSScriptRoot 'build_uf2.py'
+    Assert-ToolExists -Path $validator
+    $arguments = @()
+    $arguments += $python.PrefixArgs
+    $arguments += @(
+        $validator,
+        '--input-hex', $HexPath,
+        '--family-id', '0',
+        '--validate-only',
+        '--bootloader-image',
+        '--flash-end', $TargetFlashEnd,
+        '--ram-end', $TargetRamEnd
+    )
+    Invoke-CommandChecked -Exe $python.Exe -Arguments $arguments -FailureKind 'image-preflight'
+}
+
 function Invoke-NiusBootloaderDeploy {
     param(
         [string]$OpenOcdExe,
@@ -2778,10 +2808,18 @@ function Invoke-NiusBootloaderDeploy {
         [string]$OpenOcdConfig,
         [string]$BootloaderHexPath,
         [string]$Protocol,
-        [string]$Device = ''
+        [string]$Device = '',
+        [string]$TargetFlashEnd = '',
+        [string]$TargetRamEnd = ''
     )
 
     Assert-InputArtifact -Path $BootloaderHexPath -Label 'bootloader hex'
+    # This runs before nrf52_recover/erase. A damaged, cross-capacity, missing-
+    # vector, or debug-locking recovery image must never erase a working target.
+    Assert-NiusBootloaderImage `
+        -HexPath $BootloaderHexPath `
+        -TargetFlashEnd $TargetFlashEnd `
+        -TargetRamEnd $TargetRamEnd
     Assert-NiusBootloaderHexApprotectPolicy -HexPath $BootloaderHexPath
 
     $isJLink = ($Protocol -match '(?i)jlink')
@@ -5084,7 +5122,9 @@ try {
             -OpenOcdConfig $Config `
             -BootloaderHexPath $Hex `
             -Protocol $ProgrammerProtocol `
-            -Device $JLinkDevice
+            -Device $JLinkDevice `
+            -TargetFlashEnd $FlashEnd `
+            -TargetRamEnd $RamEnd
         exit 0
     }
 

@@ -120,6 +120,15 @@ J-Link uses SEGGER `JLink.exe`; CMSIS-DAP uses OpenOCD `nrf52_recover`. The
 recover step clears `APPROTECT`; the bootloader HEX must leave APPROTECT erased
 (`0xFF`) or unmentioned so recovery remains possible.
 
+The wrapper validates the complete recovery image before that destructive step:
+Intel HEX checksums/ordering/EOF, selected flash and UICR limits, MBR and
+bootloader vectors, target SRAM ceiling, page-aligned UICR bootloader address,
+and erased `APPROTECT` must all agree. Windows, Linux, and macOS use this same
+pre-erase contract. **Upload Using Programmer** likewise retains the normal
+application vector/layout preflight instead of bypassing it with raw OpenOCD.
+On multi-probe hosts, set `NIUS_JLINK_SERIAL` or `NIUS_CMSIS_DAP_SERIAL` to the
+exact probe serial/nickname before starting the IDE operation.
+
 - `hardware/arduinonrf/nrf52/bootloaders/promicro_nrf52840/promicro_nrf52840_bootloader-0.9.2_s140_6.1.1.hex`
 - `hardware/arduinonrf/nrf52/bootloaders/promicro_nrf52840/promicro_nrf52840_bootloader-0.11.0_nosd.hex`
 - `hardware/arduinonrf/nrf52/bootloaders/nice_nano/nice_nano_bootloader-0.6.0_s140_6.1.1.hex`

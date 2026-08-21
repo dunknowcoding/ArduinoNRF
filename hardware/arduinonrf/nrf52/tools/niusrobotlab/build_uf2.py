@@ -36,6 +36,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="validate Intel HEX and application layout without writing UF2",
     )
+    parser.add_argument(
+        "--bootloader-image",
+        action="store_true",
+        help="validate a complete nRF52 recovery/bootloader image instead of an application",
+    )
+    parser.add_argument(
+        "--flash-end",
+        help="exclusive physical internal-flash address; required with --bootloader-image",
+    )
     return parser.parse_args()
 
 
@@ -201,6 +210,81 @@ def validate_application_layout(
         )
 
 
+def validate_bootloader_layout(
+    segments: list[tuple[int, bytes]], flash_end: int, ram_end: int
+) -> None:
+    """Reject a recovery image that can erase a target but cannot safely restore it."""
+    if flash_end not in (0x0008_0000, 0x0010_0000):
+        raise ValueError("Bootloader target flash end is not a supported nRF52 capacity")
+    if not 0x2000_0000 < ram_end <= 0x2004_0000:
+        raise ValueError("Bootloader target SRAM end is invalid for a supported nRF52")
+
+    uicr_start = 0x1000_1000
+    uicr_end = 0x1000_1400
+    for address, data in segments:
+        end = address + len(data)
+        in_flash = 0 <= address < end <= flash_end
+        in_uicr = uicr_start <= address < end <= uicr_end
+        if not (in_flash or in_uicr):
+            raise ValueError(
+                f"Bootloader image writes outside target flash/UICR at "
+                f"0x{address:08X}..0x{end:08X}"
+            )
+
+    mbr_stack, mbr_reset = struct.unpack("<II", _bytes_at(segments, 0, 8))
+    if not 0x2000_0000 < mbr_stack <= ram_end or mbr_stack & 0x7:
+        raise ValueError(f"Invalid MBR stack pointer 0x{mbr_stack:08X}")
+    if mbr_reset & 1 == 0:
+        raise ValueError(f"MBR reset vector 0x{mbr_reset:08X} is not a Thumb entry")
+    mbr_reset_address = mbr_reset & ~1
+    if not any(
+        address <= mbr_reset_address < address + len(data)
+        for address, data in segments
+        if address < flash_end
+    ):
+        raise ValueError(f"MBR reset vector 0x{mbr_reset:08X} points into an image hole")
+
+    bootloader_address = int.from_bytes(
+        _bytes_at(segments, 0x1000_1014, 4), "little"
+    )
+    if bootloader_address & 0xFFF or not 0 < bootloader_address < flash_end:
+        raise ValueError(
+            f"UICR bootloader address 0x{bootloader_address:08X} is invalid"
+        )
+    boot_stack, boot_reset = struct.unpack(
+        "<II", _bytes_at(segments, bootloader_address, 8)
+    )
+    if boot_stack != ram_end or boot_stack & 0x7:
+        raise ValueError(
+            f"Bootloader stack pointer 0x{boot_stack:08X} does not match target "
+            f"SRAM end 0x{ram_end:08X}"
+        )
+    if boot_reset & 1 == 0:
+        raise ValueError(
+            f"Bootloader reset vector 0x{boot_reset:08X} is not a Thumb entry"
+        )
+    boot_reset_address = boot_reset & ~1
+    if not any(
+        address <= boot_reset_address < address + len(data)
+        for address, data in segments
+        if address < flash_end
+    ):
+        raise ValueError(
+            f"Bootloader reset vector 0x{boot_reset:08X} points into an image hole"
+        )
+
+    approtect_address = 0x1000_1208
+    approtect = None
+    for address, data in segments:
+        if address <= approtect_address < address + len(data):
+            approtect = data[approtect_address - address]
+            break
+    if approtect is not None and approtect != 0xFF:
+        raise ValueError(
+            f"Bootloader image writes protected UICR.APPROTECT byte 0x{approtect:02X}"
+        )
+
+
 def build_uf2_blocks(segments: list[tuple[int, bytes]], family_id: int) -> bytes:
     # The Adafruit nRF52 UF2 bootloader expects every block to carry exactly
     # UF2_PAYLOAD_SIZE bytes at a UF2_PAYLOAD_SIZE-aligned target address.
@@ -255,18 +339,33 @@ def main() -> None:
     if not 0 <= family_id <= 0xFFFF_FFFF:
         raise ValueError("UF2 family ID is outside the 32-bit range")
     segments = parse_hex_segments(args.input_hex)
-    layout_values = (args.app_start, args.max_size, args.ram_end)
-    if any(value is not None for value in layout_values) and not all(
-        value is not None for value in layout_values
-    ):
-        raise ValueError("--app-start, --max-size, and --ram-end must be supplied together")
-    if args.app_start is not None:
-        validate_application_layout(
+    if args.bootloader_image:
+        if not args.validate_only or args.output_uf2 is not None:
+            raise ValueError("--bootloader-image requires --validate-only")
+        if args.app_start is not None or args.max_size is not None:
+            raise ValueError("application layout arguments cannot accompany --bootloader-image")
+        if args.flash_end is None or args.ram_end is None:
+            raise ValueError("--flash-end and --ram-end are required for bootloader validation")
+        validate_bootloader_layout(
             segments,
-            int(args.app_start, 0),
-            int(args.max_size, 0),
+            int(args.flash_end, 0),
             int(args.ram_end, 0),
         )
+    else:
+        layout_values = (args.app_start, args.max_size, args.ram_end)
+        if any(value is not None for value in layout_values) and not all(
+            value is not None for value in layout_values
+        ):
+            raise ValueError(
+                "--app-start, --max-size, and --ram-end must be supplied together"
+            )
+        if args.app_start is not None:
+            validate_application_layout(
+                segments,
+                int(args.app_start, 0),
+                int(args.max_size, 0),
+                int(args.ram_end, 0),
+            )
     if not args.validate_only:
         uf2 = build_uf2_blocks(segments, family_id)
         args.output_uf2.write_bytes(uf2)
