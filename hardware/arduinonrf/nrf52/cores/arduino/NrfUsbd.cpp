@@ -262,6 +262,16 @@ static_assert(!validCdcLineCoding(3U, 0U, 8U));
 static_assert(!validCdcLineCoding(0U, 5U, 8U));
 static_assert(!validCdcLineCoding(0U, 0U, 9U));
 
+constexpr bool pluggableControlOutSupported(uint16_t length) {
+    // The current setup() callback carries metadata only; it has no bounded
+    // payload buffer or completion callback. A nonzero OUT data stage must not
+    // be acknowledged until that ownership contract exists.
+    return length == 0U;
+}
+
+static_assert(pluggableControlOutSupported(0U));
+static_assert(!pluggableControlOutSupported(1U));
+
 inline bool servicePortEnabled() {
     return nrfUsbServicePortEnabled();
 }
@@ -2700,7 +2710,8 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
         default:
             {
                 USBSetup setup = {requestType, request, value, index, length};
-                if (PluggableUSB().setup(setup)) {
+                if (pluggableControlOutSupported(length) &&
+                    PluggableUSB().setup(setup)) {
                     sendZeroLengthStatus();
                     return;
                 }
@@ -2725,6 +2736,10 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
     }
 
     const uint8_t interfaceIndex = static_cast<uint8_t>(index & 0xFFU);
+    if (!interfaceExists(interfaceIndex)) {
+        stallControlEndpoint();
+        return;
+    }
     if (interfaceIndex == SERVICE_CONTROL_INTERFACE || (userPortEnabled() && interfaceIndex == USER_CONTROL_INTERFACE)) {
         const bool userCdc = interfaceIndex == USER_CONTROL_INTERFACE;
         NrfUsbLineCoding &lineCoding = userCdc ? userLineCoding_ : lineCoding_;
@@ -2889,7 +2904,8 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                 startControlIn(controlInBuffer_, actualLength);
                 return;
             }
-        } else if (PluggableUSB().setup(setup)) {
+        } else if (pluggableControlOutSupported(length) &&
+                   PluggableUSB().setup(setup)) {
             sendZeroLengthStatus();
             return;
         }
