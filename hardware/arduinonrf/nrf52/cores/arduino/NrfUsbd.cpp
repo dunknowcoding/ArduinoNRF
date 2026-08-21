@@ -948,7 +948,7 @@ void NrfUsbdDriver::poll() {
     const bool controlPlaneIdle =
         ep0InXferPhase_ == Ep0InXferPhase::Idle &&
         pendingControlOut_ == ControlOutTransfer::None;
-    if (attached_ && configured_ && controlPlaneIdle) {
+    if (attached_ && configured_ && !suspended_ && controlPlaneIdle) {
         serviceDataIn(false);
         serviceNotificationIn(false);
         if (userPortEnabled()) {
@@ -985,7 +985,7 @@ void NrfUsbdDriver::irqHandler() {
     const bool controlPlaneIdle =
         ep0InXferPhase_ == Ep0InXferPhase::Idle &&
         pendingControlOut_ == ControlOutTransfer::None;
-    if (attached_ && configured_ && controlPlaneIdle) {
+    if (attached_ && configured_ && !suspended_ && controlPlaneIdle) {
         serviceDataIn(false);
         serviceNotificationIn(false);
         if (userPortEnabled()) {
@@ -1980,7 +1980,7 @@ void NrfUsbdDriver::serviceDataOut(bool userPort, uint32_t received) {
 }
 
 void NrfUsbdDriver::serviceDataIn(bool userPort) {
-    if (ep0InXferPhase_ != Ep0InXferPhase::Idle ||
+    if (suspended_ || ep0InXferPhase_ != Ep0InXferPhase::Idle ||
         pendingControlOut_ != ControlOutTransfer::None) {
         return;
     }
@@ -2029,7 +2029,7 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
 }
 
 void NrfUsbdDriver::serviceNotificationIn(bool userPort) {
-    if (ep0InXferPhase_ != Ep0InXferPhase::Idle ||
+    if (suspended_ || ep0InXferPhase_ != Ep0InXferPhase::Idle ||
         pendingControlOut_ != ControlOutTransfer::None) {
         return;
     }
