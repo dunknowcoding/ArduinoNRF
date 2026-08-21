@@ -2,6 +2,7 @@
 
 #include "NrfUsbd.h"
 #include "NrfSystem.h"
+#include "NrfUsbSerial.h"
 
 NrfServiceSerial SerialService;
 
@@ -40,10 +41,13 @@ size_t NrfServiceSerial::write(uint8_t value) {
 }
 
 int NrfServiceSerial::availableForWrite() {
-    // The driver's service CDC ring buffer holds 256 bytes (NrfUsbdDriver::
-    // RingBufferSize).  Return a non-zero value whenever the USB device is
-    // configured so that Print::write() does not drop bytes.
-    return nrfUsbdDriver().configured() ? 256 : 0;
+    if (!nrfUsbdDriver().configured() || nrfUsbdDriver().suspended()) {
+        return 0;
+    }
+    // One slot distinguishes full from empty in the 256-byte ring.
+    constexpr size_t capacity = NrfUsbSerialBackend::BufferSize - 1U;
+    const size_t pending = nrfUsbdDriver().serviceTxQueued();
+    return pending < capacity ? static_cast<int>(capacity - pending) : 0;
 }
 
 NrfServiceSerial::operator bool() const {

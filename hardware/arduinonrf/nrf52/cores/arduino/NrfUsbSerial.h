@@ -16,7 +16,6 @@ public:
     size_t write(uint8_t value);
     size_t write(const uint8_t *data, size_t length);  // block write (see NrfUsbd)
     bool connected() const;
-    void setConnected(bool connected);
     void setLineCoding(unsigned long baudRate);
     void setLineState(bool dtr, bool rts);
     bool dtr() const;
@@ -29,20 +28,7 @@ public:
     bool usbPeripheralEnabled() const;
 
 private:
-    void pushRx(uint8_t value);
-    bool pushTx(uint8_t value);
-    int popRx();
-
-    unsigned long baudRate_ = 115200UL;
-    bool connected_ = false;
-    bool dtr_ = false;
-    bool rts_ = false;
-    uint8_t rxBuffer_[BufferSize] = {0};
-    uint8_t txBuffer_[BufferSize] = {0};
-    size_t rxHead_ = 0;
-    size_t rxTail_ = 0;
-    size_t txHead_ = 0;
-    size_t txTail_ = 0;
+    static unsigned long normalizedBaud(unsigned long baudRate);
 };
 
 NrfUsbSerialBackend &nrfUsbSerialBackend();

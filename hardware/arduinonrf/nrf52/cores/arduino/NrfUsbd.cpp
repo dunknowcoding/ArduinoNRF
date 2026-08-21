@@ -2063,6 +2063,7 @@ void NrfUsbdDriver::serviceSetup() {
     pendingControlOut_ = ControlOutTransfer::None;
     controlOutExpected_ = 0U;
     controlOutLength_ = 0U;
+    pendingAddressValid_ = false;
     resetEp0InXferState();
 
     const uint8_t requestType = static_cast<uint8_t>(reg32(USBD_BASE, BMREQUESTTYPE) & 0xFFUL);
@@ -2915,6 +2916,14 @@ int NrfUsbdDriver::userRingPeekRx() const {
 
 size_t NrfUsbdDriver::userTxPending() const {
     return ringPending(userTxHead_, userTxTail_);
+}
+
+size_t NrfUsbdDriver::serviceTxQueued() const {
+    return txPending();
+}
+
+size_t NrfUsbdDriver::userTxQueued() const {
+    return userTxPending();
 }
 
 extern "C" void USBD_IRQHandler(void) {

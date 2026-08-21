@@ -277,10 +277,18 @@ int HardwareSerial::availableForWrite() {
 
     if (usbBacked_) {
         if (nrfSerialUsbUsesServicePortOnly()) {
-            return nrfUsbdDriver().configured() ? 256 : 0;
+            if (!nrfUsbdDriver().configured() || nrfUsbdDriver().suspended()) {
+                return 0;
+            }
+            const size_t capacity = NrfUsbSerialBackend::BufferSize - 1U;
+            const size_t pending = nrfUsbdDriver().serviceTxQueued();
+            return pending < capacity ? static_cast<int>(capacity - pending) : 0;
+        }
+        if (!nrfUsbdDriver().configured() || nrfUsbdDriver().suspended()) {
+            return 0;
         }
         const size_t pending = nrfUsbSerialBackend().txPending();
-        const size_t bufferLimit = NrfUsbSerialBackend::BufferSize;
+        const size_t bufferLimit = NrfUsbSerialBackend::BufferSize - 1U;
         if (pending < bufferLimit) {
             return static_cast<int>(bufferLimit - pending);
         }

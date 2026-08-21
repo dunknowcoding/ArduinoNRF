@@ -3,7 +3,6 @@
 #include "NrfBoard.h"
 #include "NrfSystem.h"
 #include "NrfUsbd.h"
-#include "NrfUsbSerial.h"
 
 USBDeviceClass USBDevice;
 
@@ -26,7 +25,6 @@ void USBDeviceClass::detach() {
         return;
     }
     nrfUsbdDriver().detach();
-    nrfUsbSerialBackend().setConnected(false);
 }
 
 void USBDeviceClass::poll() {

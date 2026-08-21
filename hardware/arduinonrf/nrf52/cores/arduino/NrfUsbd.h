@@ -89,6 +89,8 @@ public:
     // next packet, which is what capped CDC TX throughput. @return bytes accepted.
     size_t userWrite(const uint8_t *data, size_t length);
     void userFlush();
+    size_t serviceTxQueued() const;
+    size_t userTxQueued() const;
     void injectRx(const uint8_t *data, size_t length);
     void setLineCoding(const NrfUsbLineCoding &lineCoding);
     void setLineState(bool dtr, bool rts);
