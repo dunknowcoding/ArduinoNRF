@@ -2011,8 +2011,6 @@ function Resolve-AdafruitNrfutil {
         return $null
     }
 
-    $allowConda = ($env:NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL -eq '1')
-
     # Prefer the first non-conda hit.
     foreach ($p in $ordered) {
         if (-not (Test-NiusResolvedPathUnderConda $p)) {
@@ -2020,13 +2018,11 @@ function Resolve-AdafruitNrfutil {
         }
     }
 
-    # Only conda installs available.
-    if ($allowConda) {
-        Write-NiusDetail '[nius] NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL=1: using a Conda adafruit-nrfutil (nordicsemi version may mismatch).' -ForegroundColor Yellow
-        return $ordered[0]
-    }
-    Write-NiusDetail '[nius] Only a Conda adafruit-nrfutil was found; serial DFU may fail on a version mismatch. Prefer `pip install adafruit-nrfutil` with python.org Python, or set NIUS_ADAFRUIT_NRFUTIL_EXE.' -ForegroundColor Yellow
-    return $ordered[0]
+    # Only Conda installs are available. Do not silently accept a potentially
+    # incompatible protocol implementation. An explicit executable path remains
+    # available for operators who have independently verified another build.
+    Write-NiusDetail '[nius] Only a Conda adafruit-nrfutil was found; refusing an implicit protocol-tool substitution. Use the bundled tool or set NIUS_ADAFRUIT_NRFUTIL_EXE to an independently verified executable.' -ForegroundColor Yellow
+    return $null
 }
 
 function Stop-NiusLingeringAdafruitNrfutil {
@@ -2034,14 +2030,6 @@ function Stop-NiusLingeringAdafruitNrfutil {
         [ValidateSet('touch', 'dfu')]
         [string]$Phase = 'touch'
     )
-
-    if ($Phase -eq 'touch' -and $env:NIUS_SKIP_STOP_NRFUTIL_BEFORE_TOUCH -eq '1') {
-        return
-    }
-
-    if ($Phase -eq 'dfu' -and $env:NIUS_SKIP_STOP_NRFUTIL_BEFORE_DFU -eq '1') {
-        return
-    }
 
     # Never kill by image name or infer ownership from a missing parent. Another
     # IDE/tool may legitimately have launched the process, and a parent can exit
@@ -2126,31 +2114,26 @@ function Stop-NiusProcessTree {
 
 function Resolve-AdafruitInitialSdReq {
     param(
-        [string]$SdReq,
-        [string]$DevType = '0x0052'
+        [string]$SdReq
     )
 
-    $resolvedSdReq = $SdReq
-    $normalizedSdReq = ''
-    if (-not [string]::IsNullOrWhiteSpace($resolvedSdReq)) {
-        $normalizedSdReq = $resolvedSdReq.Trim().ToUpperInvariant()
+    if ([string]::IsNullOrWhiteSpace($SdReq)) {
+        throw 'The selected serial-DFU layout does not declare an sd-req; refusing to infer a SoftDevice generation.'
     }
 
-    if ($DevType -eq '0x0052' -and [string]::IsNullOrWhiteSpace($resolvedSdReq)) {
-        # Start with the reference S140 6.1.1 FWID used by mature Adafruit
-        # nRF52840 serial DFU paths only when the board did not provide an
-        # explicit sd-req. Preserve a configured 0xFFFE wildcard as-is.
-        return '0x00B6'
+    $normalizedSdReq = $SdReq.Trim().ToUpperInvariant()
+    if ($normalizedSdReq -notmatch '^0X[0-9A-F]{1,4}$') {
+        throw ('Invalid serial-DFU sd-req: {0}' -f $SdReq)
     }
-
-    return $resolvedSdReq
+    return ('0x{0}' -f $normalizedSdReq.Substring(2))
 }
 
 function Get-NiusAdafruitSerialReadyMilliseconds {
     $milliseconds = 12000
     if (-not [string]::IsNullOrWhiteSpace($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS)) {
         $configured = -1
-        if ([int]::TryParse($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS, [ref]$configured) -and $configured -gt 0) {
+        if ([int]::TryParse($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS, [ref]$configured) -and
+            $configured -ge 1000 -and $configured -le 120000) {
             $milliseconds = $configured
         }
     }
@@ -2174,7 +2157,7 @@ function Invoke-AdafruitDfuDeploy {
     }
     $tool = Resolve-AdafruitNrfutil
     if (-not $tool) {
-        throw 'adafruit-nrfutil was not found. Install with non-Conda Python (`pip install adafruit-nrfutil`), set NIUS_ADAFRUIT_NRFUTIL_EXE to the Scripts\adafruit-nrfutil.exe path, or temporarily NIUS_ALLOW_ANACONDA_ADAFRUIT_NRFUTIL=1 if you must use Conda. UF2 drag-drop is also supported via the UF2 bootloader menu entries.'
+        throw 'adafruit-nrfutil was not found. Install with non-Conda Python (`pip install adafruit-nrfutil`) or set NIUS_ADAFRUIT_NRFUTIL_EXE to an independently verified executable. UF2 drag-drop is also supported via the UF2 bootloader menu entries.'
     }
     Write-NiusDetail ('[nius] Resolved adafruit-nrfutil: {0}' -f $tool) -ForegroundColor DarkGray
 
@@ -2188,7 +2171,7 @@ function Invoke-AdafruitDfuDeploy {
         ('arduinonrf-dfu-{0}.zip' -f ([Guid]::NewGuid().ToString('n')))
 
     try {
-        $resolvedSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq -DevType $DevType
+        $resolvedSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq
 
         $genpkgArgs = @('dfu', 'genpkg', '--dev-type', $DevType)
         if (-not [string]::IsNullOrWhiteSpace($resolvedSdReq)) {
@@ -3279,7 +3262,8 @@ function Touch-SerialPort1200 {
         $envMs = $env:NIUS_TOUCH_SERIAL_OPEN_TIMEOUT_MS
         if (-not [string]::IsNullOrWhiteSpace($envMs)) {
             $parsedOpen = -1
-            if ([int]::TryParse($envMs, [ref]$parsedOpen) -and $parsedOpen -gt 0) {
+            if ([int]::TryParse($envMs, [ref]$parsedOpen) -and
+                $parsedOpen -ge 500 -and $parsedOpen -le 10000) {
                 $openTimeoutSec = [int][Math]::Ceiling($parsedOpen / 1000.0)
                 if ($openTimeoutSec -lt 1) {
                     $openTimeoutSec = 1
@@ -3475,7 +3459,8 @@ public static class NiusNativeSerialTouch {
     $pulseBudgetOverride = $env:NIUS_TOUCH_PULSE_BUDGET_MS
     if (-not [string]::IsNullOrWhiteSpace($pulseBudgetOverride)) {
         $parsedBudget = -1
-        if ([int]::TryParse($pulseBudgetOverride, [ref]$parsedBudget) -and $parsedBudget -ge 2000) {
+        if ([int]::TryParse($pulseBudgetOverride, [ref]$parsedBudget) -and
+            $parsedBudget -ge 2000 -and $parsedBudget -le 10000) {
             $pulseBudgetMs = $parsedBudget
         }
     }
@@ -3563,7 +3548,7 @@ function Invoke-Touch1200Transition {
     $o = $env:NIUS_TOUCH_TRANSITION_TIMEOUT_MS
     if (-not [string]::IsNullOrWhiteSpace($o)) {
         $tt = -1
-        if ([int]::TryParse($o, [ref]$tt) -and $tt -ge 800) { $perModeTimeoutMs = $tt }
+        if ([int]::TryParse($o, [ref]$tt) -and $tt -ge 800 -and $tt -le 15000) { $perModeTimeoutMs = $tt }
     }
 
     # The cached serial inventory was populated by pre-touch port resolution on
@@ -3714,13 +3699,12 @@ function Get-NiusPostTouchSleepMilliseconds {
     # Buttonless boards: give USB detach / bootloader enumerate before nrfutil grabs COM.
     # NOTE: this is now used as the *ceiling* of the adaptive settle wait
     # (Wait-NiusBootloaderPortSettled), not a blind fixed sleep, so a fast
-    # board no longer pays the full window. Set NIUS_FORCE_FIXED_POST_TOUCH_SLEEP=1
-    # to fall back to a blind Start-Sleep of this duration.
+    # board no longer pays the full window.
     $ms = 3800
     $o = $env:NIUS_POST_TOUCH_SLEEP_MS
     if (-not [string]::IsNullOrWhiteSpace($o)) {
         $p = -1
-        if ([int]::TryParse($o, [ref]$p) -and $p -ge 0) {
+        if ([int]::TryParse($o, [ref]$p) -and $p -ge 500 -and $p -le 15000) {
             $ms = $p
         }
     }
@@ -4622,9 +4606,6 @@ try {
                 # the whole settle ceiling. The exact bootloader resolver below
                 # remaps by composite identity and waits on the resulting port.
                 Write-NiusDetail '[nius] Runtime CDC detached; resolving the bootloader control COM directly.' -ForegroundColor DarkGray
-            }
-            elseif ($env:NIUS_FORCE_FIXED_POST_TOUCH_SLEEP -eq '1') {
-                Start-Sleep -Milliseconds (Get-NiusPostTouchSleepMilliseconds)
             }
             else {
                 # Adaptive settle: proceed the moment the bootloader COM is

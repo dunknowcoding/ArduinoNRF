@@ -136,6 +136,9 @@ choices because it has no native USB upload path in this package.
   invocation. A timeout, cable loss, protocol failure, or interrupted write is
   terminal and keeps its original error; the wrapper never infers that a
   second single-bank transfer or a wildcard SoftDevice requirement is safe.
+- Each serial-DFU board/layout recipe must declare its exact `sd-req`. A missing
+  or malformed value is terminal; the uploader does not infer a SoftDevice
+  generation from the MCU type.
 - That sole transfer is launched only after the exact bootloader maintenance
   CDC is proven in the selected physical scope. An unconfirmed touch and an
   unresolved bootloader port are terminal; the old runtime COM is never used as
@@ -163,6 +166,9 @@ choices because it has no native USB upload path in this package.
 - Pre-existing `adafruit-nrfutil` processes are never killed or treated as owned
   merely because their parent exited. The wrapper fails before touching USB; timeout
   cleanup may terminate only the exact child process tree launched by this upload.
+- The Boards Manager tool is preferred. An automatically discovered Conda copy is
+  rejected, avoiding an implicit protocol-implementation substitution. A separately
+  verified tool can still be selected by an explicit executable path.
 - Every Windows child tool is launched with CRT-correct argument escaping, including
   empty arguments, embedded quotes, and paths whose final character is a backslash.
   Verbose stdout and stderr are drained concurrently so a full pipe cannot freeze an
@@ -179,6 +185,9 @@ choices because it has no native USB upload path in this package.
   serialization lock before any target-visible action. Their wait intervals may
   be tuned only within 0-10 seconds and 0-600 seconds respectively; lock creation
   or acquisition failure is terminal before USB is touched.
+- Touch/open/transition/settle tuning is finite and range-checked. The uploader
+  always uses identity-aware adaptive settlement; a caller cannot replace it with
+  an unbounded or blind fixed sleep.
 - Generated serial-DFU ZIP and UF2 files are unique, invocation-owned temporary
   artifacts and are removed on both success and failure. The wrapper never reuses a
   package left by an earlier incomplete upload.
