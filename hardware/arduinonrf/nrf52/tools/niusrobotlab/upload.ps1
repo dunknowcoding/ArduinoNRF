@@ -424,6 +424,88 @@ function ConvertTo-ProcessArguments {
     }) -join ' ')
 }
 
+function ConvertTo-OpenOcdTclWord {
+    param(
+        [AllowEmptyString()]
+        [string]$Value = ''
+    )
+
+    # This value is embedded inside OpenOCD's Tcl `-c` program, so Windows
+    # process argument quoting is not sufficient. Reject control characters and
+    # suppress Tcl variable/command/backslash substitution inside a quoted word.
+    if ($Value -match '[\x00-\x1F\x7F]') {
+        throw 'OpenOCD command values must not contain control characters.'
+    }
+    $escaped = $Value.Replace('\', '\\')
+    $escaped = $escaped.Replace('"', '\"')
+    $escaped = $escaped.Replace('$', '\$')
+    $escaped = $escaped.Replace('[', '\[')
+    $escaped = $escaped.Replace(']', '\]')
+    return ('"{0}"' -f $escaped)
+}
+
+function Resolve-NiusOptionalProbeIdentity {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$EnvironmentName
+    )
+
+    $value = [Environment]::GetEnvironmentVariable($EnvironmentName)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return ''
+    }
+    $value = $value.Trim()
+    if ($value.Length -gt 128 -or $value -match '[\x00-\x1F\x7F]') {
+        throw ('{0} must be a probe serial/nickname of at most 128 characters without control characters.' -f $EnvironmentName)
+    }
+    return $value
+}
+
+function New-NiusJLinkCommandArguments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Device,
+        [Parameter(Mandatory = $true)]
+        [string]$CommandFile
+    )
+
+    $arguments = @(
+        '-Device', $Device,
+        '-If', 'SWD',
+        '-Speed', '1000',
+        '-AutoConnect', '1',
+        '-ExitOnError', '1',
+        '-NoGui', '1'
+    )
+    $probeIdentity = Resolve-NiusOptionalProbeIdentity -EnvironmentName 'NIUS_JLINK_SERIAL'
+    if (-not [string]::IsNullOrWhiteSpace($probeIdentity)) {
+        $arguments += @('-USB', $probeIdentity)
+    }
+    $arguments += @('-CommanderScript', $CommandFile)
+    return $arguments
+}
+
+function New-NiusOpenOcdArguments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ScriptRootPath,
+        [Parameter(Mandatory = $true)]
+        [string]$ConfigPath,
+        [Parameter(Mandatory = $true)]
+        [string]$Command
+    )
+
+    $arguments = @('-s', $ScriptRootPath, '-f', $ConfigPath)
+    $probeIdentity = Resolve-NiusOptionalProbeIdentity -EnvironmentName 'NIUS_CMSIS_DAP_SERIAL'
+    if (-not [string]::IsNullOrWhiteSpace($probeIdentity)) {
+        # Must execute before `init`, otherwise OpenOCD may already have opened
+        # the first matching adapter on a multi-probe host.
+        $arguments += @('-c', ('adapter serial {0}' -f (ConvertTo-OpenOcdTclWord -Value $probeIdentity)))
+    }
+    $arguments += @('-c', $Command)
+    return $arguments
+}
+
 function Assert-ToolExists {
     param([string]$Path)
 
@@ -2608,12 +2690,15 @@ function Invoke-JLinkDeploy {
         $Device = 'NRF52840_XXAA'
     }
 
+    $resolvedHex = (Resolve-Path -LiteralPath $HexPath).Path
+    if ($resolvedHex -match '[\x00-\x1F\x7F"]') {
+        throw 'J-Link firmware paths must not contain quotes or control characters.'
+    }
     $scriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ('nius-jlink-{0}.jlink' -f ([Guid]::NewGuid().ToString('n')))
-    $escapedHex = $HexPath.Replace('"', '\"')
     @(
         'r',
         'h',
-        ('loadfile "{0}"' -f $escapedHex),
+        ('loadfile "{0}"' -f $resolvedHex),
         'r',
         'g',
         'q'
@@ -2623,12 +2708,8 @@ function Invoke-JLinkDeploy {
         Write-Stage -Percent 0 -Label 'Connecting' -Detail 'SEGGER J-Link SWD'
         Write-NiusDetail ('[nius] Resolved SEGGER J-Link: {0}' -f $JLinkExe) -ForegroundColor DarkGray
         Write-NiusDetail ('[nius] J-Link device: {0}' -f $Device) -ForegroundColor DarkGray
-        Invoke-CommandChecked -Exe $JLinkExe -Arguments @(
-            '-Device', $Device,
-            '-If', 'SWD',
-            '-Speed', '1000',
-            '-CommanderScript', $scriptPath
-        ) -FailureKind 'jlink' -ProgressPercent 76 -ProgressLabel 'SEGGER J-Link flash transaction active'
+        $jlinkArguments = New-NiusJLinkCommandArguments -Device $Device -CommandFile $scriptPath
+        Invoke-CommandChecked -Exe $JLinkExe -Arguments $jlinkArguments -FailureKind 'jlink' -ProgressPercent 76 -ProgressLabel 'SEGGER J-Link flash transaction active'
         Write-NiusUploadComplete -Note 'SEGGER J-Link SWD upload path'
     }
     finally {
@@ -2709,13 +2790,16 @@ function Invoke-NiusBootloaderDeploy {
         if ([string]::IsNullOrWhiteSpace($Device)) {
             $Device = 'NRF52840_XXAA'
         }
+        $resolvedBootloaderHex = (Resolve-Path -LiteralPath $BootloaderHexPath).Path
+        if ($resolvedBootloaderHex -match '[\x00-\x1F\x7F"]') {
+            throw 'J-Link bootloader paths must not contain quotes or control characters.'
+        }
         $scriptPath = Join-Path ([System.IO.Path]::GetTempPath()) ('nius-jlink-bootloader-{0}.jlink' -f ([Guid]::NewGuid().ToString('n')))
-        $escapedHex = $BootloaderHexPath.Replace('"', '\"')
         @(
             'r',
             'h',
             'erase',
-            ('loadfile "{0}"' -f $escapedHex),
+            ('loadfile "{0}"' -f $resolvedBootloaderHex),
             'r',
             'g',
             'q'
@@ -2724,12 +2808,8 @@ function Invoke-NiusBootloaderDeploy {
         try {
             Write-Stage -Percent 0 -Label 'Connecting' -Detail 'SEGGER J-Link bootloader flash'
             Write-NiusDetail ('[nius] Resolved SEGGER J-Link: {0}' -f $jlinkExe) -ForegroundColor DarkGray
-            Invoke-CommandChecked -Exe $jlinkExe -Arguments @(
-                '-Device', $Device,
-                '-If', 'SWD',
-                '-Speed', '1000',
-                '-CommanderScript', $scriptPath
-            ) -FailureKind 'jlink' -ProgressPercent 76 -ProgressLabel 'SEGGER J-Link bootloader flash active'
+            $jlinkArguments = New-NiusJLinkCommandArguments -Device $Device -CommandFile $scriptPath
+            Invoke-CommandChecked -Exe $jlinkExe -Arguments $jlinkArguments -FailureKind 'jlink' -ProgressPercent 76 -ProgressLabel 'SEGGER J-Link bootloader flash active'
             Write-NiusUploadComplete -Note 'SEGGER J-Link bootloader flash path'
         }
         finally {
@@ -2743,12 +2823,15 @@ function Invoke-NiusBootloaderDeploy {
         Throw-NiusUploadFailure (New-UploadFailure -Kind 'openocd' -ExitCode 1 -Output 'OpenOCD script root/config missing from bootloader recipe.' -Exe $OpenOcdExe)
     }
 
+    $resolvedBootloaderHex = (Resolve-Path -LiteralPath $BootloaderHexPath).Path
+    $openOcdCommand = 'telnet_port disabled; init; halt; nrf52_recover; reset halt; program {0} verify reset; shutdown' -f `
+        (ConvertTo-OpenOcdTclWord -Value $resolvedBootloaderHex)
+    $openOcdArguments = New-NiusOpenOcdArguments `
+        -ScriptRootPath $ScriptRootPath `
+        -ConfigPath $OpenOcdConfig `
+        -Command $openOcdCommand
     Write-Stage -Percent 0 -Label 'Connecting' -Detail 'OpenOCD bootloader flash'
-    Invoke-CommandChecked -Exe $OpenOcdExe -Arguments @(
-        '-s', $ScriptRootPath,
-        '-f', $OpenOcdConfig,
-        '-c', ('telnet_port disabled; init; halt; nrf52_recover; reset halt; program {{{0}}} verify reset; shutdown' -f $BootloaderHexPath)
-    ) -FailureKind 'openocd' -ProgressPercent 76 -ProgressLabel 'OpenOCD bootloader flash active'
+    Invoke-CommandChecked -Exe $OpenOcdExe -Arguments $openOcdArguments -FailureKind 'openocd' -ProgressPercent 76 -ProgressLabel 'OpenOCD bootloader flash active'
     Write-NiusUploadComplete -Note 'OpenOCD bootloader flash path'
 }
 
@@ -5013,7 +5096,14 @@ try {
     Assert-InputArtifact -Path $Hex -Label 'hex'
     Write-Stage -Percent 10 -Label 'Connecting'
     Write-Stage -Percent 42 -Label 'Uploading'
-    Invoke-CommandChecked -Exe $toolPath -Arguments @('-s', $ScriptRoot, '-f', $Config, '-c', ('init; halt; program {{{0}}} verify reset exit' -f $Hex)) -FailureKind 'openocd' -ProgressPercent 76 -ProgressLabel 'SWD flash transaction active'
+    $resolvedHex = (Resolve-Path -LiteralPath $Hex).Path
+    $openOcdCommand = 'init; halt; program {0} verify reset exit' -f `
+        (ConvertTo-OpenOcdTclWord -Value $resolvedHex)
+    $openOcdArguments = New-NiusOpenOcdArguments `
+        -ScriptRootPath $ScriptRoot `
+        -ConfigPath $Config `
+        -Command $openOcdCommand
+    Invoke-CommandChecked -Exe $toolPath -Arguments $openOcdArguments -FailureKind 'openocd' -ProgressPercent 76 -ProgressLabel 'SWD flash transaction active'
     Write-NiusUploadComplete
 }
 catch {

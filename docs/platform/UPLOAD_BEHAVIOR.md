@@ -34,6 +34,13 @@ board's selected `Upload Method` properties. Use **Tools -> Programmer** for
 OpenOCD for locked-target recover. For locked nRF52 parts, the recover/erase
 step is what clears `APPROTECT`; the bootloader HEX is flashed afterward.
 
+J-Link transactions run non-interactively with automatic connection, GUI dialogs
+disabled, and exit-on-error enabled. On a host with more than one probe, set
+`NIUS_JLINK_SERIAL` to the exact SEGGER serial number or nickname. For CMSIS-DAP,
+set `NIUS_CMSIS_DAP_SERIAL` to the exact adapter serial. These selectors are passed
+before target initialization; they are not inferred from a board COM port. Firmware
+paths embedded in OpenOCD commands are Tcl-escaped before any probe is opened.
+
 Arduino IDE 2 SWD Debug follows the selected `Upload Method`: CMSIS-DAP keeps
 the OpenOCD server, while the J-Link upload method switches the debug server
 metadata to Arduino IDE's `jlink` server type.
