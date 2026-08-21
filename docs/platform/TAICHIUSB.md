@@ -28,6 +28,10 @@ the request pending; a later insertion restarts it even when application code
 never yields. TaichiUSB does not claim PendSV or POWER/CLOCK IRQ ownership to
 obtain that guarantee. SysTick runs below the USBD IRQ, observes VBUS at 1 kHz,
 and retires a disconnected controller without preempting an active USB handler.
+Because the higher-priority USBD IRQ could otherwise preempt that lower-priority
+tick while both own lifecycle/touch state, the tick masks only USBD around its
+bounded shared-state step. Startup uses a core interrupt guard for the final
+IRQ-enable/pull-up commit.
 The pull-up and controller lifecycle use the nRF POWER block's real
 `USBREGSTATUS.VBUSDETECT`; board profiles cannot substitute an assumed VBUS
 level, so battery-only execution cannot expose a stale USB session.

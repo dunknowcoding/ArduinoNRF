@@ -1558,9 +1558,17 @@ void NrfUsbdDriver::serviceTick() {
     // bounded state-machine step per tick so cable insertion recovers even
     // while application code continuously occupies the foreground.
     if (!enabled_) {
+        // SysTick runs below USBD. Keep the final startup step atomic when it
+        // enables the higher-priority IRQ; otherwise that IRQ could preempt
+        // before startupPhase_/startupServicing_ and pull-up state are committed.
+        CoreInterruptLock lock;
         serviceStartup();
         return;
     }
+    // A higher-priority USBD IRQ can preempt SysTick. Mask it while this tick
+    // retires VBUS state or advances touch/detach timers; the event remains
+    // pending and runs immediately after the shared state is consistent.
+    UsbdIrqLock lock;
     // The nRF POWER block owns the VBUS edge, but claiming POWER_CLOCK IRQ
     // would collide with radio/clock stacks. SysTick is explicitly lower
     // priority than USBD, so this 1 kHz observation cannot preempt the USB ISR
