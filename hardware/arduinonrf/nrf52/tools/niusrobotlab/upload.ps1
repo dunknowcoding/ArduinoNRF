@@ -2206,6 +2206,7 @@ function Invoke-CommandChecked {
     $process.StartInfo = $psi
     [void]$process.Start()
 
+    try {
     $tick = 0
     $timedOut = $false
     $timedOutIdle = $false
@@ -2560,6 +2561,28 @@ function Invoke-CommandChecked {
     if ($process.ExitCode -ne 0 -or $textSignaledFailure) {
         $reportedExitCode = if ($process.ExitCode -ne 0) { $process.ExitCode } else { 1 }
         Throw-NiusUploadFailure (New-UploadFailure -Kind $FailureKind -ExitCode $reportedExitCode -Output $output -Exe $Exe)
+    }
+    }
+    finally {
+        # Cancellation or an unexpected host exception must not leave this
+        # invocation's child tree holding a serial/probe endpoint. Normal and
+        # diagnosed failure exits have already reaped the child, so this is a
+        # no-op for them and remains scoped to the exact PID we launched.
+        try {
+            if (-not $process.HasExited) {
+                Stop-NiusProcessTree -RootPid $process.Id
+            }
+        }
+        catch {
+        }
+        try {
+            if (-not $process.HasExited) {
+                $null = $process.WaitForExit(2000)
+            }
+        }
+        catch {
+        }
+        try { $process.Dispose() } catch { }
     }
 }
 

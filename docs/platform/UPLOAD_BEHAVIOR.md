@@ -195,7 +195,10 @@ choices because it has no native USB upload path in this package.
   serial DFU idle 1-120 seconds, OpenOCD/J-Link 1-600 seconds, and local helpers
   1-300 seconds. Zero, negative, malformed, and out-of-range values are ignored;
   no setting disables a deadline. Timeout cleanup remains limited to the exact
-  child tree launched by the current upload.
+  child tree launched by the current upload. The same PID-scoped cleanup runs
+  from the command's `finally` boundary on cancellation or an unexpected host
+  exception, so those exits cannot strand a launched helper on a COM/probe
+  endpoint.
 - Windows always takes both a selected-target upload lock and a host-wide DFU
   serialization lock before any target-visible action. Their wait intervals may
   be tuned only within 0-10 seconds and 0-600 seconds respectively; lock creation
