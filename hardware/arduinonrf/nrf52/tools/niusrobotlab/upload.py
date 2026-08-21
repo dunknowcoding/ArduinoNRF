@@ -233,6 +233,22 @@ def advance_runtime_stability(ready: bool, now: float, ready_since, stable_s: fl
     return started, now - started >= stable_s
 
 
+def runtime_endpoint_ready(candidates) -> bool:
+    """Require the maintenance CDC when interface metadata is available.
+
+    Some hosts omit bInterfaceNumber from their registry view; in that case an
+    identity-scoped runtime tty is the strongest available evidence. If the host
+    does expose interface numbers, however, a user CDC alone must not be mistaken
+    for a complete upload/maintenance path.
+    """
+    if not candidates:
+        return False
+    known_interfaces = [identity[4] for identity in candidates if identity[4] is not None]
+    if not known_interfaces:
+        return True
+    return known_interfaces.count(0) == 1
+
+
 def resolve_service_serial_port(
     port: str,
     runtime_vid: int,
@@ -343,18 +359,14 @@ def wait_for_runtime(
                 if identity and identity[0] == runtime_vid and identity[1] == runtime_pid:
                     if matches_target_scope(identity, serial, stable_id):
                         candidates.append(identity)
-            service = [d for d in candidates if d[4] == 0]
-            if len(service) == 1 or ((bool(serial) or bool(stable_id)) and bool(candidates)):
-                ready = True
+            ready = runtime_endpoint_ready(candidates)
         elif sys.platform == "darwin":
             candidates = [
                 d for d in mac_serial_devices()
                 if d[0] == runtime_vid and d[1] == runtime_pid
                 and matches_target_scope(d, serial, stable_id)
             ]
-            service = [d for d in candidates if d[4] == 0]
-            if len(service) == 1 or ((bool(serial) or bool(stable_id)) and bool(candidates)):
-                ready = True
+            ready = runtime_endpoint_ready(candidates)
         ready_since, stable = advance_runtime_stability(
             ready, time.monotonic(), ready_since, stable_s
         )
@@ -377,6 +389,17 @@ def main() -> int:
         assert not matches_target_scope(peer, "bootloader", "/sys/devices/usb1/1-2")
         assert matches_target_scope(changed_serial, "runtime", "")
         assert not matches_target_scope(changed_serial, "peer", "")
+        assert runtime_endpoint_ready([changed_serial])
+        assert runtime_endpoint_ready([
+            (0x239A, 0x0001, "runtime", "/dev/ttyACM1", None, "scope")
+        ])
+        assert not runtime_endpoint_ready([
+            (0x239A, 0x0001, "runtime", "/dev/ttyACM2", 2, "scope")
+        ])
+        assert not runtime_endpoint_ready([
+            (0x239A, 0x0001, "runtime", "/dev/ttyACM1", 0, "scope"),
+            (0x239A, 0x0001, "runtime", "/dev/ttyACM2", 0, "scope"),
+        ])
         since, stable = advance_runtime_stability(True, 1.0, None, 0.3)
         assert since == 1.0 and not stable
         since, stable = advance_runtime_stability(False, 1.2, since, 0.3)

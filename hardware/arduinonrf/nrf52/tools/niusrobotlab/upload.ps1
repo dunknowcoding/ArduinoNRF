@@ -749,9 +749,10 @@ function Resolve-NiusLayoutGuardUf2Summary {
     }
 
     Write-NiusDetail ('[nius] layout guard: waiting for scoped UF2 on {0} after extra 1200 bps touch...' -f $PortName) -ForegroundColor DarkGray
-    $null = Touch-SerialPort1200 -PortName $PortName
-    Start-Sleep -Milliseconds 600
-    $null = Touch-SerialPort1200 -PortName $PortName
+    $touch = Touch-SerialPort1200 -PortName $PortName
+    if (-not $touch.Triggered) {
+        return $null
+    }
 
     $retouchDeadline = (Get-Date).AddMilliseconds([Math]::Max($WaitMs, 8000))
     while ((Get-Date) -lt $retouchDeadline) {
@@ -1163,10 +1164,10 @@ function Invoke-NiusRecoverBoardToBootloader {
             ((Get-SerialPortUsbParentCompositeStableId -PortName $PortName -Fresh) -eq $PreferredCompositeStableId.Trim().ToUpperInvariant())
         if ($st.Openable -and $stableIdMatches) {
             Write-NiusDetail ('[nius] misflash recovery: 1200 bps touch on {0} to re-enter bootloader...' -f $PortName) -ForegroundColor Yellow
-            $null = Touch-SerialPort1200 -PortName $PortName
-            Start-Sleep -Milliseconds 800
-            $null = Touch-SerialPort1200 -PortName $PortName
-            $detail = '1200 bps touch sent on service COM'
+            $touch = Touch-SerialPort1200 -PortName $PortName
+            if ($touch.Triggered) {
+                $detail = 'one 1200 bps touch sent on service COM'
+            }
         }
     }
 

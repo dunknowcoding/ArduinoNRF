@@ -141,6 +141,10 @@ choices because it has no native USB upload path in this package.
 - The same runtime identity must remain continuously present for 300 ms by default;
   a transient enumeration followed by an early application/watchdog failure is not
   reported as upload success. `--runtime-stable-ms` may tune this bounded check.
+- When the host exposes CDC interface numbers, post-upload verification requires
+  exactly one maintenance interface zero. A surviving user CDC alone is not accepted
+  as proof that the hands-free upload path was restored. Hosts that omit interface
+  metadata fall back to the exact physical USB topology/serial identity.
 - One host-local advisory lock owns a physical topology/serial identity throughout
   package generation, transfer, and runtime verification. A concurrent uploader
   fails before touching that target, while the OS releases the lock after exit.
