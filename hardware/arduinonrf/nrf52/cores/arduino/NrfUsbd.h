@@ -140,7 +140,7 @@ private:
     void resetEp0InXferState();
     void sendEp0ControlInChunkOrAdvanceStatus();
 
-    void initDescriptors();
+    bool initDescriptors();
     void clearEvents();
     void enableInterrupts();
     void disableInterrupts();

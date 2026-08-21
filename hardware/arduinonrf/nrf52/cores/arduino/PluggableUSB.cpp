@@ -49,6 +49,16 @@ bool PluggableUSB_::plug(PluggableUSBModule *module) {
         lastEndpoint_ = nrfUsbUserPortEnabled() ? 5U : 3U;
     }
 
+    // nRF52840 exposes endpoint numbers 0..7; EP0 and the compiled CDC/DFU
+    // functions already own the prefix represented by lastEndpoint_. Reject
+    // overcommit before linking the module, rather than emitting descriptors
+    // for endpoints the controller can never enable.
+    if ((module->numEndpoints != 0U && module->endpointType == nullptr) ||
+        static_cast<uint16_t>(lastEndpoint_) + module->numEndpoints > 8U ||
+        static_cast<uint16_t>(lastInterface_) + module->numInterfaces > 255U) {
+        return false;
+    }
+
     module->pluggedInterface = lastInterface_;
     module->pluggedEndpoint = lastEndpoint_;
     lastInterface_ = static_cast<uint8_t>(lastInterface_ + module->numInterfaces);
@@ -74,16 +84,47 @@ bool PluggableUSB_::plug(PluggableUSBModule *module) {
 }
 
 int PluggableUSB_::getInterface(uint8_t *interfaceCount) {
+    if (interfaceCount == nullptr) {
+        return 0;
+    }
     int total = 0;
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
-        total += node->getInterface(interfaceCount);
+        node->descriptorAdmitted = false;
+        const size_t beforeLength = descriptorLength_;
+        const uint8_t beforeInterfaces = *interfaceCount;
+        // Descriptor rejection must not leave an interface-number hole for a
+        // later valid module. Rebind each candidate to the next admitted
+        // interface for this complete configuration build.
+        node->pluggedInterface = beforeInterfaces;
+        descriptorOverflowed_ = false;
+        const int reported = node->getInterface(interfaceCount);
+        const size_t written = descriptorLength_ - beforeLength;
+        const uint16_t expectedInterfaces =
+            static_cast<uint16_t>(beforeInterfaces) + node->numInterfaces;
+        const bool valid = reported >= 0 &&
+            (node->numInterfaces == 0U || reported > 0) && !descriptorOverflowed_ &&
+            static_cast<size_t>(reported) == written &&
+            expectedInterfaces <= 255U &&
+            *interfaceCount == static_cast<uint8_t>(expectedInterfaces);
+        if (!valid) {
+            descriptorLength_ = beforeLength;
+            *interfaceCount = beforeInterfaces;
+            continue;
+        }
+        node->descriptorAdmitted = true;
+        total += reported;
     }
+    descriptorOverflowed_ = false;
+    lastInterface_ = *interfaceCount;
     return total;
 }
 
 int PluggableUSB_::getDescriptor(USBSetup &setup) {
     int total = 0;
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
+        if (!node->descriptorAdmitted) {
+            continue;
+        }
         total += node->getDescriptor(setup);
     }
     return total;
@@ -92,6 +133,9 @@ int PluggableUSB_::getDescriptor(USBSetup &setup) {
 int PluggableUSB_::getSetupResponse(USBSetup &setup) {
     int total = 0;
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
+        if (!node->descriptorAdmitted) {
+            continue;
+        }
         total += node->getSetupResponse(setup);
         if (total > 0) {
             return total;
@@ -102,6 +146,9 @@ int PluggableUSB_::getSetupResponse(USBSetup &setup) {
 
 bool PluggableUSB_::setup(USBSetup &setup) {
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
+        if (!node->descriptorAdmitted) {
+            continue;
+        }
         if (node->setup(setup)) {
             return true;
         }
@@ -112,6 +159,9 @@ bool PluggableUSB_::setup(USBSetup &setup) {
 uint8_t PluggableUSB_::getShortName(char *name) {
     uint8_t length = 0U;
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
+        if (!node->descriptorAdmitted) {
+            continue;
+        }
         char *cursor = nullptr;
         if (name != nullptr) {
             cursor = name + length;
@@ -125,6 +175,7 @@ void PluggableUSB_::beginDescriptorBuild(uint8_t *buffer, size_t capacity, size_
     descriptorBuffer_ = buffer;
     descriptorCapacity_ = capacity;
     descriptorLength_ = initialLength;
+    descriptorOverflowed_ = false;
     if (descriptorLength_ > capacity) {
         descriptorLength_ = capacity;
     }
@@ -135,6 +186,7 @@ size_t PluggableUSB_::endDescriptorBuild() {
     descriptorBuffer_ = nullptr;
     descriptorCapacity_ = 0U;
     descriptorLength_ = 0U;
+    descriptorOverflowed_ = false;
     return length;
 }
 
@@ -143,6 +195,7 @@ bool PluggableUSB_::appendDescriptor(const void *data, size_t length) {
         return false;
     }
     if ((descriptorLength_ + length) > descriptorCapacity_) {
+        descriptorOverflowed_ = true;
         return false;
     }
 
@@ -155,7 +208,7 @@ bool PluggableUSB_::appendDescriptor(const void *data, size_t length) {
 }
 
 bool PluggableUSB_::send(PluggableUSBModule *module, const void *data, size_t length) {
-    if (module == nullptr) {
+    if (module == nullptr || !module->descriptorAdmitted) {
         return false;
     }
     return nrfUsbdDriver().sendInPacket(module->pluggedEndpoint, data, length);
@@ -163,6 +216,9 @@ bool PluggableUSB_::send(PluggableUSBModule *module, const void *data, size_t le
 
 void PluggableUSB_::endpointInComplete(uint8_t endpoint) {
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
+        if (!node->descriptorAdmitted) {
+            continue;
+        }
         const uint8_t firstEndpoint = node->pluggedEndpoint;
         const uint8_t lastEndpoint = static_cast<uint8_t>(firstEndpoint + node->numEndpoints);
         if (endpoint >= firstEndpoint && endpoint < lastEndpoint) {

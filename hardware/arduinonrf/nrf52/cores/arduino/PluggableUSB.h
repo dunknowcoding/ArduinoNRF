@@ -35,6 +35,10 @@ public:
     uint8_t numEndpoints = 0U;
     uint8_t numInterfaces = 0U;
     const uint8_t *endpointType = nullptr;
+    // Set only after one complete, internally consistent descriptor
+    // transaction. A rejected module remains linked for diagnostics but cannot
+    // receive setup/data callbacks or corrupt the base CDC configuration.
+    bool descriptorAdmitted = false;
 };
 
 class PluggableUSB_ {
@@ -61,6 +65,7 @@ private:
     uint8_t *descriptorBuffer_ = nullptr;
     size_t descriptorCapacity_ = 0U;
     size_t descriptorLength_ = 0U;
+    bool descriptorOverflowed_ = false;
 };
 
 PluggableUSB_ &PluggableUSB();

@@ -701,7 +701,14 @@ void NrfUsbdDriver::begin() {
         startupInProgress_ = false;
         return;
     }
-    initDescriptors();
+    if (!initDescriptors()) {
+        // Descriptor construction happens while USBD is still disabled. Keep
+        // the pull-up disconnected rather than exposing a truncated composite
+        // configuration that can poison the host's descriptor cache.
+        startupFaulted_ = true;
+        startupInProgress_ = false;
+        return;
+    }
     diagResetAtUsbdBeginStage(2UL);
 
     // Enabling USBD starts the dedicated USB regulator. OUTPUTRDY must
@@ -1657,7 +1664,7 @@ void NrfUsbdDriver::resetDynamicEndpoints() {
     }
 }
 
-void NrfUsbdDriver::initDescriptors() {
+bool NrfUsbdDriver::initDescriptors() {
     const NrfSystemProfile &profile = nrfSystemProfile();
     const uint8_t deviceDescriptor[] = {
         18U, USB_DESC_DEVICE,
@@ -1676,8 +1683,13 @@ void NrfUsbdDriver::initDescriptors() {
     }
 
     configurationDescriptorLength_ = 0U;
+    bool baseDescriptorValid = true;
     const auto appendDescriptor = [&](const uint8_t *data, size_t length) {
-        for (size_t index = 0; index < length && configurationDescriptorLength_ < sizeof(configurationDescriptor_); ++index) {
+        if (length > (sizeof(configurationDescriptor_) - configurationDescriptorLength_)) {
+            baseDescriptorValid = false;
+            return;
+        }
+        for (size_t index = 0; index < length; ++index) {
             configurationDescriptor_[configurationDescriptorLength_++] = data[index];
         }
     };
@@ -1738,6 +1750,7 @@ void NrfUsbdDriver::initDescriptors() {
     configurationDescriptor_[2] = static_cast<uint8_t>(configurationDescriptorLength_ & 0xFFU);
     configurationDescriptor_[3] = static_cast<uint8_t>((configurationDescriptorLength_ >> 8U) & 0xFFU);
     configurationDescriptor_[4] = interfaceCount;
+    return baseDescriptorValid && configurationDescriptorLength_ >= sizeof(configHeader);
 }
 
 void NrfUsbdDriver::clearEvents() {

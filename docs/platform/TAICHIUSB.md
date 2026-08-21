@@ -64,6 +64,15 @@ host ACK is observed in `EPDATASTATUS`. This prevents control/data overlap,
 premature buffer reuse, and packet loss under simultaneous upload, logging, and
 debug traffic.
 
+Pluggable modules are admitted transactionally. Registration first rejects an
+endpoint/interface allocation beyond the nRF52840 controller limits. During
+descriptor construction, each module must write exactly the byte and interface
+counts it reports without exceeding the composite buffer; otherwise its partial
+descriptor is rolled back, it receives no setup/data callbacks, and the next
+valid module reuses the interface number. An invalid optional module therefore
+cannot truncate the configuration header or prevent the maintenance CDC from
+enumerating.
+
 So debugging rides the *same* enumeration-from-ISR USB core as `Serial` and the
 uploader; there is no second USB implementation. Application `Serial` (user CDC)
 stays separate — don't multiplex sketch `printf` onto the service CDC during a
