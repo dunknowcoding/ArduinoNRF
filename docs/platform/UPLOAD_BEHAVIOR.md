@@ -122,6 +122,9 @@ choices because it has no native USB upload path in this package.
   needed for ordinary use. Enable it explicitly only for a workflow that sends
   USB DFU runtime requests directly.
 - The previous service-port "boot token" fallback (`~NIUSBL!42\r` after arming with line coding `134/8/2/2 + DTR+RTS`) has been removed — the standard 1200 bps touch path is now the single primary trigger.
+- Pre-existing `adafruit-nrfutil` processes are never killed or treated as owned
+  merely because their parent exited. The wrapper fails before touching USB; timeout
+  cleanup may terminate only the exact child process tree launched by this upload.
 
 ## Linux and macOS wrapper behavior
 

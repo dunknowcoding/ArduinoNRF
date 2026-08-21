@@ -1914,35 +1914,21 @@ function Stop-NiusLingeringAdafruitNrfutil {
         return
     }
 
-    # Never kill by image name. Another IDE/tool may legitimately be uploading
-    # a different board, and taskkill /IM used to terminate that transfer. The
-    # host mutex serializes ArduinoNRF uploads; here we may remove only orphaned
-    # nrfutil processes whose parent no longer exists. A live-parent process is
-    # treated as an external owner and fails closed without touching it.
+    # Never kill by image name or infer ownership from a missing parent. Another
+    # IDE/tool may legitimately have launched the process, and a parent can exit
+    # after intentionally handing work to a child. Only Stop-NiusProcessTree may
+    # terminate the exact PID tree started by this uploader. Any pre-existing
+    # nrfutil is an external owner and fails closed without touching it.
     $processes = @(Get-CimInstance Win32_Process -Filter "Name='adafruit-nrfutil.exe'" -ErrorAction SilentlyContinue)
     $lingering = @($processes)
     if ($lingering.Count -eq 0) {
         return
     }
 
-    $allPids = @{}
-    foreach ($proc in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)) {
-        $allPids[[int]$proc.ProcessId] = $true
-    }
-    $active = New-Object 'System.Collections.Generic.List[object]'
-    foreach ($proc in $lingering) {
-        $parentId = [int]$proc.ParentProcessId
-        if ($parentId -gt 0 -and $allPids.ContainsKey($parentId)) {
-            $active.Add($proc)
-            continue
-        }
-        try { Stop-Process -Id ([int]$proc.ProcessId) -Force -ErrorAction Stop } catch {}
-    }
-    if ($active.Count -gt 0) {
-        $owners = ($active | ForEach-Object { 'pid={0}, parent={1}' -f $_.ProcessId, $_.ParentProcessId }) -join '; '
-        throw ('An active adafruit-nrfutil process is owned by another live program ({0}). ArduinoNRF left it untouched; wait for that operation to finish.' -f $owners)
-    }
-    Start-Sleep -Milliseconds 250
+    $owners = ($lingering | ForEach-Object {
+            'pid={0}, parent={1}' -f $_.ProcessId, $_.ParentProcessId
+        }) -join '; '
+    throw ('A pre-existing adafruit-nrfutil process may own a board or serial endpoint ({0}). ArduinoNRF left every process untouched; wait for that operation to finish.' -f $owners)
 }
 
 function Normalize-NiusUsbId {
