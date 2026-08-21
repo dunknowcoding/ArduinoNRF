@@ -224,6 +224,10 @@ constexpr bool configurationRequestAllowed(uint8_t address) {
     return address != 0U;
 }
 
+constexpr bool rxRingCanAcceptPacket(size_t freeBytes, size_t packetBytes) {
+    return packetBytes <= DATA_EP_MAX_PACKET && freeBytes >= packetBytes;
+}
+
 static_assert(suspendedAfterUsbEvent(false, USBD_EVENTCAUSE_SUSPEND_MASK));
 static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_SUSPEND_MASK |
@@ -234,6 +238,9 @@ static_assert(ep0DataDoneMayCommit(false));
 static_assert(!ep0DataDoneMayCommit(true));
 static_assert(!configurationRequestAllowed(0U));
 static_assert(configurationRequestAllowed(1U));
+static_assert(rxRingCanAcceptPacket(0U, 0U));
+static_assert(rxRingCanAcceptPacket(1U, 1U));
+static_assert(!rxRingCanAcceptPacket(63U, 64U));
 constexpr uint32_t USBD_TRACE_MAGIC = 0x55444254UL;
 constexpr uint32_t USBD_DTOGGLE_VALUE_POS = 8UL;
 constexpr uint32_t USBD_DTOGGLE_NOP = 0UL;
@@ -2153,17 +2160,23 @@ void NrfUsbdDriver::drainServiceDataOut() {
     const uint32_t serviceOutBit = 1UL << (EPDATASTATUS_OUT_BASE_BIT + SERVICE_DATA_EP - 1U);
     const uint32_t userOutBit = 1UL << (EPDATASTATUS_OUT_BASE_BIT + USER_DATA_EP - 1U);
     // Preserve USB backpressure. Fetching a packet acknowledges the endpoint;
-    // if the software ring cannot hold the entire packet, the old code still
-    // fetched it and silently dropped the tail. A host burst larger than the
-    // 256-byte ring therefore truncated after a few packets. Leave the status
-    // bit pending (and the endpoint NAKing the next packet) until the sketch has
-    // drained at least one full maximum-size packet of space.
+    // If the software ring cannot hold the entire packet, leave the status bit
+    // pending (and the endpoint NAKing the next packet) until the sketch drains
+    // enough space. SIZE.EPOUT is stable while that packet is buffered, so use
+    // its exact bounded length instead of requiring an unnecessary full 64-byte
+    // slot for a short packet or ZLP.
     const size_t serviceFree = (USBD_RING_BUFFER_SIZE - 1U) - ringPending(rxHead_, rxTail_);
     const size_t userFree = (USBD_RING_BUFFER_SIZE - 1U) - ringPending(userRxHead_, userRxTail_);
-    if ((eds & serviceOutBit) != 0UL && serviceFree >= DATA_EP_MAX_PACKET) {
+    const size_t servicePacket = reg32(USBD_BASE, sizeEpoutOffset(SERVICE_DATA_EP));
+    const size_t userPacket = userPortEnabled()
+        ? reg32(USBD_BASE, sizeEpoutOffset(USER_DATA_EP))
+        : 0U;
+    if ((eds & serviceOutBit) != 0UL &&
+        rxRingCanAcceptPacket(serviceFree, servicePacket)) {
         fetchOutPacket(SERVICE_DATA_EP, false, serviceOutBit);
     }
-    if (userPortEnabled() && (eds & userOutBit) != 0UL && userFree >= DATA_EP_MAX_PACKET) {
+    if (userPortEnabled() && (eds & userOutBit) != 0UL &&
+        rxRingCanAcceptPacket(userFree, userPacket)) {
         fetchOutPacket(USER_DATA_EP, true, userOutBit);
     }
 }

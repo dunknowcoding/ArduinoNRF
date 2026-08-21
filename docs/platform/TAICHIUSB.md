@@ -76,6 +76,9 @@ the peripheral after a completed transfer; IN endpoints remain busy until the
 host ACK is observed in `EPDATASTATUS`. This prevents control/data overlap,
 premature buffer reuse, and packet loss under simultaneous upload, logging, and
 debug traffic.
+Bulk OUT backpressure uses the exact bounded `SIZE.EPOUT` packet length. A short
+packet or zero-length packet is therefore drained as soon as its own bytes fit,
+without waiting for an unnecessary full 64-byte ring slot.
 
 Suspend/resume state is applied before EP0 or data-endpoint events from the same
 interrupt snapshot. While suspended, only USB reset and USB-event wake sources
