@@ -660,6 +660,7 @@ function Resolve-AdafruitBootloaderControlPort {
         return [pscustomobject]@{
             Port = $fallbackPort
             Reason = 'no bootloader remap context'
+            Resolved = $false
         }
     }
 
@@ -679,7 +680,8 @@ function Resolve-AdafruitBootloaderControlPort {
     if ($ports.Count -eq 0) {
         return [pscustomobject]@{
             Port = $fallbackPort
-            Reason = 'no serial inventory'
+            Reason = $(if ($fastSnapshot.Available -and -not [string]::IsNullOrWhiteSpace($PreferredCompositeStableId)) { 'selected board bootloader identity not enumerated' } else { 'no serial inventory' })
+            Resolved = $false
         }
     }
 
@@ -696,19 +698,15 @@ function Resolve-AdafruitBootloaderControlPort {
         return [pscustomobject]@{
             Port = $fallbackPort
             Reason = 'bootloader service CDC not enumerated'
+            Resolved = $false
         }
     }
 
-    $exact = @($candidates | Where-Object {
-        ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $fallbackPortNormalized
-    } | Select-Object -First 1)
-    if ($exact) {
-        return [pscustomobject]@{
-            Port = [string]$exact[0].DeviceID
-            Reason = 'current port already on bootloader service interface'
-        }
-    }
-
+    # A runtime and its bootloader normally use different VID/PID nodes and
+    # may receive different COM numbers.  When the runtime serial identity is
+    # known it is authoritative: never substitute the sole bootloader from a
+    # different attached board merely because the intended one is still
+    # enumerating.
     $preferredStable = $PreferredCompositeStableId.Trim().ToUpperInvariant()
     if (-not [string]::IsNullOrWhiteSpace($preferredStable)) {
         $stableMatches = @($candidates | Where-Object {
@@ -718,7 +716,13 @@ function Resolve-AdafruitBootloaderControlPort {
             return [pscustomobject]@{
                 Port = [string]$stableMatches[0].DeviceID
                 Reason = ('bootloader service CDC matched runtime composite identity {0}' -f $preferredStable)
+                Resolved = $true
             }
+        }
+        return [pscustomobject]@{
+            Port = $fallbackPort
+            Reason = $(if ($stableMatches.Count -gt 1) { 'bootloader service CDC identity is ambiguous' } else { 'selected board bootloader identity not enumerated' })
+            Resolved = $false
         }
     }
 
@@ -731,7 +735,24 @@ function Resolve-AdafruitBootloaderControlPort {
             return [pscustomobject]@{
                 Port = [string]$parentMatches[0].DeviceID
                 Reason = ('bootloader service CDC matched runtime interface parent prefix {0}' -f $normalizedParentPrefix)
+                Resolved = $true
             }
+        }
+        return [pscustomobject]@{
+            Port = $fallbackPort
+            Reason = $(if ($parentMatches.Count -gt 1) { 'bootloader service CDC parent is ambiguous' } else { 'selected board bootloader parent not enumerated' })
+            Resolved = $false
+        }
+    }
+
+    $exact = @($candidates | Where-Object {
+        ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $fallbackPortNormalized
+    } | Select-Object -First 1)
+    if ($exact) {
+        return [pscustomobject]@{
+            Port = [string]$exact[0].DeviceID
+            Reason = 'current port already on bootloader service interface'
+            Resolved = $true
         }
     }
 
@@ -739,12 +760,51 @@ function Resolve-AdafruitBootloaderControlPort {
         return [pscustomobject]@{
             Port = [string]$candidates[0].DeviceID
             Reason = 'single bootloader service CDC candidate'
+            Resolved = $true
         }
     }
 
     return [pscustomobject]@{
         Port = $fallbackPort
         Reason = 'bootloader service CDC ambiguous'
+        Resolved = $false
+    }
+}
+
+function Wait-AdafruitBootloaderControlPort {
+    param(
+        [string]$SelectedPort,
+        [string]$CurrentPort = '',
+        [string]$BootloaderVid = '',
+        [string]$BootloaderPid = '',
+        [string]$PreferredCompositeStableId = '',
+        [string]$InterfaceParentPrefix = '',
+        [ValidateRange(1, 120000)][int]$TimeoutMs = 12000,
+        [ValidateRange(10, 2000)][int]$PollMilliseconds = 100
+    )
+
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    $last = $null
+    do {
+        $last = Resolve-AdafruitBootloaderControlPort `
+            -SelectedPort $SelectedPort `
+            -CurrentPort $CurrentPort `
+            -BootloaderVid $BootloaderVid `
+            -BootloaderPid $BootloaderPid `
+            -PreferredCompositeStableId $PreferredCompositeStableId `
+            -InterfaceParentPrefix $InterfaceParentPrefix `
+            -Fresh
+        if ($last -and $last.Resolved) {
+            return $last
+        }
+        Start-Sleep -Milliseconds $PollMilliseconds
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if ($last) { return $last }
+    return [pscustomobject]@{
+        Port = $(if (-not [string]::IsNullOrWhiteSpace($CurrentPort)) { $CurrentPort } else { $SelectedPort })
+        Reason = 'bootloader service CDC resolution timed out'
+        Resolved = $false
     }
 }
 

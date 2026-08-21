@@ -38,6 +38,14 @@ pipeline. Windows uses `upload.ps1`; Linux and macOS use the stdlib-only
 
 A hardened PowerShell pipeline drives the touch and DFU. Beyond the basics it provides:
 
+- **Runtime-to-bootloader COM remapping by stable USB identity.** Windows may
+  assign different COM numbers to the application and serial-DFU interfaces.
+  The uploader waits for the selected board's bootloader identity, then opens
+  that COM; it will not substitute another attached board just because that is
+  the only bootloader currently visible.
+- **Busy-port failure before mutation.** If another monitor owns the selected
+  runtime/service CDC, upload stops before the 1200-bps request or any flash
+  operation and names the occupied port.
 - A per-port mutex so double-clicking **Upload** can't interleave two flashes.
 - A bridge-yield IPC so an active debug session releases the COM for the upload.
 - Identity-scoped user-to-service CDC resolution; ambiguous sibling or peer mappings fail before touch.

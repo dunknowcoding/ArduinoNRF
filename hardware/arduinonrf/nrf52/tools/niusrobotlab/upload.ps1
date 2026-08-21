@@ -2154,6 +2154,17 @@ function Resolve-AdafruitInitialSdReq {
     return $resolvedSdReq
 }
 
+function Get-NiusAdafruitSerialReadyMilliseconds {
+    $milliseconds = 12000
+    if (-not [string]::IsNullOrWhiteSpace($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS)) {
+        $configured = -1
+        if ([int]::TryParse($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS, [ref]$configured) -and $configured -gt 0) {
+            $milliseconds = $configured
+        }
+    }
+    return $milliseconds
+}
+
 function Invoke-AdafruitDfuDeploy {
     param(
         [string]$HexPath,
@@ -2203,13 +2214,7 @@ function Invoke-AdafruitDfuDeploy {
         Write-NiusTiming 'genpkg-done'
 
         try {
-            $serialReadyMs = 12000
-            if (-not [string]::IsNullOrWhiteSpace($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS)) {
-                $sr = -1
-                if ([int]::TryParse($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS, [ref]$sr) -and $sr -gt 0) {
-                    $serialReadyMs = $sr
-                }
-            }
+            $serialReadyMs = Get-NiusAdafruitSerialReadyMilliseconds
             Wait-SerialPortReady -PortName $Port -Purpose 'Adafruit DFU control port' -TimeoutMs $serialReadyMs
         } catch {
             Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output $_.Exception.Message -Exe $tool)
@@ -3334,6 +3339,8 @@ function Touch-SerialPort1200 {
         return [pscustomobject]@{
             Triggered = $false
             SawResetCycle = $false
+            FailureKind = 'invalid-port'
+            Error = 'serial port is not concrete'
         }
     }
 
@@ -3443,7 +3450,15 @@ public static class NiusNativeSerialTouch {
                 exit 0
             }
             catch {
-                try { [Console]::Error.WriteLine($_.Exception.Message) } catch { }
+                try {
+                    if ($_.Exception -is [ComponentModel.Win32Exception]) {
+                        [Console]::Error.WriteLine(
+                            ('WIN32:{0}:{1}' -f $_.Exception.NativeErrorCode, $_.Exception.Message))
+                    }
+                    else {
+                        [Console]::Error.WriteLine($_.Exception.Message)
+                    }
+                } catch { }
                 exit 1
             }
             finally {
@@ -3490,6 +3505,8 @@ public static class NiusNativeSerialTouch {
             return [pscustomobject]@{
                 Triggered = $true
                 SawResetCycle = $true
+                FailureKind = ''
+                Error = ''
             }
         }
         if (-not $helper.HasExited) {
@@ -3499,10 +3516,13 @@ public static class NiusNativeSerialTouch {
             return [pscustomobject]@{
                 Triggered = $false
                 SawResetCycle = $false
+                FailureKind = 'timeout'
+                Error = 'touch helper timed out while the selected COM remained present'
             }
         }
 
         $recv = ($helper.ExitCode -eq 0)
+        $helperError = ''
         if (-not $recv) {
             try {
                 $helperError = $helper.StandardError.ReadToEnd().Trim()
@@ -3518,6 +3538,8 @@ public static class NiusNativeSerialTouch {
         return [pscustomobject]@{
             Triggered = [bool]$recv
             SawResetCycle = $false
+            FailureKind = $(if (-not $recv -and $helperError -match '(?i)WIN32:5:') { 'busy' } elseif (-not $recv) { 'open-failed' } else { '' })
+            Error = $helperError
         }
     }
 
@@ -3556,6 +3578,9 @@ public static class NiusNativeSerialTouch {
                 }
                 $touchPulse = Invoke-TouchPulse -BaudRate 115200
                 if (-not $touchPulse.Triggered) {
+                    if ($touchPulse.FailureKind -eq 'busy') {
+                        return $touchPulse
+                    }
                     throw '115200 phase failed'
                 }
                 Start-Sleep -Milliseconds 200
@@ -3571,6 +3596,9 @@ public static class NiusNativeSerialTouch {
             }
             $touchPulse = Invoke-TouchPulse -BaudRate 1200
             if (-not $touchPulse.Triggered) {
+                if ($touchPulse.FailureKind -eq 'busy') {
+                    return $touchPulse
+                }
                 throw '1200 phase failed'
             }
             if ($ObservePostTouchResetCycle) {
@@ -3589,6 +3617,8 @@ public static class NiusNativeSerialTouch {
     return [pscustomobject]@{
         Triggered = $false
         SawResetCycle = $false
+        FailureKind = 'touch-failed'
+        Error = $lastError
     }
 }
 
@@ -3655,6 +3685,15 @@ function Invoke-Touch1200Transition {
             -IncludePrepulse115200:$touchMode.IncludePrepulse115200 `
             -ObservePostTouchResetCycle:$sameUsbIdentity
         if (-not $touchAttempt.Triggered) {
+            if ($touchAttempt.FailureKind -eq 'busy') {
+                return [pscustomobject]@{
+                    Triggered = $false
+                    Candidate = $touchMode
+                    Transition = $null
+                    FailureKind = 'busy'
+                    Error = $touchAttempt.Error
+                }
+            }
             # A disappearing USB CDC can leave SerialPort.Dispose blocked even
             # though the DTR touch reached the MCU. Before issuing a duplicate
             # pulse, check the exact board scope for the transition produced by
@@ -3679,6 +3718,8 @@ function Invoke-Touch1200Transition {
                         Triggered = $true
                         Candidate = $touchMode
                         Transition = $lateEvidence
+                        FailureKind = ''
+                        Error = ''
                     }
                 }
                 catch {
@@ -3701,6 +3742,8 @@ function Invoke-Touch1200Transition {
                 Triggered = $true
                 Candidate = $touchMode
                 Transition = $null
+                FailureKind = ''
+                Error = ''
             }
         }
         elseif ($touchAttempt.SawResetCycle) {
@@ -3733,6 +3776,8 @@ function Invoke-Touch1200Transition {
                 Triggered = $true
                 Candidate = $touchMode
                 Transition = $transitionEvidence
+                FailureKind = ''
+                Error = ''
             }
         }
         catch {
@@ -3745,6 +3790,8 @@ function Invoke-Touch1200Transition {
                         Triggered = $false
                         Candidate = $null
                         Transition = $null
+                        FailureKind = 'transition-unconfirmed'
+                        Error = $_.Exception.Message
                     }
                 }
             }
@@ -3758,6 +3805,8 @@ function Invoke-Touch1200Transition {
         Triggered = $false
         Candidate = $null
         Transition = $null
+        FailureKind = 'touch-failed'
+        Error = 'no touch mode produced a scoped bootloader transition'
     }
 }
 
@@ -4687,6 +4736,10 @@ try {
                 }
             }
             else {
+                if ($touchTransitionResult.PSObject.Properties['FailureKind'] -and
+                    $touchTransitionResult.FailureKind -eq 'busy') {
+                    Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output ('Could not open port {0}: access is denied because another process owns the selected runtime/service CDC. No bootloader request or flash operation was attempted. Close only that serial monitor or console and retry.' -f $adafruitControlPort) -Exe $toolPath)
+                }
                 if ($runtimeSharesUploadIdentity -and $BootloaderMode -eq 'adafruit-dfu') {
                     Write-NiusDetail ('[nius] Same-PID 1200 bps touch on {0} produced no host-visible transition; proceeding with direct serial DFU on the same COM.' -f $adafruitControlPort) -ForegroundColor DarkGray
                 }
@@ -4816,20 +4869,23 @@ try {
             $wildcardAttempted = ($normalizedSdReq -eq '0XFFFE') -or ($BootloaderMode -eq 'nordic-dfu')
             $successfulAdafruitTransport = ''
 
-            $bootloaderPortResolution = Resolve-AdafruitBootloaderControlPort `
+            $bootloaderPortResolution = Wait-AdafruitBootloaderControlPort `
                 -SelectedPort $Port `
                 -CurrentPort $adafruitControlPort `
                 -BootloaderVid $UsbVid `
                 -BootloaderPid $UsbPid `
                 -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
                 -InterfaceParentPrefix $adafruitControlPortParentPrefix `
-                -Fresh
-            if ($bootloaderPortResolution -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
+                -TimeoutMs (Get-NiusAdafruitSerialReadyMilliseconds)
+            if ($bootloaderPortResolution -and $bootloaderPortResolution.Resolved -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
                 $resolvedBootloaderPort = $bootloaderPortResolution.Port.Trim()
                 if ($resolvedBootloaderPort.ToUpperInvariant() -ne $adafruitControlPort.Trim().ToUpperInvariant()) {
                     Write-NiusDetail ('[nius] serial DFU bootloader control port remap: using {0} instead of {1} ({2})' -f $resolvedBootloaderPort, $adafruitControlPort, $bootloaderPortResolution.Reason) -ForegroundColor DarkGray
                 }
                 $adafruitControlPort = $resolvedBootloaderPort
+            }
+            elseif ($UseTouch1200 -eq 'true' -and $bootloaderTransitionConfirmed) {
+                Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output ('The selected board entered its bootloader, but its identity-scoped service CDC did not enumerate within the bounded wait: {0}. Refusing to open the old runtime COM or another attached board.' -f $bootloaderPortResolution.Reason) -Exe $toolPath)
             }
 
             # Serial-only bootloaders need no mass-storage interface.  When the
@@ -4876,15 +4932,15 @@ try {
                             -ExpectedModel $Uf2Model `
                             -ExpectedBoardId $Uf2BoardId
                         if ($retouchTriggered) {
-                            $bootloaderPortResolution = Resolve-AdafruitBootloaderControlPort `
+                            $bootloaderPortResolution = Wait-AdafruitBootloaderControlPort `
                                 -SelectedPort $Port `
                                 -CurrentPort $adafruitControlPort `
                                 -BootloaderVid $UsbVid `
                                 -BootloaderPid $UsbPid `
                                 -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
                                 -InterfaceParentPrefix $adafruitControlPortParentPrefix `
-                                -Fresh
-                            if ($bootloaderPortResolution -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
+                                -TimeoutMs (Get-NiusAdafruitSerialReadyMilliseconds)
+                            if ($bootloaderPortResolution -and $bootloaderPortResolution.Resolved -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
                                 $resolvedBootloaderPort = $bootloaderPortResolution.Port.Trim()
                                 if ($resolvedBootloaderPort.ToUpperInvariant() -ne $adafruitControlPort.Trim().ToUpperInvariant()) {
                                     Write-NiusDetail ('[nius] serial DFU bootloader control port remap: using {0} instead of {1} ({2})' -f $resolvedBootloaderPort, $adafruitControlPort, $bootloaderPortResolution.Reason) -ForegroundColor DarkGray
@@ -4964,15 +5020,15 @@ try {
                                 -ExpectedModel $Uf2Model `
                                 -ExpectedBoardId $Uf2BoardId
                         }
-                        $bootloaderPortResolution = Resolve-AdafruitBootloaderControlPort `
+                        $bootloaderPortResolution = Wait-AdafruitBootloaderControlPort `
                             -SelectedPort $Port `
                             -CurrentPort $adafruitControlPort `
                             -BootloaderVid $UsbVid `
                             -BootloaderPid $UsbPid `
                             -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
                             -InterfaceParentPrefix $adafruitControlPortParentPrefix `
-                            -Fresh
-                        if ($bootloaderPortResolution -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
+                            -TimeoutMs (Get-NiusAdafruitSerialReadyMilliseconds)
+                        if ($bootloaderPortResolution -and $bootloaderPortResolution.Resolved -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
                             $resolvedBootloaderPort = $bootloaderPortResolution.Port.Trim()
                             if ($resolvedBootloaderPort.ToUpperInvariant() -ne $adafruitControlPort.Trim().ToUpperInvariant()) {
                                 Write-NiusDetail ('[nius] serial DFU bootloader control port remap: using {0} instead of {1} ({2})' -f $resolvedBootloaderPort, $adafruitControlPort, $bootloaderPortResolution.Reason) -ForegroundColor DarkGray
