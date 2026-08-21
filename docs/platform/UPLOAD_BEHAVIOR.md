@@ -137,6 +137,12 @@ choices because it has no native USB upload path in this package.
   service CDC's 1200-bps touch, so the extra driverless DFU-runtime node is not
   needed for ordinary use. Enable it explicitly only for a workflow that sends
   USB DFU runtime requests directly.
+- A runtime that is powered and attached but not configured no longer reboots
+  itself into the bootloader after an ambient 60-second timeout. Bootloader
+  entry requires an explicit maintenance-CDC 1200-bps/DTR-drop transaction,
+  an admitted DFU detach request, or an external reset/debug action. A sleeping,
+  disconnected, suspended, driver-less, or slow host therefore cannot turn an
+  otherwise healthy application into a different USB identity by elapsed time.
 - The previous service-port "boot token" fallback (`~NIUSBL!42\r` after arming with line coding `134/8/2/2 + DTR+RTS`) has been removed — the standard 1200 bps touch path is now the single primary trigger.
 - Pre-existing `adafruit-nrfutil` processes are never killed or treated as owned
   merely because their parent exited. The wrapper fails before touching USB; timeout

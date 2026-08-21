@@ -113,7 +113,6 @@ constexpr uint32_t AIRCR = 0xE000ED0CUL;
 constexpr uint32_t AIRCR_RESET_KEY = 0x05FA0000UL;
 constexpr uint32_t AIRCR_SYSRESETREQ = 0x4UL;
 extern "C" volatile uint32_t g_nrfDiagCause;
-constexpr uint32_t USBD_DIAG_CAUSE_CONFIG_TIMEOUT = 0xCA5E0001UL;
 constexpr uint32_t USBD_DIAG_CAUSE_POLL_DETACH = 0xCA5E0002UL;
 constexpr uint32_t USBD_DIAG_CAUSE_IRQ_DETACH = 0xCA5E0003UL;
 constexpr uint32_t USBD_DIAG_CAUSE_1200_TOUCH = 0xCA5E1200UL;
@@ -185,11 +184,6 @@ constexpr uint32_t USBD_START_CAPTURE_TIMEOUT_SPINS = 100000UL;
 // stops reading can't wedge the stub forever.
 constexpr uint32_t USBD_STUB_FLUSH_SPINS = 2000000UL;
 constexpr size_t USBD_RING_BUFFER_SIZE = 256U;
-#if defined(NRF_USBD_CONFIG_TIMEOUT_RESET_MS)
-constexpr uint32_t USBD_CONFIG_TIMEOUT_RESET_MS = static_cast<uint32_t>(NRF_USBD_CONFIG_TIMEOUT_RESET_MS);
-#else
-constexpr uint32_t USBD_CONFIG_TIMEOUT_RESET_MS = 0UL;
-#endif
 #if defined(NRF_USBD_1200_RESET_ARM_MS)
 constexpr uint32_t USBD_1200_RESET_ARM_MS = static_cast<uint32_t>(NRF_USBD_1200_RESET_ARM_MS);
 #else
@@ -917,12 +911,6 @@ void NrfUsbdDriver::poll() {
     const bool hasVbus = effectiveVbusDetected();
     enablePullup(attached_ && hasVbus);
     processBusState(hasVbus);
-
-    if (USBD_CONFIG_TIMEOUT_RESET_MS != 0UL && attached_ && hasVbus && !configured_ && configStartMillis_ != 0UL &&
-        (millis() - configStartMillis_) >= USBD_CONFIG_TIMEOUT_RESET_MS) {
-        markResetCause(USBD_DIAG_CAUSE_CONFIG_TIMEOUT);
-        requestBootloaderReset();
-    }
 
     if (attached_ && hasVbus) {
         started_ = true;
