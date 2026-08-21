@@ -211,10 +211,10 @@ constexpr bool readyAfterUsbEvent(bool ready, bool attached, bool hasVbus,
         : ready;
 }
 
-constexpr bool ep0DataDoneMayCommit(bool newerSetupPending) {
+constexpr bool ep0CompletionMayCommit(bool newerSetupPending) {
     // A new SETUP token aborts the older control transfer. Because firmware
-    // must arm the new data stage after reading SETUP, a simultaneously latched
-    // EP0DATADONE can only belong to the aborted request.
+    // must arm the new data/status stage after reading SETUP, any simultaneously
+    // latched EP0DATADONE or ENDEPIN0 belongs to the aborted request.
     return !newerSetupPending;
 }
 
@@ -234,8 +234,8 @@ static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_SUSPEND_MASK |
                                            USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(readyAfterUsbEvent(false, true, true, USBD_EVENTCAUSE_READY_MASK));
 static_assert(!readyAfterUsbEvent(true, true, false, USBD_EVENTCAUSE_RESUME_MASK));
-static_assert(ep0DataDoneMayCommit(false));
-static_assert(!ep0DataDoneMayCommit(true));
+static_assert(ep0CompletionMayCommit(false));
+static_assert(!ep0CompletionMayCommit(true));
 static_assert(!configurationRequestAllowed(0U));
 static_assert(configurationRequestAllowed(1U));
 static_assert(rxRingCanAcceptPacket(0U, 0U));
@@ -1268,9 +1268,17 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         started_ = true;
     }
 
+    const bool ep0SetupPending = reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL;
     if (reg32(USBD_BASE, eventEndEpinOffset(0U)) != 0UL) {
         reg32(USBD_BASE, eventEndEpinOffset(0U)) = 0UL;
-        completePendingAddress();
+        if (ep0CompletionMayCommit(ep0SetupPending)) {
+            completePendingAddress();
+        } else {
+            // ENDEPIN0 may be the stale status completion of an aborted
+            // SET_ADDRESS. The newer SETUP owns EP0 and must not inherit or
+            // commit the previous request's pending address.
+            pendingAddressValid_ = false;
+        }
     }
 
     if (reg32(USBD_BASE, eventEndEpinOffset(SERVICE_NOTIFICATION_EP)) != 0UL) {
@@ -1285,8 +1293,7 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         reg32(USBD_BASE, eventEndEpinOffset(USER_NOTIFICATION_EP)) = 0UL;
     }
 
-    const bool ep0SetupPending = reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL;
-    if (ep0DataDoneMayCommit(ep0SetupPending) &&
+    if (ep0CompletionMayCommit(ep0SetupPending) &&
         reg32(USBD_BASE, EVENTS_EP0DATADONE) != 0UL) {
         reg32(USBD_BASE, EVENTS_EP0DATADONE) = 0UL;
         if (pollTraceEnabled()) {

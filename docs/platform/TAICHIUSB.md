@@ -90,6 +90,12 @@ remain armed; transfer events stay latched and are serviced after resume. This
 prevents an interrupt storm and prevents stale active state from launching new
 EasyDMA work during bus suspend.
 
+A newer EP0 SETUP token is authoritative over co-latched data or status
+completion from the previous request. That includes the IN/status completion
+used by `SET_ADDRESS`: an aborted request cannot commit its stale address before
+the replacement SETUP is serviced. Aborted CDC line-coding payloads likewise
+cannot mutate line state or retain 1200-baud upload authority.
+
 Pluggable modules are admitted transactionally. Registration first rejects an
 endpoint/interface allocation beyond the nRF52840 controller limits. During
 descriptor construction, each module must write exactly the byte and interface
