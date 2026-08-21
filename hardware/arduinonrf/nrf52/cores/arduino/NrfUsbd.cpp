@@ -1478,12 +1478,20 @@ void NrfUsbdDriver::pumpRx() {
 }
 
 bool NrfUsbdDriver::sendInPacket(uint8_t endpoint, const void *data, size_t length) {
-    if (!enabled_ || !attached_ || !configured_ || suspended_ || data == nullptr) {
+    if (!enabled_ || !attached_ || !configured_ || suspended_ ||
+        (data == nullptr && length != 0U)) {
         return false;
     }
     if (endpoint < firstDynamicEndpoint() || endpoint >= USB_MAX_ENDPOINTS) {
         return false;
     }
+    uint8_t endpointAttributes = 0U;
+    if (!endpointDescriptorAttributes(epAddressIn(endpoint), endpointAttributes)) {
+        // A module cannot transmit through an endpoint number it did not
+        // actually admit as IN in the active configuration descriptor.
+        return false;
+    }
+    (void)endpointAttributes;
 
     // Hold the busy test-and-set plus the EasyDMA kick atomic against the ISR,
     // which clears dynamicInBusy_[endpoint] after the host's IN ACK.
@@ -1496,16 +1504,22 @@ bool NrfUsbdDriver::sendInPacket(uint8_t endpoint, const void *data, size_t leng
         return false;
     }
 
-    size_t actualLength = length;
-    if (actualLength > DATA_EP_MAX_PACKET) {
-        actualLength = DATA_EP_MAX_PACKET;
+    if (length > DATA_EP_MAX_PACKET) {
+        // The pluggable API represents one USB packet and returns only a bool;
+        // truncating would falsely report the caller's complete payload sent.
+        return false;
     }
+    const size_t actualLength = length;
     const uint8_t *source = reinterpret_cast<const uint8_t *>(data);
     for (size_t index = 0; index < actualLength; ++index) {
         dynamicInBuffers_[endpoint][index] = source[index];
     }
     dynamicInLengths_[endpoint] = static_cast<uint8_t>(actualLength);
-    reg32(USBD_BASE, EPINEN) |= endpointMask(endpoint);
+    const uint32_t enabledIn = reg32(USBD_BASE, EPINEN);
+    if ((enabledIn & endpointMask(endpoint)) == 0U) {
+        reg32(USBD_BASE, EPINEN) = enabledIn | endpointMask(endpoint);
+        resetEndpointDataState(epAddressIn(endpoint));
+    }
     reg32(USBD_BASE, epinPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(&dynamicInBuffers_[endpoint][0]);
     reg32(USBD_BASE, epinMaxcntOffset(endpoint)) = static_cast<uint32_t>(actualLength);
     if (!triggerEndpointStartTask(taskStartEpinOffset(endpoint))) {
