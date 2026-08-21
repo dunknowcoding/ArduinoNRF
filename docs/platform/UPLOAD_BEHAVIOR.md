@@ -204,6 +204,10 @@ choices because it has no native USB upload path in this package.
   endpoint. Process-tree discovery itself has a two-second CIM operation bound;
   if descendant enumeration is unavailable, cleanup still targets the exact
   launched root PID rather than blocking indefinitely or widening ownership.
+- UF2 disk/volume attribution and post-transition mass-storage problem inspection
+  use the same two-second CIM operation bound. A stalled storage or PnP provider
+  cannot hold upload indefinitely, and missing diagnostic evidence is never
+  converted into target identity or upload success.
 - Windows always takes both a selected-target upload lock and a host-wide DFU
   serialization lock before any target-visible action. Their wait intervals may
   be tuned only within 0-10 seconds and 0-600 seconds respectively; lock creation

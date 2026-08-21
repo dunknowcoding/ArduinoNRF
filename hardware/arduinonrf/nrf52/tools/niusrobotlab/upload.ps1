@@ -698,7 +698,7 @@ function Get-Uf2VolumeCompositeStableId {
 
     if ($partition) {
         try {
-            $diskDrive = Get-CimInstance Win32_DiskDrive -ErrorAction Stop | Where-Object { $_.Index -eq $partition.DiskNumber } | Select-Object -First 1
+            $diskDrive = Get-CimInstance Win32_DiskDrive -OperationTimeoutSec 2 -ErrorAction Stop | Where-Object { $_.Index -eq $partition.DiskNumber } | Select-Object -First 1
             foreach ($candidate in @([string]$diskDrive.PNPDeviceID, [string]$diskDrive.Model, [string]$diskDrive.Caption)) {
                 $stableId = Resolve-Uf2CompositeStableIdToken -Value $candidate
                 if (-not [string]::IsNullOrWhiteSpace($stableId)) {
@@ -732,7 +732,7 @@ function Get-Uf2ProbeSummary {
             $label = if ($volume) {
                 $volume.FileSystemLabel
             } else {
-                $logicalDisk = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='{0}:'" -f $driveLetter) -ErrorAction SilentlyContinue | Select-Object -First 1
+                $logicalDisk = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='{0}:'" -f $driveLetter) -OperationTimeoutSec 2 -ErrorAction SilentlyContinue | Select-Object -First 1
                 if ($logicalDisk) { $logicalDisk.VolumeName } else { $null }
             }
             $summary = [pscustomobject]@{
@@ -794,7 +794,7 @@ function New-Uf2ProbeSummaryFromRoot {
         $volume.FileSystemLabel
     }
     else {
-        $logicalDisk = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='{0}:'" -f $driveLetter) -ErrorAction SilentlyContinue | Select-Object -First 1
+        $logicalDisk = Get-CimInstance Win32_LogicalDisk -Filter ("DeviceID='{0}:'" -f $driveLetter) -OperationTimeoutSec 2 -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($logicalDisk) { $logicalDisk.VolumeName } else { $null }
     }
 
@@ -1533,7 +1533,7 @@ function Get-Uf2MassStorageProblemReports {
     # busy host). ConfigManagerErrorCode is the problem code (0 = OK).
     $cimByInstance = @{}
     try {
-        foreach ($e in @(Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction Stop)) {
+        foreach ($e in @(Get-CimInstance -ClassName Win32_PnPEntity -OperationTimeoutSec 2 -ErrorAction Stop)) {
             $did = ([string]$e.DeviceID).Trim().ToUpperInvariant()
             if ($did -and -not $cimByInstance.ContainsKey($did)) { $cimByInstance[$did] = $e }
         }
