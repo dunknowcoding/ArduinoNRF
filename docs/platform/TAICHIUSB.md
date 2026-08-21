@@ -101,6 +101,12 @@ The current boolean `setup()` callback owns metadata-only control-OUT requests;
 nonzero OUT payloads and nonexistent interface recipients stall until a bounded
 payload/completion API is explicitly implemented.
 
+A newer SETUP token aborts the previous control transfer before any old payload
+or status completion is committed. If SETUP and `EP0DATADONE` are observed
+together, the completion belongs to the aborted request and is discarded before
+the new request is admitted. An aborted CDC line-coding write therefore cannot
+leave 1200-baud upload authority behind for a later DTR transition.
+
 So debugging rides the *same* enumeration-from-ISR USB core as `Serial` and the
 uploader; there is no second USB implementation. Application `Serial` (user CDC)
 stays separate — don't multiplex sketch `printf` onto the service CDC during a

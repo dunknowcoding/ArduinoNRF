@@ -211,12 +211,21 @@ constexpr bool readyAfterUsbEvent(bool ready, bool attached, bool hasVbus,
         : ready;
 }
 
+constexpr bool ep0DataDoneMayCommit(bool newerSetupPending) {
+    // A new SETUP token aborts the older control transfer. Because firmware
+    // must arm the new data stage after reading SETUP, a simultaneously latched
+    // EP0DATADONE can only belong to the aborted request.
+    return !newerSetupPending;
+}
+
 static_assert(suspendedAfterUsbEvent(false, USBD_EVENTCAUSE_SUSPEND_MASK));
 static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_SUSPEND_MASK |
                                            USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(readyAfterUsbEvent(false, true, true, USBD_EVENTCAUSE_READY_MASK));
 static_assert(!readyAfterUsbEvent(true, true, false, USBD_EVENTCAUSE_RESUME_MASK));
+static_assert(ep0DataDoneMayCommit(false));
+static_assert(!ep0DataDoneMayCommit(true));
 constexpr uint32_t USBD_TRACE_MAGIC = 0x55444254UL;
 constexpr uint32_t USBD_DTOGGLE_VALUE_POS = 8UL;
 constexpr uint32_t USBD_DTOGGLE_NOP = 0UL;
@@ -1261,18 +1270,17 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         reg32(USBD_BASE, eventEndEpinOffset(USER_NOTIFICATION_EP)) = 0UL;
     }
 
-    if (reg32(USBD_BASE, EVENTS_EP0DATADONE) != 0UL) {
+    const bool ep0SetupPending = reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL;
+    if (ep0DataDoneMayCommit(ep0SetupPending) &&
+        reg32(USBD_BASE, EVENTS_EP0DATADONE) != 0UL) {
         reg32(USBD_BASE, EVENTS_EP0DATADONE) = 0UL;
         if (pollTraceEnabled()) {
             ++g_usbdPollTrace.ep0DataDoneEvents;
         }
-        // Route EP0DATADONE based on OUR tracked transfer state, NOT the volatile
-        // BMREQUESTTYPE register. Windows can issue a follow-up setup (e.g.
-        // GET_LINE_CODING immediately after SET_LINE_CODING) BEFORE the firmware
-        // poll observes the OUT-data DONE event — that follow-up setup overwrites
-        // BMREQUESTTYPE so the direction bit reads back as IN. The previous logic
-        // then routed an OUT data completion into the IN-side branch and the
-        // pending SET_LINE_CODING payload was dropped on the floor.
+        // Route EP0DATADONE from our admitted transfer state, never from the
+        // volatile BMREQUESTTYPE register. That register describes the latest
+        // SETUP token rather than serving as a completion tag; the co-latched
+        // newer-SETUP case was rejected above as an abort.
         const bool inXferActive =
             ep0InXferPhase_ == Ep0InXferPhase::Data ||
             ep0InXferPhase_ == Ep0InXferPhase::StatusPending;
@@ -1311,13 +1319,17 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         // Else: spurious EP0DATADONE with neither side tracked — drop silently.
     }
 
-    // Finish an already-latched data stage before reading a newer SETUP token.
-    // A host can advance to the next control request before this ISR/poll pass;
-    // servicing SETUP first would replace our transfer state and either drop a
-    // completed CDC line-coding payload or route its DONE event into the new IN
-    // request. serviceSetup() then explicitly aborts only a genuinely
-    // incomplete older transfer.
-    if (reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL) {
+    // A newer SETUP aborts the old data/status stage. If both events are
+    // latched, discard the old DONE before serviceSetup() creates state for the
+    // new request; otherwise the stale completion could advance or commit the
+    // new transfer (including an aborted 1200-baud line-coding request).
+    if (ep0SetupPending) {
+        if (reg32(USBD_BASE, EVENTS_EP0DATADONE) != 0UL) {
+            reg32(USBD_BASE, EVENTS_EP0DATADONE) = 0UL;
+            if (pollTraceEnabled()) {
+                ++g_usbdPollTrace.ep0DataDoneEvents;
+            }
+        }
         reg32(USBD_BASE, EVENTS_EP0SETUP) = 0UL;
         if (pollTraceEnabled()) {
             ++g_usbdPollTrace.ep0SetupEvents;
