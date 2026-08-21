@@ -302,7 +302,13 @@ function Get-UsbInterfaceParentDeviceInstanceId {
     catch {
     }
 
-    $script:NiusUsbParentCache[$key] = $result
+    # A missing parent during composite enumeration is transient. Caching null
+    # would make every later retry in this upload permanently unscoped even
+    # after Windows finishes creating the parent node. Only proved mappings are
+    # immutable enough to cache.
+    if (-not [string]::IsNullOrWhiteSpace($result)) {
+        $script:NiusUsbParentCache[$key] = $result
+    }
     return $result
 }
 
