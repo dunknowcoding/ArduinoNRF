@@ -1052,6 +1052,27 @@ void NrfUsbdDriver::serviceHaltedTouch() {
 }
 
 void NrfUsbdDriver::processBusState(bool hasVbus) {
+    if (!hasVbus) {
+        if (enabled_) {
+            // VBUS removal powers down the USB regulator. Keeping ENABLE and
+            // the old configured/endpoint state across that boundary lets a
+            // later cable insertion expose a stale session before OUTPUTRDY.
+            // Preserve logical attach/start intent, but retire this controller
+            // instance. The normal begin() path will prove disable readback,
+            // open fresh errata brackets, wait for READY + OUTPUTRDY, and only
+            // then reconnect the pull-up.
+            enablePullup(false);
+            disableInterrupts();
+            reg32(USBD_BASE, ENABLE) = 0UL;
+            enabled_ = false;
+            started_ = false;
+            ready_ = false;
+            startupInProgress_ = false;
+            resetConnectionState();
+        }
+        return;
+    }
+
     if (reg32(USBD_BASE, EVENTS_USBRESET) != 0UL) {
         reg32(USBD_BASE, EVENTS_USBRESET) = 0UL;
         resetConnectionState();
