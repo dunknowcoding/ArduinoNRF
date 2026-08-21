@@ -3,6 +3,9 @@
 
 #include "NrfSoftDevice.h"
 
+extern "C" volatile uint32_t g_nrfDiagSoftDeviceMarker;
+extern "C" volatile uint32_t g_nrfDiagSoftDeviceAppStart;
+
 namespace {
 // Tracks whether requestEnable() ever succeeded.  The bare-metal core leaves
 // this false for the entire run; only the guarded opt-in hook can set it.
@@ -102,10 +105,10 @@ bool NrfSoftDevice::requestDisable() {
 extern "C" void nrfSoftDeviceBootDetect(void) {
     using namespace nrf_sd_detail;
     if (raw32(kInfoBase + kMagicOffset) == kMagicValue) {
-        raw32(kDiagSdMarkerAddr) = kDiagSdPresentBase | (raw32(kInfoBase + kFwidOffset) & 0xFFFFUL);
-        raw32(kDiagSdAppStartAddr) = raw32(kInfoBase + kSizeOffset);
+        g_nrfDiagSoftDeviceMarker = kDiagSdPresentBase | (raw32(kInfoBase + kFwidOffset) & 0xFFFFUL);
+        g_nrfDiagSoftDeviceAppStart = raw32(kInfoBase + kSizeOffset);
     } else {
-        raw32(kDiagSdMarkerAddr) = kDiagSdAbsentMark;
-        raw32(kDiagSdAppStartAddr) = 0x00001000UL;
+        g_nrfDiagSoftDeviceMarker = kDiagSdAbsentMark;
+        g_nrfDiagSoftDeviceAppStart = 0x00001000UL;
     }
 }

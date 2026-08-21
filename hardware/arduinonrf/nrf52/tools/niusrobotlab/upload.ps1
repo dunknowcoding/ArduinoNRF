@@ -48,6 +48,8 @@ param(
     [AllowEmptyString()]
     [string]$Uf2AppStart = '0x0',
     [AllowEmptyString()]
+    [string]$MaximumSize = '',
+    [AllowEmptyString()]
     [string]$Uf2VolumeLabel = '',
     [AllowEmptyString()]
     [string]$Uf2Model = '',
@@ -979,19 +981,22 @@ function Resolve-NiusLayoutGuardUf2Summary {
 # an explicit menu choice for users with healthy MSC mounting.
 $script:NrfBootloaderCandidates = @(
     @{ Vid = '239a'; Pid = '00b3'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Adafruit nice!nano v2 / clone fork (default clone layout; legacy 0x27000 remains explicit menu-only)'; VolumeLabel = 'NICENANO'; Model = 'nice!nano'; BoardId = 'nRF52840-nicenano' },
-    @{ Vid = '239a'; Pid = '0029'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 876544;  Note = 'Adafruit nice!nano v2 fork'; VolumeLabel = 'NICENANO'; Model = 'nice!nano'; BoardId = 'nRF52840-nicenano' },
-    @{ Vid = '239a'; Pid = '002a'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 876544;  Note = 'Adafruit Feather nRF52840 fork'; VolumeLabel = 'FTHR840BOOT'; Model = 'Feather nRF52840 Express'; BoardId = 'nRF52840-feather-express' },
+    @{ Vid = '239a'; Pid = '0029'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Adafruit Feather nRF52840 Express UF2 bootloader'; VolumeLabel = 'FTHR840BOOT'; Model = 'Adafruit Feather nRF52840 Express'; BoardId = 'nRF52840-Feather-revE' },
+    @{ Vid = '239a'; Pid = '002a'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Adafruit Feather nRF52840 Express CDC-only bootloader identity'; VolumeLabel = 'FTHR840BOOT'; Model = 'Adafruit Feather nRF52840 Express'; BoardId = 'nRF52840-Feather-revE' },
     @{ Vid = '239a'; Pid = '4029'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 876544;  Note = 'Adafruit user-mode CDC (nRF52840)' },
     # Seeed XIAO nRF52840 (and XIAO Sense): Adafruit-fork bootloader under Seeed's VID.
     @{ Vid = '2886'; Pid = '0044'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 (Adafruit-fork, Seeed)'; VolumeLabel = 'XIAO-BOOT'; Model = 'Seeed XIAO nRF52840'; BoardId = 'nRF52840-SeeedXiao-v1' },
     @{ Vid = '2886'; Pid = '8044'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 (runtime/app PID)'; VolumeLabel = 'XIAO-BOOT'; Model = 'Seeed XIAO nRF52840'; BoardId = 'nRF52840-SeeedXiao-v1' },
     @{ Vid = '2886'; Pid = '0045'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 Sense'; VolumeLabel = 'XIAO-SENSE'; Model = 'Seeed XIAO nRF52840 Sense'; BoardId = 'nRF52840-SeeedXiaoSense-v1' },
     @{ Vid = '2886'; Pid = '8045'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 Sense (runtime/app PID)'; VolumeLabel = 'XIAO-SENSE'; Model = 'Seeed XIAO nRF52840 Sense'; BoardId = 'nRF52840-SeeedXiaoSense-v1' },
+    # 0x2886:0xF00F is shared by multiple MakerDiary boards. Auto mode may use
+    # the USB identity and INFO_UF2 layout, but must not invent one board's
+    # volume/model as proof for another. Explicit M.2 recipes carry exact metadata.
+    @{ Vid = '2886'; Pid = 'f00f'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'MakerDiary shared nRF52840 bootloader identity'; VolumeLabel = ''; Model = ''; BoardId = '' },
     # Makerdiary Pitaya Go: Adafruit-fork bootloader, same VID:PID in DFU and app.
     @{ Vid = '2886'; Pid = 'f00e'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Makerdiary Pitaya Go (Adafruit-fork)'; VolumeLabel = 'PITAYAGO'; Model = 'Makerdiary Pitaya Go'; BoardId = 'PITAYAGO' },
     # nRFMicro (joric open-hardware): Adafruit-fork bootloader under the pid.codes 1209 VID.
-    @{ Vid = '1209'; Pid = '5284'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'nRFMicro (joric, Adafruit-fork S140 7.3.0)'; VolumeLabel = 'NRFMICRO'; Model = 'nRFMicro'; BoardId = 'nRF52840-nRFMicro-v0' },
-    @{ Vid = '1209'; Pid = '5285'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'nRFMicro runtime/app PID (S140 7.3.0)'; VolumeLabel = 'NRFMICRO'; Model = 'nRFMicro'; BoardId = 'nRF52840-nRFMicro-v0' },
+    @{ Vid = '1209'; Pid = '5284'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 794624;  Note = 'nRFMicro (current Adafruit-fork S140 7.3.0; legacy S140 6.1.1 remains explicit menu-only)'; VolumeLabel = 'NRFMICRO'; Model = 'nRFMicro'; BoardId = 'nRF52840-nRFMicro-v0' },
     @{ Vid = '1915'; Pid = '521f'; Kind = 'nordic-dfu';   Family = '';           AppStart = '0x1000';  MaxSize = 897024;  Note = 'Nordic PCA10059 USB serial DFU (MBR plus onboard bootloader)' }
 )
 
@@ -1019,13 +1024,13 @@ function Resolve-Uf2FlashLayout {
             }
             elseif ($softDeviceLower -match 's140.*(\bv?7\b|7\.)') {
                 $appStart = '0x27000'
-                if ($maxSize -le 0) {
+                if ($maxSize -le 0 -or $maxSize -gt 811008) {
                     $maxSize = 811008
                 }
             }
             elseif ($softDeviceLower -match 's140.*(\bv?6\b|6\.)') {
                 $appStart = '0x26000'
-                if ($maxSize -le 0) {
+                if ($maxSize -le 0 -or $maxSize -gt 815104) {
                     $maxSize = 815104
                 }
             }
@@ -1672,6 +1677,32 @@ function Resolve-AutoBootloader {
     $probedNames = ($script:NrfBootloaderCandidates | ForEach-Object { ('{0}:{1}' -f $_.Vid, $_.Pid) }) -join ', '
 
     for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
+        # A mounted INFO_UF2 volume already provides the strongest available
+        # evidence: board identity, layout metadata, and the deployment path.
+        # Check it before the much slower full Windows PnP inventory. The
+        # preferred composite ID keeps this scoped to the board that was just
+        # touched even when several UF2-capable boards are connected.
+        $uf2Any = Get-Uf2ProbeSummary -PreferredCompositeStableId $PreferredCompositeStableId
+        if ($uf2Any) {
+            $layout = Resolve-Uf2FlashLayout -Uf2Summary $uf2Any -DefaultAppStart '0x26000' -DefaultMaxSize 876544 -DefaultNote 'UF2 volume identified by INFO_UF2.TXT only'
+            Write-NiusDetail ('[nius] auto-detect: matched UF2 volume {0} (label={1}, model={2}); VID/PID unknown, treating as Adafruit-fork UF2; {3}' -f $uf2Any.Drive, $uf2Any.Label, $uf2Any.Model, $layout.Note)
+            return [pscustomobject]@{
+                Resolved = $true
+                Source = 'uf2-volume'
+                Vid = '0x239A'
+                Pid = '0x00B3'
+                Kind = 'uf2'
+                Family = '0xADA52840'
+                AppStart = $layout.AppStart
+                MaxSize = $layout.MaxSize
+                Note = $layout.Note
+                VolumeLabel = $uf2Any.Label
+                Model = $uf2Any.Model
+                BoardId = $uf2Any.BoardId
+                DriveRoot = $uf2Any.Drive
+            }
+        }
+
         $pnpInventory = @(Get-PnpDeviceInventory)
 
         function Test-PnpVidPidInSnapshot {
@@ -1740,32 +1771,6 @@ function Resolve-AutoBootloader {
             }
         }
 
-        # 2) Last-resort: any UF2 volume whose INFO_UF2.TXT looks like an
-        # nRF52840 bootloader, even if VID/PID didn't match a known clone.
-        # (We do prefer 'adafruit-dfu' for VID/PID-matched Adafruit forks;
-        # this fallback uses the UF2 mass-storage path because we got here
-        # via a mounted volume rather than a USB identity match.)
-        $uf2Any = Get-Uf2ProbeSummary -PreferredCompositeStableId $PreferredCompositeStableId
-        if ($uf2Any) {
-            $layout = Resolve-Uf2FlashLayout -Uf2Summary $uf2Any -DefaultAppStart '0x26000' -DefaultMaxSize 876544 -DefaultNote 'UF2 volume identified by INFO_UF2.TXT only'
-            Write-NiusDetail ('[nius] auto-detect: matched UF2 volume {0} (label={1}, model={2}); VID/PID unknown, treating as Adafruit-fork UF2; {3}' -f $uf2Any.Drive, $uf2Any.Label, $uf2Any.Model, $layout.Note)
-            return [pscustomobject]@{
-                Resolved = $true
-                Source = 'uf2-volume'
-                Vid = '0x239A'
-                Pid = '0x00B3'
-                Kind = 'uf2'
-                Family = '0xADA52840'
-                AppStart = $layout.AppStart
-                MaxSize = $layout.MaxSize
-                Note = $layout.Note
-                VolumeLabel = $uf2Any.Label
-                Model = $uf2Any.Model
-                BoardId = $uf2Any.BoardId
-                DriveRoot = $uf2Any.Drive
-            }
-        }
-
         Start-Sleep -Milliseconds $DelayMs
     }
 
@@ -1779,11 +1784,17 @@ function Invoke-Uf2Deploy {
     param(
         [string]$HexPath,
         [string]$FamilyId,
+        [string]$AppStart,
+        [string]$MaxSize,
         [string]$DrivePath
     )
 
     Write-NiusTiming 'UF2 conversion start'
-    $uf2Path = New-Uf2Artifact -HexPath $HexPath -FamilyId $FamilyId
+    $uf2Path = New-Uf2Artifact `
+        -HexPath $HexPath `
+        -FamilyId $FamilyId `
+        -AppStart $AppStart `
+        -MaxSize $MaxSize
     Write-NiusTiming 'UF2 conversion done'
     $destination = Join-Path $DrivePath ([System.IO.Path]::GetFileName($uf2Path))
     Write-NiusTiming 'UF2 copy start'
@@ -2776,7 +2787,9 @@ function Get-FailureHints {
 function New-Uf2Artifact {
     param(
         [string]$HexPath,
-        [string]$FamilyId
+        [string]$FamilyId,
+        [string]$AppStart,
+        [string]$MaxSize
     )
 
     if ([string]::IsNullOrWhiteSpace($HexPath) -or -not (Test-Path -LiteralPath $HexPath)) {
@@ -2786,6 +2799,10 @@ function New-Uf2Artifact {
     if ([string]::IsNullOrWhiteSpace($FamilyId)) {
         throw 'UF2 upload was selected, but no UF2 family ID was provided by the board recipe.'
     }
+    if ([string]::IsNullOrWhiteSpace($AppStart) -or
+        [string]::IsNullOrWhiteSpace($MaxSize)) {
+        throw 'UF2 upload was selected, but the board recipe did not provide an application range.'
+    }
 
     $python = Resolve-PythonLaunch
     $converter = Join-Path $PSScriptRoot 'build_uf2.py'
@@ -2793,9 +2810,48 @@ function New-Uf2Artifact {
     $uf2Path = [System.IO.Path]::ChangeExtension($HexPath, '.uf2')
     $args = @()
     $args += $python.PrefixArgs
-    $args += @($converter, '--input-hex', $HexPath, '--output-uf2', $uf2Path, '--family-id', $FamilyId)
+    $args += @(
+        $converter,
+        '--input-hex', $HexPath,
+        '--output-uf2', $uf2Path,
+        '--family-id', $FamilyId,
+        '--app-start', $AppStart,
+        '--max-size', $MaxSize
+    )
     Invoke-CommandChecked -Exe $python.Exe -Arguments $args -FailureKind 'uf2-convert'
     return $uf2Path
+}
+
+function Assert-NiusApplicationImage {
+    param(
+        [string]$HexPath,
+        [string]$FamilyId,
+        [string]$AppStart,
+        [string]$MaxSize
+    )
+
+    Assert-InputArtifact -Path $HexPath -Label 'hex'
+    if ([string]::IsNullOrWhiteSpace($FamilyId)) {
+        $FamilyId = '0xADA52840'
+    }
+    if ([string]::IsNullOrWhiteSpace($AppStart) -or
+        [string]::IsNullOrWhiteSpace($MaxSize)) {
+        throw 'The board recipe did not provide a complete application flash range.'
+    }
+
+    $python = Resolve-PythonLaunch
+    $validator = Join-Path $PSScriptRoot 'build_uf2.py'
+    $args = @()
+    $args += $python.PrefixArgs
+    $args += @(
+        $validator,
+        '--input-hex', $HexPath,
+        '--family-id', $FamilyId,
+        '--app-start', $AppStart,
+        '--max-size', $MaxSize,
+        '--validate-only'
+    )
+    Invoke-CommandChecked -Exe $python.Exe -Arguments $args -FailureKind 'image-preflight'
 }
 
 function New-UploadFailure {
@@ -3381,8 +3437,14 @@ function Invoke-Touch1200Transition {
         }
 
         if ($touchAttempt.SawResetCycle -and
-            [string]::IsNullOrWhiteSpace($ExpectedLabel)) {
-            Write-NiusDetail ('[nius] CDC reset-cycle observed inline during {0}; no storage identity is required.' -f $touchMode.Label) -ForegroundColor DarkGray
+            (-not $hasBootloaderIdentity -or
+             [string]::IsNullOrWhiteSpace($ExpectedLabel))) {
+            # Auto mode does not know the bootloader VID/PID until after the
+            # reset. A confirmed detach is enough to prove the touch occurred;
+            # the caller immediately performs the exact post-touch identity
+            # discovery. Waiting for the old runtime COM to return would be
+            # wrong when the bootloader owns a different COM number.
+            Write-NiusDetail ('[nius] CDC reset-cycle observed inline during {0}; continuing to post-touch identity discovery.' -f $touchMode.Label) -ForegroundColor DarkGray
             Write-NiusTiming ('touch mode confirmed inline: {0}' -f $touchMode.Label)
             return [pscustomobject]@{
                 Triggered = $true
@@ -3869,6 +3931,19 @@ try {
     Write-Banner -BoardName $Board
     Write-NiusTiming 'banner done'
 
+    # Validate the complete linked image before inspecting, opening, touching,
+    # or resetting any USB interface. A wrong layout, corrupt HEX record, bad
+    # vector table, or oversized image must leave the running board untouched.
+    $enterBootloaderOnlyRequested = (($EnterBootloaderOnly -eq 'true') -or ($EnterBootloaderOnly -eq '1'))
+    if ($Mode -eq 'dfu' -and -not $enterBootloaderOnlyRequested) {
+        Assert-NiusApplicationImage `
+            -HexPath $Hex `
+            -FamilyId $Uf2FamilyId `
+            -AppStart $Uf2AppStart `
+            -MaxSize $MaximumSize
+        Write-NiusTiming 'application image preflight done'
+    }
+
     # Arm the PnP-device snapshot cache for the pre-touch identity/port checks
     # (board is on a stable, not-yet-touched port set). Disarmed before the
     # 1200 touch (next to Clear-SerialPortInventoryCache) so transition polling
@@ -3880,7 +3955,7 @@ try {
     # flight (e.g. mid-1200-touch or mid-DFU). A second instance racing for the
     # same COM would interleave touches / DFU frames and can corrupt flash. A
     # per-port system-wide mutex makes the first upload the sole owner; a
-    # duplicate fails fast BEFORE any touch/port manipulation, so it cannot
+    # duplicate fails fast BEFORE any touch/port access, so it cannot
     # disturb the in-flight transfer. The OS releases the mutex when the owning
     # process exits (covers crashes / killed nrfutil); a later acquirer that
     # sees the abandoned state simply takes ownership. Disable with
@@ -3944,8 +4019,8 @@ try {
     # operations from overlapping in the first place.
     # This host-wide mutex serializes the whole USB-sensitive upload across
     # boards: a second board's upload WAITS for the first to finish instead of
-    # racing (and cross-killing) it. With only one nrfutil ever live, the global
-    # taskkill can only hit genuinely-stale processes. Disable with
+    # racing it. Orphan cleanup is PID-scoped and never terminates a process
+    # whose parent is still alive. Disable the upload lock with
     # NIUS_DISABLE_UPLOAD_LOCK=1; tune the wait via
     # NIUS_UPLOAD_HOST_LOCK_WAIT_MS (default 300000 = 5 min, long enough to queue
     # behind a real other-board upload; on timeout the new request fails closed
@@ -4137,7 +4212,6 @@ try {
             }
         }
     }
-    $enterBootloaderOnlyRequested = (($EnterBootloaderOnly -eq 'true') -or ($EnterBootloaderOnly -eq '1'))
     if (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid) -and -not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid) -and
         -not [string]::IsNullOrWhiteSpace($UsbVid) -and -not [string]::IsNullOrWhiteSpace($UsbPid) -and
         $UsbVid -ne 'auto' -and $UsbPid -ne 'auto') {
@@ -4200,7 +4274,29 @@ try {
         $autoMode = ($BootloaderMode -eq 'auto' -or $UsbVid -eq 'auto' -or $UsbPid -eq 'auto')
         if ($autoMode) {
             Write-NiusDetail '[nius] Auto-detecting bootloader...' -ForegroundColor DarkGray
-            $resolved = Resolve-AutoBootloader -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId -Attempts 2 -DelayMs 200
+            # A selected COM that still has the declared runtime identity is
+            # authoritative application state. Scanning every supported
+            # bootloader before touching it is both redundant and slow on a
+            # Windows host with many USB devices. Touch first, then identify
+            # the exact bootloader that actually appeared.
+            $selectedPortIsRuntime =
+                $UseTouch1200 -eq 'true' -and
+                -not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid) -and
+                -not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid) -and
+                (Test-SerialPortMatchesUsbIdentity `
+                    -PortName $adafruitControlPort `
+                    -Vid $effectiveRuntimeUsbVid `
+                    -ProductId $effectiveRuntimeUsbPid)
+            if ($selectedPortIsRuntime) {
+                $resolved = [pscustomobject]@{
+                    Resolved = $false
+                    ProbedCandidates = 'selected port is the declared runtime endpoint; bootloader probe deferred until after touch'
+                }
+                Write-NiusDetail '[nius] Selected port is the runtime endpoint; deferring bootloader discovery until after its reset transition.' -ForegroundColor DarkGray
+            }
+            else {
+                $resolved = Resolve-AutoBootloader -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId -Attempts 2 -DelayMs 200
+            }
             # VID:PID 239A:00B3 is shared by several clone bootloaders whose
             # application starts differ. Neither a PnP hit nor dfu-util listing
             # that identity proves the flash layout. When the candidate default
@@ -4227,14 +4323,10 @@ try {
             if (-not $resolved.Resolved -and $UseTouch1200 -eq 'true') {
                 Stop-NiusLingeringAdafruitNrfutil -Phase touch
                 Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
-                $samePidTouchHints = (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid)) -and
-                    (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid))
                 $touchTransition = Invoke-Touch1200Transition `
                     -PortName $adafruitControlPort `
-                    -BootloaderVid $(if ($samePidTouchHints) { $effectiveRuntimeUsbVid } else { '' }) `
-                    -BootloaderPid $(if ($samePidTouchHints) { $effectiveRuntimeUsbPid } else { '' }) `
-                    -RuntimeVid $(if ($samePidTouchHints) { $effectiveRuntimeUsbVid } else { '' }) `
-                    -RuntimePid $(if ($samePidTouchHints) { $effectiveRuntimeUsbPid } else { '' }) `
+                    -RuntimeVid $effectiveRuntimeUsbVid `
+                    -RuntimePid $effectiveRuntimeUsbPid `
                     -InterfaceParentPrefix $adafruitControlPortParentPrefix `
                     -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
                     -ExpectedLabel $Uf2VolumeLabel `
@@ -4243,8 +4335,12 @@ try {
                 if (-not $touchTransition.Triggered) {
                     Write-NiusDetail ('[warn] 1200 bps touch on {0} did not confirm a host-visible transition; probing scoped bootloader anyway (same-PID clones may keep the COM name).' -f $adafruitControlPort) -ForegroundColor DarkYellow
                 }
-                Start-Sleep -Milliseconds (Get-NiusPostTouchSleepMilliseconds)
-                $resolved = Resolve-AutoBootloader -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId -Attempts 6 -DelayMs 500
+                # Transition detection already waited for runtime detach. Give
+                # Windows only a short scheduling grace, then let the bounded
+                # identity probe itself wait for the bootloader. A second blind
+                # multi-second sleep only duplicates that wait.
+                Start-Sleep -Milliseconds 150
+                $resolved = Resolve-AutoBootloader -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId -Attempts 10 -DelayMs 350
                 if (-not $resolved.Resolved -and -not $touchTransition.Triggered) {
                     Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output ('Unable to trigger 1200 bps touch on {0}; the service/user CDC port may be missing or busy.' -f $adafruitControlPort) -Exe $toolPath)
                 }
@@ -4734,7 +4830,12 @@ try {
 
             Write-Stage -Percent 68 -Label 'Uploading'
             Assert-Uf2BuildLayoutMatchesBootloader -Uf2Summary $detectedBootloader.Summary -ExpectedAppStart $Uf2AppStart -Context 'Selected UF2 bootloader'
-            Invoke-Uf2Deploy -HexPath $Hex -FamilyId $Uf2FamilyId -DrivePath $detectedBootloader.Summary.Drive
+            Invoke-Uf2Deploy `
+                -HexPath $Hex `
+                -FamilyId $Uf2FamilyId `
+                -AppStart $Uf2AppStart `
+                -MaxSize $MaximumSize `
+                -DrivePath $detectedBootloader.Summary.Drive
             Write-Stage -Percent 94 -Label 'Verifying'
             $null = Invoke-NiusMisflashGuardAfterSamePidUpload `
                 -PortName $adafruitControlPort `

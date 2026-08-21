@@ -7,7 +7,7 @@
 //   * DCDC regulator enable (~30% lower run/idle current at typical 3.3 V).
 //   * RAM retention bitmap for System OFF (which 8 banks keep their contents).
 //   * System OFF entry with wake-source configuration (GPIO DETECT, NFC field,
-//     USB plug detect) and the no-return semantics.
+//     USB plug detect) and USB-safe no-return semantics.
 //   * Read/clear POWER_RESETREAS so a sketch knows WHY it woke up.
 //   * GPREGRET / GPREGRET2 - 8-bit retention registers that survive any reset
 //     short of POR. The verified hands-free upload path already uses GPREGRET
@@ -15,9 +15,9 @@
 //
 // SystemOFF caveats:
 //   * SystemOFF is the lowest-power mode (~0.4 uA). enterSystemOff() DOES NOT
-//     RETURN. The wake source eventually triggers a full reset and the sketch
-//     starts from setup() again. Inspect getResetReason() at boot to tell
-//     power-on apart from SystemOFF wake / watchdog / etc.
+//     RETURN. If VBUS is already present, the safe default remains in System ON
+//     sleep so USB enumeration and the 1200-bps recovery endpoint stay alive.
+//     Pass allowUsbDisconnect=true only when losing USB is intentional.
 //   * GPIO wake requires the SENSE field in GPIO_PIN_CNF to be set BEFORE
 //     SystemOFF. enableGpioWake() does that for you.
 //   * NFC wake requires the NFCT peripheral to be running in tag-emulation
@@ -109,10 +109,11 @@ public:
     static void enableUsbWake(bool enable);
 
     // -- SystemOFF entry ----------------------------------------------------
-    // Enters SystemOFF. DOES NOT RETURN - the configured wake source causes
-    // a reset, the sketch starts again from setup() with getResetReason()
-    // indicating the trigger.
-    static void enterSystemOff() __attribute__((noreturn));
+    // Enters SystemOFF. DOES NOT RETURN. With USB VBUS already present, the
+    // default remains in interrupt-driven System ON sleep instead, preserving
+    // enumeration and 1200-bps upload recovery. Set allowUsbDisconnect=true
+    // only when the caller explicitly accepts losing the active USB session.
+    static void enterSystemOff(bool allowUsbDisconnect = false) __attribute__((noreturn));
 
     // -- Reset reason / GPREGRET --------------------------------------------
     static uint32_t getResetReason();

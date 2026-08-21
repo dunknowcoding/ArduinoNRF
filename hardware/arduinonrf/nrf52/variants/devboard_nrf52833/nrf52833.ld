@@ -64,6 +64,15 @@ SECTIONS
 
   _sidata = LOADADDR(.data);
 
+  .noinit (NOLOAD) :
+  {
+    . = ALIGN(4);
+    __noinit_start = .;
+    *(.noinit*)
+    . = ALIGN(4);
+    __noinit_end = .;
+  } > RAM
+
   .bss :
   {
     _sbss = .;

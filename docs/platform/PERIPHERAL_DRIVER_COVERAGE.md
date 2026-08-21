@@ -81,7 +81,7 @@ These are **not** missing drivers — they're intentional design choices:
   (CRYS runtime: SHA-256, HMAC, AES-CBC/CTR, ECDSA/ECDH P-256, TRNG on
   CryptoCell; Oberon for AES-GCM). The in-package `libraries/CC310/` shim
   forwards `#include <NrfCC310.h>` to NiusCrypto (`depends=NiusCrypto`); smoke
-  test covers TRNG, hash, HMAC, AES-CTR, ECDSA, and ECDH. Board1 verified.
+  test covers TRNG, hash, HMAC, AES-CTR, ECDSA, and ECDH. Verified on physical ProMicro nRF52840 hardware.
   The on-chip ECB/CCM/AAR above cover hardware AES *without* the Nordic blob.
 - **DAC** — does not exist on the nRF52840.
 

@@ -55,7 +55,7 @@ constexpr uint32_t SHPR3 = 0xE000ED20UL;
 // bits: 0x00,0x20,...,0xE0. BASEPRI=0x20 masks every interrupt of priority
 // >=0x20 (SysTick/RTC1/...) while leaving priority-0 handlers -- the pinned
 // DebugMon -- able to preempt and complete the step. (USBD is prio 0 but stays
-// NVIC-masked across the halt and is inert under NRF_USBD_POLL_ONLY.)
+// NVIC-masked across the halt.)
 constexpr uint32_t STEP_BASEPRI = 0x20UL;
 
 inline void setBasepri(uint32_t value) {
@@ -619,16 +619,20 @@ bool NrfGdbStubClass::detectWatchpointHit() {
 }
 
 void NrfGdbStubClass::serviceAsyncBreak() {
-    // Called from yield() while the target runs free. Only meaningful once a
-    // gdb session has resumed us and we're not already halted in the stub.
-    if (!sessionLive_ || active_ || !enabled()) {
+    // Called from yield() while the target runs free. A 0x03 is both the
+    // initial attach request injected by the USB bridge and GDB's later Pause
+    // request. Requiring sessionLive_ here made the first attach impossible:
+    // sessionLive_ is established only after serve() has handled that first
+    // stop. The dedicated service CDC is not user data, so accepting the
+    // initial break is safe before a session has been marked live.
+    if (active_ || !enabled()) {
         return;
     }
     // During free-run nothing else fetches the service-CDC OUT endpoint (its
     // bit-gated drain lives in the stub's halted poll), so the host's byte
     // would sit unfetched in the EP buffer and the next packet would NAK. Pump
     // the drain here to pull any host OUT into the rx ring. Safe in free-run:
-    // POLL_ONLY silicon has no USB ISR, and we run in thread context.
+    // The halted stub masks the USB ISR and runs in thread context.
     nrfUsbdDriver().drainServiceDataOut();
     // A host async-interrupt arrives as a bare 0x03 byte (no $..# framing). In
     // all-stop mode (what gdb/cortex-debug use) the host sends nothing else

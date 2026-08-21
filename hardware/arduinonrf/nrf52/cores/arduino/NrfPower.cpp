@@ -261,7 +261,19 @@ void NrfPower::enableUsbWake(bool enable) {
 
 // -- SystemOFF entry ---------------------------------------------------------
 
-void NrfPower::enterSystemOff() {
+void NrfPower::enterSystemOff(bool allowUsbDisconnect) {
+    // Entering SystemOFF while the cable is already powered can leave no new
+    // VBUS edge to wake the MCU. Keep the interrupt-driven USB service alive by
+    // default, including its 1200-bps recovery endpoint. This loop intentionally
+    // preserves the documented no-return contract. Battery-powered callers can
+    // still request true SystemOFF, and a USB-powered caller must opt in.
+    if (isUsbVbusPresent() && !allowUsbDisconnect) {
+        setMode(MODE_LOW_POWER);
+        while (true) {
+            sleep();
+        }
+    }
+
     // Errata 12: a write to POWER_SYSTEMOFF can race the BUS - force a
     // BARRIER + READBACK to guarantee the write goes out. The trailing
     // infinite loop is the official Nordic-recommended fallback if the

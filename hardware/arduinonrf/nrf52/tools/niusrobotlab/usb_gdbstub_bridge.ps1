@@ -276,6 +276,22 @@ try {
     Write-BridgeLog 'GDB client connected; forwarding traffic'
     Write-Host 'GDB client connected. Forwarding traffic. Press Ctrl+C to stop.'
 
+    # A remote target must be stopped before GDB can complete its first RSP
+    # handshake. The firmware treats a bare 0x03 on the dedicated service CDC
+    # as the initial DebugMonitor attach as well as a later Pause request.
+    # Inject it once per new TCP client before forwarding queued RSP packets;
+    # otherwise GDB sends qSupported while the free-running target has not yet
+    # entered the stub, and both sides wait indefinitely.
+    $initialBreak = [byte[]]@(0x03)
+    $serial.Write($initialBreak, 0, 1)
+    Write-BridgeLog 'injected initial DebugMonitor break byte before RSP relay'
+    # Keep the break in its own USB OUT transaction. Forwarding GDB's queued
+    # qSupported bytes immediately can coalesce/overwrite the one-byte request
+    # on clone USB firmware before the sketch's yield hook drains it. A short,
+    # fixed attach grace lets DebugMonitor own the service endpoint first; the
+    # device's stop reply remains buffered until the read below is posted.
+    Start-Sleep -Milliseconds 100
+
     $buffer = New-Object byte[] 4096
     $serialReadBuffer = New-Object byte[] 4096
     # Keep one native overlapped read posted at all times. usbser can leave

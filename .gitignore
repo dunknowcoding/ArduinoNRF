@@ -9,6 +9,7 @@
 .ncs-zigbee-work/
 .nius-verify-cache/
 build/
+_work/
 drivers/
 # Ad-hoc NimBLE bring-up build dirs (.build-nimble-host-*, -controller-*, etc.)
 .build*/

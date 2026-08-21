@@ -52,13 +52,14 @@ bool bootloaderDoubleResetFallbackEnabled() {
 inline uint16_t boardVid() {
 #if defined(NRF_SYSTEM_RUNTIME_USB_VID)
     return static_cast<uint16_t>(NRF_SYSTEM_RUNTIME_USB_VID);
+#elif defined(ARDUINO_NRF52_NRFMICRO)
+    return 0x1209U;
+#elif defined(ARDUINO_NRF52_XIAO) || defined(ARDUINO_NRF52_PITAYA_GO)
+    return 0x2886U;
 #elif defined(ARDUINO_NRF52_PROMICRO) \
  || defined(ARDUINO_NRF52_NICENANO_V2) \
  || defined(ARDUINO_NRF52_SUPERMINI) \
- || defined(ARDUINO_NRF52_NRFMICRO) \
  || defined(ARDUINO_NRF52_MINI) \
- || defined(ARDUINO_NRF52_XIAO) \
- || defined(ARDUINO_NRF52_PITAYA_GO) \
  || defined(ARDUINO_NRF52_USB_DONGLE)
     return kAdafruitVid;
 #else
@@ -249,20 +250,20 @@ uint16_t boardPid() {
     // analysis ambiguous and removed the clean bootloader/app identity split.
 #if defined(ARDUINO_NRF52_PROMICRO)
     return 0x00B4;
-#elif defined(ARDUINO_NRF52_NICENANO_V2)
-    return 0x0029;   // Adafruit UF2 fork, nice!nano v2 build
-#elif defined(ARDUINO_NRF52_SUPERMINI)
-    return 0x0029;   // Adafruit UF2 fork, nice!nano-compatible
+#elif defined(ARDUINO_NRF52_NICENANO_V2) || defined(ARDUINO_NRF52_SUPERMINI)
+    return 0x00B4;
 #elif defined(ARDUINO_NRF52_NRFMICRO)
-    return 0x0029;   // Adafruit UF2 fork, nice!nano-compatible
+    // pid.codes assigns one identity to the nRFMicro project; do not invent an
+    // adjacent runtime PID that belongs to no allocation.
+    return 0x5284;
 #elif defined(ARDUINO_NRF52_MINI)
     return 0x0029;
 #elif defined(ARDUINO_NRF52_XIAO)
-    return 0x0029;
+    return 0x8044;
 #elif defined(ARDUINO_NRF52_DEVBOARD_833)
     return 0x5233;   // No native USB on nRF52833 build, kept for compat.
 #elif defined(ARDUINO_NRF52_PITAYA_GO)
-    return 0x0029;
+    return 0xF00E;
 #elif defined(ARDUINO_NRF52_USB_DONGLE)
     return 0x0029;
 #else

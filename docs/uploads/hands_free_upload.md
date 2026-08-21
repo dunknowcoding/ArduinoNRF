@@ -49,6 +49,10 @@ A hardened PowerShell pipeline drives the touch and DFU. Beyond the basics it pr
   `INFO_UF2.TXT`; serial DFU checks the same identity-scoped metadata
   immediately when the bootloader exposes it. Serial-only bootloaders instead
   use the exact app-start and SoftDevice requirement in the selected recipe.
+- Strict sketch-image preflight: Intel HEX checksums, record lengths, overlap,
+  EOF, vector table, reset entry, link start, and maximum application range are
+  validated before Windows inspects or touches USB and before Linux/macOS
+  serial DFU touches the selected device.
 - A **misflash guard** after every transfer that requires the expected runtime
   USB identity to return, without opening or holding the fresh application COM.
 

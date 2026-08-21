@@ -8,7 +8,7 @@ touch and lets this identity-aware uploader perform it through
 adafruit-nrfutil. That prevents a host-side port scan from selecting a peer
 board during simultaneous USB re-enumeration.
 
-Requires Python 3.6+ and adafruit-nrfutil on PATH:
+Requires Python 3.7+ and adafruit-nrfutil on PATH:
     pip3 install --user adafruit-nrfutil   # Linux / macOS
 
 This script is intentionally small and dependency-free (only stdlib) so it runs
@@ -25,6 +25,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+from build_uf2 import parse_hex_segments, validate_application_layout
 
 
 def fail(msg: str, code: int = 2) -> "None":
@@ -271,6 +273,8 @@ def main() -> int:
     ap.add_argument("--pid", default="0x00B3", help="expected bootloader USB PID")
     ap.add_argument("--runtime-vid", required=True, help="expected application USB VID")
     ap.add_argument("--runtime-pid", required=True, help="expected application USB PID")
+    ap.add_argument("--app-start", required=True, help="required application vector address")
+    ap.add_argument("--max-size", required=True, help="maximum application bytes from --app-start")
     ap.add_argument("--runtime-timeout", default="30", help="seconds to wait for identity-verified application USB")
     ap.add_argument("--sd-req", default="0xFFFE", help="adafruit-nrfutil genpkg --sd-req (SoftDevice req hash; 0xFFFE = wildcard)")
     ap.add_argument("--dev-type", default="0x0052", help="adafruit-nrfutil genpkg --dev-type (0x0052 = nRF52)")
@@ -280,17 +284,32 @@ def main() -> int:
     ap.add_argument("--verbose", action="store_true", help="pass --verbose to adafruit-nrfutil")
     args = ap.parse_args()
 
+    if args.vid.strip().lower() == "auto" or args.pid.strip().lower() == "auto":
+        fail(
+            "this board has no canonical USB bootloader identity; select an "
+            "explicit Bootloader / DFU entry before uploading on Linux or macOS",
+            code=2,
+        )
+
     try:
         boot_vid = parse_usb_id(args.vid)
         boot_pid = parse_usb_id(args.pid)
         runtime_vid = parse_usb_id(args.runtime_vid)
         runtime_pid = parse_usb_id(args.runtime_pid)
+        app_start = int(args.app_start, 0)
+        max_size = int(args.max_size, 0)
         runtime_timeout = float(args.runtime_timeout)
     except ValueError:
-        fail("invalid USB identity or runtime timeout", code=2)
+        fail("invalid USB identity, application range, or runtime timeout", code=2)
 
     if not os.path.isfile(args.hex):
         fail("input hex not found: " + args.hex)
+    try:
+        validate_application_layout(
+            parse_hex_segments(Path(args.hex)), app_start, max_size
+        )
+    except (OSError, ValueError) as error:
+        fail("application image preflight failed: " + str(error), code=2)
 
     nrfutil = shutil.which(args.nrfutil)
     if not nrfutil:

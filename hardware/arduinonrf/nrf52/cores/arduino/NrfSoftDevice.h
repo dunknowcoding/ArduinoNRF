@@ -46,14 +46,6 @@ constexpr uint32_t kFwidOffset       = 0x0CUL;                         // -> 0x3
 constexpr uint32_t kVersionOffset    = 0x14UL;                         // -> 0x3014
 constexpr uint32_t kMagicValue       = 0x51B1E5DBUL;                   // SD_MAGIC_NUMBER
 
-// Persistent diagnostic SRAM scratch (inside the SoftDevice-reserved zone
-// 0x20000000-0x20005FFF that neither the bootloader nor our linker script
-// touches, so it survives every reset).  nrfSoftDeviceBootDetect() stamps the
-// boot-time presence result here so a J-Link/SWD read confirms detection ran
-// without needing a serial console.  0x20004000/4/8 are already used by the
-// startup diag markers; these two words extend that block.
-constexpr uint32_t kDiagSdMarkerAddr   = 0x2000400CUL;
-constexpr uint32_t kDiagSdAppStartAddr = 0x20004010UL;
 constexpr uint32_t kDiagSdPresentBase  = 0x5D000000UL;   // | (fwid & 0xFFFF)
 constexpr uint32_t kDiagSdAbsentMark   = 0x5DAB0000UL;   // "5D ABsent" - ran, none found
 }  // namespace nrf_sd_detail

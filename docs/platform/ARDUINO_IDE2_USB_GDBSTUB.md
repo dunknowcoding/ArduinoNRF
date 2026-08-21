@@ -46,6 +46,11 @@ to **`localhost:3335`**, and the IDE does *not* spawn the bridge itself.
 2. Wait for **`Waiting for a GDB client connection...`**.
 3. Click **Debug** in Arduino IDE 2 (it attaches to the running stub).
 
+The bridge sends one dedicated break byte when a TCP client connects, waits a
+short bounded interval so that byte remains a separate USB transaction, and
+then relays GDB packets. This permits attachment to free-running sketches; an
+application breakpoint is not required to enter the first debug session.
+
 On Linux/macOS the bridge is `usb_gdbstub_bridge.py` with the equivalent
 `--serial-port / --tcp-port / --board` arguments (see `platform.txt`,
 `debug.usbgdbstub.bridge.launch.pattern.*`).
@@ -70,6 +75,9 @@ the next session.
 - One GDB client at a time; the bridge owns the maintenance CDC while
   running, so close it before a serial-DFU upload on the same port (the
   bridge yields automatically for the platform's own upload tool).
+- Uploading while the target is already stopped in DebugMonitor is supported.
+  The halted USB loop recognizes the explicit 1200-baud request without relying
+  on SysTick, exits to the bootloader, and leaves the bridge process closed.
 
 ## 6. References
 

@@ -25,6 +25,7 @@ SECTIONS
 	.fini_array : { PROVIDE_HIDDEN (__fini_array_start = .); KEEP(*(SORT(.fini_array.*))) KEEP(*(.fini_array*)) PROVIDE_HIDDEN (__fini_array_end = .); } > FLASH
 	.data : { _sdata = .; *(.data*) _edata = .; } > RAM AT > FLASH
 	_sidata = LOADADDR(.data);
+	.noinit (NOLOAD) : { . = ALIGN(4); __noinit_start = .; *(.noinit*) . = ALIGN(4); __noinit_end = .; } > RAM
 	.bss : { _sbss = .; *(.bss*) *(COMMON) _ebss = .; } > RAM
 	.heap (COPY) : { _end = .; end = .; . = . + 0x1000; } > RAM
 }

@@ -30,7 +30,6 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="f00e", MODE="0664"
 
 # nRFMicro (joric, pid.codes 1209)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="5284", MODE="0664", GROUP="dialout"
-SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="5285", MODE="0664", GROUP="dialout"
 
 # Nordic Open DFU (nRF52840 USB Dongle / PCA10059) - flashed with nrfutil
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="521f", MODE="0664", GROUP="dialout"

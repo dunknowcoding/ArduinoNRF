@@ -52,6 +52,9 @@ public:
     void detach();
     void poll();
     void irqHandler();
+    // Called from SysTick so a 1200-bps touch completes even when loop() never
+    // yields and no further USB packet arrives after the host drops DTR.
+    void serviceTick();
     bool enabled() const;
     bool attached() const;
     bool ready() const;
@@ -172,6 +175,7 @@ private:
     void resetDynamicEndpoints();
     void queueSerialStateNotification(bool userPort);
     void updateSerialState(bool userPort);
+    void serviceTouchTimer();
     volatile bool enabled_ = false;
     volatile bool started_ = false;
     volatile bool attached_ = false;

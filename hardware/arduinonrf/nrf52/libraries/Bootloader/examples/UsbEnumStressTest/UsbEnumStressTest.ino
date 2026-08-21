@@ -3,13 +3,14 @@
 //
 // Both the SERVICE CDC (upload/DFU) and the USER CDC (this sketch's Serial) are
 // interfaces of one composite device; enumeration is serviced in the USBD ISR,
-// so it no longer depends on loop() yielding. With the pre-interrupt-driven
-// poll-only build this loop() starved USB and the COM port(s) dropped.
+// so it never depends on loop() yielding. Poll-only USB is intentionally not a
+// supported build mode because this loop would starve it and drop the COM ports.
 //
 // Expected on a native-USB nRF52840 board (e.g. promicro_nrf52840), usbcdc=enabled:
 //   * Both COM ports enumerate within ~1s and stay visible indefinitely.
 //   * The board is still re-uploadable over USB (the 1200-bps DFU touch is also
-//     serviced in the ISR), so a non-yielding sketch never bricks the port.
+//     captured in the ISR and its confirmation timer is completed by SysTick),
+//     so a non-yielding sketch never bricks the port.
 //   * The LED blinks purely from a busy-wait, proving loop() never yields.
 
 void setup() {

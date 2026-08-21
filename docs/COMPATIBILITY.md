@@ -45,7 +45,7 @@ Identities below were corrected against the upstream `Adafruit_nRF52_Bootloader`
 | `promicro_nrf52840` | `0x239A:0x00B3` | `0x239A:0x00B4` | UF2 + Adafruit serial DFU | `NICENANO` / `nRF52840-nicenano` | ✅ **Verified on hardware**; identical bootloader to nice!nano (the clone ships with it). |
 | `nicenano_v2` | `0x239A:0x00B3` | `0x239A:0x00B4` | UF2 + Adafruit serial DFU | `NICENANO` / `nRF52840-nicenano` | Identity matches upstream; pipeline is the same as ProMicro. |
 | `supermini_nrf52840` | `0x239A:0x00B3` | `0x239A:0x00B4` | UF2 + Adafruit serial DFU | `NICENANO` | The AliExpress SuperMini ships with the nice!nano bootloader — same identity. LED on P0.15. |
-| `nrfmicro_nrf52840` | `0x1209:0x5284` | `0x1209:0x5285` | Adafruit serial DFU | `NRFMICRO` / `nRF52840-nRFMicro-v0` | joric open-hardware identity. Some DIY/JLCPCB builds are flashed with nice!nano IDs instead — verify before relying on the VID:PID. |
+| `nrfmicro_nrf52840` | `0x1209:0x5284` | `0x1209:0x5284` | Adafruit serial DFU | `NRFMICRO` / `nRF52840-nRFMicro-v0` | Default matches the current upstream S140 7.3.0 image at `0x27000`; pid.codes assigns one identity to both modes. Legacy S140 6.1.1 at `0x26000` has its own explicit menu. Some DIY/JLCPCB builds use no-SoftDevice or nice!nano images, so select the matching explicit layout. |
 | `xiao_nrf52840` | `0x2886:0x0044` | `0x2886:0x8044` | Adafruit serial DFU (Seeed) | `XIAO-BOOT` / `nRF52840-SeeedXiao-v1` | Seeed XIAO nRF52840. Sense variant uses `0x2886:0x0045/0x8045` (covered in the auto-detect table). |
 | `pitaya_go_nrf52840` | `0x2886:0xF00E` | `0x2886:0xF00E` | Adafruit serial DFU | `PITAYAGO` / `PITAYAGO` | Makerdiary Pitaya Go. |
 | `mini_nrf52840` | `auto` | `auto` | varies | varies | ⚠️ No canonical identity or layout. The bare/SWD default is linked at `0x0`; select an explicit USB bootloader layout before compiling. Auto upload rejects a detected link-address mismatch. |
@@ -59,14 +59,14 @@ Identities below were corrected against the upstream `Adafruit_nRF52_Bootloader`
 |---|---|---|
 | nice!nano v2 | `0x1915:0x5286` (placeholder) | `0x239A:0x00B3` + `runtime 0x00B4` ✅ |
 | SuperMini | `0x1915:0x5287` (placeholder) | `0x239A:0x00B3` + `runtime 0x00B4` ✅ |
-| nRFMicro | `0x1915:0x5288` + `nordic-dfu` (wrong type) | `0x1209:0x5284/0x5285` + `adafruit-dfu` ✅ |
+| nRFMicro | `0x1915:0x5288` + `nordic-dfu` (wrong type) | `0x1209:0x5284` + `adafruit-dfu` ✅ |
 | XIAO | `0x1915:0x5283` + empty UF2 metadata | `0x2886:0x0044/0x8044` + `XIAO-BOOT` ✅ |
 | Pitaya Go | `0x1915:0x5284` + `nordic-dfu` (wrong type) | `0x2886:0xF00E` + `adafruit-dfu` + `PITAYAGO` ✅ |
 | USB Dongle | `0x1915:0x5285` + `uf2` (wrong type) | `0x1915:0x521F` + Nordic USB serial DFU + `0x1000..0xE0000` partition contract |
 | Mini | `0x1915:0x5282` (placeholder) | `auto` + flagged variable |
 | Generic devboard | `0x1915:0x5280` (placeholder) | `auto` + flagged variable / DK uses J-Link |
 
-The auto-detect table in `upload.ps1` (`$script:NrfBootloaderCandidates`) was also extended with the Seeed (`0x2886:0x0044/0x8044/0x0045/0x8045`), Makerdiary (`0x2886:0xF00E`) and pid.codes nRFMicro (`0x1209:0x5284/0x5285`) entries, so `bootloader_mode=auto` also recognises them.
+The auto-detect table in `upload.ps1` (`$script:NrfBootloaderCandidates`) was also extended with the Seeed (`0x2886:0x0044/0x8044/0x0045/0x8045`), Makerdiary (`0x2886:0xF00E/0xF00F`) and pid.codes nRFMicro (`0x1209:0x5284`) entries, so `bootloader_mode=auto` also recognises them. MakerDiary shares `0xF00F` between the M.2 Module and Connect Kit, so auto-detection does not pretend that VID:PID alone proves the board model; explicit M.2 entries carry the exact UF2 identity and separate S140 v6 (`0x26000`) from no-SoftDevice (`0x1000`) layouts.
 
 ## Flash layout / app-start compatibility
 
@@ -77,7 +77,7 @@ property of the bootloader plus reserved flash layout:
 |---|---:|---|
 | No SoftDevice / MBR only | `0x1000` | UF2 `INFO_UF2.TXT` reports `SoftDevice: not found`, or the board was flashed with a bootloader/MBR-only image. |
 | SoftDevice S140 v6 | `0x26000` | Adafruit/nice!nano-style S140 v6 bootloader layout. This is the normal nice!nano v2 public layout. |
-| SoftDevice S140 v7 / legacy | `0x27000` | Bootloaders using the larger S140 v7 layout, including Seeed XIAO-style UF2 profiles. |
+| SoftDevice S140 v7 | `0x27000` | Bootloaders using the larger S140 v7 layout, including current nRFMicro and Seeed XIAO-style UF2 profiles. |
 | Bare application / SWD | `0x0` | Targets with no MBR, SoftDevice, or USB bootloader reservation. |
 | Nordic PCA10059 USB serial DFU | `0x1000` | Official dongle MBR at the bottom of flash; application plus package storage remain below the onboard bootloader at `0xE0000`. |
 
@@ -123,6 +123,7 @@ transport with an app linked for the wrong SoftDevice boundary.
 
 - Adafruit_nRF52_Bootloader board.h files (authoritative for VID:PID, UF2 label, board-id, LED pins): <https://github.com/adafruit/Adafruit_nRF52_Bootloader/tree/master/src/boards>
 - Adafruit_nRF52_Bootloader README (UF2 app address depends on SoftDevice size/version; S140 v6 `0x26000`, v7 `0x27000`; `flash` and `flash-sd` are distinct): <https://github.com/adafruit/Adafruit_nRF52_Bootloader/blob/master/README.md>
+- Adafruit_nRF52_Bootloader board definitions and release assets (current `nrfmicro` uses S140 7.3.0; `nrf52840_m2`, `nice_nano`, and `pitaya_go` use S140 6.1.1): <https://github.com/adafruit/Adafruit_nRF52_Bootloader/tree/master/src/boards>
 - nice!nano troubleshooting (USB DFU update when the existing bootloader works; J-Link/OpenOCD recovery when it does not; bundled `nice_nano_bootloader-0.6.0_s140_6.1.1.hex`): <https://nicekeyboards.com/docs/nice-nano/troubleshooting/>
 - Seeed XIAO Arduino core boards.txt (XIAO `0x0044`/`0x8044`): <https://github.com/Seeed-Studio/Adafruit_nRF52_Arduino/blob/master/boards.txt>
 - pdcook nRFMicro-Arduino-Core (SuperMini LED P0.15, nRFMicro runtime PID): <https://github.com/pdcook/nRFMicro-Arduino-Core>

@@ -70,6 +70,12 @@ choices because it has no native USB upload path in this package.
   from the selected board recipe. A discovered mismatch remains terminal before
   firmware is written; Arduino compiles before upload, so the wrapper cannot
   safely relocate an already-linked image.
+- Before any Windows USB discovery or touch, the uploader independently validates every
+  Intel HEX record checksum and length, rejects overlaps or records after EOF,
+  and requires the actual vector table, reset entry, start address, and highest
+  programmed byte to fit the selected application range. The same validated
+  image is used for serial DFU and UF2; recipe metadata alone is not accepted as
+  proof that the compiled image is safe to transfer.
 - **Layout guard** (`layout` failure): compares the IDE `Bootloader / DFU` app
   start (`0x1000` / `0x26000` / `0x27000`) against `INFO_UF2.TXT` on the
   selected board's UF2 drive (matched by stable USB identity, not drive letter).
@@ -122,6 +128,8 @@ choices because it has no native USB upload path in this package.
 - `upload.py` accepts the selected port only when it matches either the board
   recipe's runtime identity or its bootloader identity; the script then owns
   the 1200-bps transition through `adafruit-nrfutil`.
+- The script validates the actual Intel HEX framing, vector table, link address,
+  and maximum application range before resolving or touching a USB device.
 - On a dual-CDC runtime, a selected user endpoint is remapped to interface zero
   only when Linux sysfs or the macOS IOUSB registry proves it is a sibling on
   the same USB composite. Ambiguous mappings fail closed.
@@ -129,6 +137,36 @@ choices because it has no native USB upload path in this package.
   serial must return with the declared runtime VID/PID before upload succeeds.
 - Ambiguous same-identity devices fail closed instead of allowing a peer board
   to satisfy target detection or post-upload verification.
+- Generic boards whose base recipe says `auto` must select an explicit
+  **Bootloader / DFU** identity on Linux/macOS; the cross-platform uploader does
+  not guess a bootloader VID/PID after the application port disappears.
+
+## Probe and debugger image safety
+
+- The link recipe constrains ELF load-segment alignment to the nRF flash page
+  size. An application linked for `0x0`, `0x1000`, `0x26000`, or `0x27000` therefore
+  has its first file-backed `PT_LOAD` segment at that exact address; debugger
+  tools cannot interpret alignment padding as an earlier flash load and erase a
+  SoftDevice prefix.
+- A debugger should still validate ELF program headers, not only section
+  addresses, and protect the MBR/SoftDevice plus bootloader ranges in its target
+  profile. Arduino USB upload continues to use the independently validated HEX
+  image.
+- Startup, SoftDevice, fault, and USB diagnostic words live in the linker's
+  `.noinit` allocation. No diagnostic uses a guessed absolute RAM address.
+- No-SoftDevice profiles link data at `0x20000000` and expose the full 256 KiB
+  RAM. SoftDevice profiles retain the required `0x20006000` RAM origin.
+
+## USB-safe idle and power-down behavior
+
+- Native USB remains interrupt-driven during ordinary System ON `WFI` idle;
+  applications do not need to busy-wait merely to preserve enumeration.
+- Generic `nrfSystemPowerDown()` refuses SystemOFF whenever VBUS is present,
+  including the pre-configuration and USB-suspend windows. Entering SystemOFF
+  in either window can leave no new VBUS edge to wake the MCU.
+- `NrfPower::enterSystemOff()` applies the same safe default. A caller that
+  intentionally accepts disconnecting an already powered USB session must say
+  so explicitly with `enterSystemOff(true)`.
 
 ## Real Promicro-class board result
 

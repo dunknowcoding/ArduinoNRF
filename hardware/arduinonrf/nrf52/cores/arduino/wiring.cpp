@@ -884,6 +884,7 @@ extern "C" void nrfNimbleYieldPoll(void) __attribute__((weak));
 
 extern "C" void SysTick_Handler(void) {
     ++g_millis;
+    nrfUsbdDriver().serviceTick();
 }
 
 void init(void) {
@@ -1217,11 +1218,18 @@ bool nrfSystemPowerDownSupported(void) {
 }
 
 bool nrfSystemUsbBlocksLowPower(void) {
-    return nrfUsbRuntimeEnabled() && USBDevice.configured() && !USBDevice.suspended();
+    // SystemOFF is unsafe whenever a native-USB runtime sees (or, on a board
+    // profile that requires it, conservatively assumes) VBUS. Configuration
+    // and suspend are not exemptions: neither creates the new VBUS edge needed
+    // to wake a board that powered down before or during enumeration.
+    return nrfUsbRuntimeEnabled() && nrfUsbPowerPresent();
 }
 
 bool nrfSystemCanSleep(void) {
-    return nrfSystemSleepSupported() && !nrfSystemUsbBlocksLowPower();
+    // System ON WFI preserves the USBD peripheral and wakes on its interrupt.
+    // Interrupt-driven USB therefore remains compatible with ordinary idle
+    // sleep and does not need a wasteful busy loop.
+    return nrfSystemSleepSupported();
 }
 
 bool nrfSystemCanPowerDown(void) {
@@ -1239,8 +1247,16 @@ void nrfSystemPowerDown(void) {
     if (!nrfSystemCanPowerDown()) {
         return;
     }
+    // Close the small check-to-write race if VBUS arrived after the first
+    // nrfSystemCanPowerDown() evaluation.
+    if (nrfSystemUsbBlocksLowPower()) {
+        return;
+    }
     reg32(POWER_BASE, POWER_SYSTEMOFF) = 1UL;
     __asm__ volatile("dsb" : : : "memory");
+    const uint32_t systemOffReadback = reg32(POWER_BASE, POWER_SYSTEMOFF);
+    (void)systemOffReadback;
+    __asm__ volatile("isb" : : : "memory");
     __asm__ volatile("wfi" : : : "memory");
 }
 

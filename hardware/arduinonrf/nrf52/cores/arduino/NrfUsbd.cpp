@@ -112,7 +112,7 @@ constexpr uint32_t CLOCK_EVENTS_HFCLKSTARTED = 0x100UL;
 constexpr uint32_t AIRCR = 0xE000ED0CUL;
 constexpr uint32_t AIRCR_RESET_KEY = 0x05FA0000UL;
 constexpr uint32_t AIRCR_SYSRESETREQ = 0x4UL;
-constexpr uint32_t USBD_DIAG_CAUSE_ADDR = 0x20004004UL;
+extern "C" volatile uint32_t g_nrfDiagCause;
 constexpr uint32_t USBD_DIAG_CAUSE_CONFIG_TIMEOUT = 0xCA5E0001UL;
 constexpr uint32_t USBD_DIAG_CAUSE_POLL_DETACH = 0xCA5E0002UL;
 constexpr uint32_t USBD_DIAG_CAUSE_IRQ_DETACH = 0xCA5E0003UL;
@@ -277,8 +277,7 @@ inline void setNvicPriority(uint32_t irqNumber, uint8_t priority) {
 
 // RAII mutual-exclusion between foreground USB servicing and the USBD ISR.
 //
-// Once the USBD interrupt is enabled (the default for every board option except
-// the historical promicroserialnosd poll-only override), processBusState() /
+// Once the USBD interrupt is enabled, processBusState() /
 // serviceDataIn() / serviceSetup() run from irqHandler() AND can still be
 // reached from foreground (Serial.write -> serviceDataIn, flush(), poll() via
 // yield()). They share USBD EasyDMA registers, the in-flight flags, and the
@@ -290,7 +289,7 @@ inline void setNvicPriority(uint32_t irqNumber, uint8_t priority) {
 // blocking it here means it cannot preempt us, and any event that arrives while
 // masked simply stays pending and is taken the instant we unmask. The guard
 // saves and restores the prior enable state, so it is a zero-cost no-op when the
-// IRQ is disabled (poll-only builds, or while the GDB stub holds it masked) and
+// IRQ is temporarily disabled while the GDB stub holds it masked and
 // nests correctly.
 class UsbdIrqLock {
 public:
@@ -546,11 +545,11 @@ inline void requestBootloaderReset() {
 }
 
 inline void markResetCause(uint32_t cause) {
-    mem32(USBD_DIAG_CAUSE_ADDR) = cause;
+    g_nrfDiagCause = cause;
 }
 
 inline void markResetCauseIfUnset(uint32_t cause) {
-    if (mem32(USBD_DIAG_CAUSE_ADDR) == 0UL) {
+    if (g_nrfDiagCause == 0UL) {
         markResetCause(cause);
     }
 }
@@ -835,8 +834,8 @@ void NrfUsbdDriver::poll() {
     // Serialize against the USBD ISR: poll() and irqHandler() run the same
     // servicing routines and touch the same registers/state. With the IRQ live
     // (interrupt-driven builds) this mask makes the whole foreground pass atomic
-    // w.r.t. the ISR; on poll-only builds the IRQ is disabled and this is a
-    // no-op.
+    // w.r.t. the ISR; while the GDB stub deliberately masks the IRQ this is a
+    // no-op and the stub pumps the same service path explicitly.
     UsbdIrqLock lock;
 
     const bool hasVbus = effectiveVbusDetected();
@@ -869,47 +868,7 @@ void NrfUsbdDriver::poll() {
         }
     }
 
-    if (serviceTouchPending_) {
-        const bool resetArmed = configuredMillis_ != 0UL &&
-            (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-        const bool windowStarted = serviceTouchResetMillis_ != 0UL;
-        const bool windowElapsed = windowStarted &&
-            (millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS;
-        const bool inConfirmWindow = windowStarted && !windowElapsed;
-        if (windowElapsed) {
-            // The confirm window opened and fully elapsed: commit the touch and
-            // reboot. We deliberately do NOT re-check DTR here. Windows
-            // re-asserts DTR on the port close that immediately follows the
-            // touch, so if poll()/the ISR first runs AFTER the window elapsed
-            // with DTR back high, re-checking it would cancel an already-armed
-            // touch. This hazard is largest with usbcdc=disabled, where the
-            // single service CDC sees little traffic and the ISR can land
-            // outside the short confirm window.
-            serviceTouchPending_ = false;
-            serviceTouchResetMillis_ = 0UL;
-            if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
-                ++ignoredResetTouchCount_;
-            } else {
-                detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
-                detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
-            }
-        } else if (!configured_ ||
-                   (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
-            // NOTE: the 1200-bps-touch reboot is honored regardless of the build's
-            // default upload mode (it used to be gated on prefersUsbUpload). The
-            // touch is the universal DFU *recovery* path; disabling it on a
-            // jlink/openocd-profile build means one wrong-profile flash can leave a
-            // board with no host-side way back into the bootloader. It still only
-            // fires on a configured port seeing 1200 baud + a DTR drop on the
-            // service CDC, which never happens for normal data.
-            serviceTouchPending_ = false;
-            serviceTouchResetMillis_ = 0UL;
-        } else if (!resetArmed) {
-            serviceTouchResetMillis_ = 0UL;
-        } else if (serviceTouchResetMillis_ == 0UL) {
-            serviceTouchResetMillis_ = millis();
-        }
-    }
+    serviceTouchTimer();
 
     if (detachRequestMagic_ == USBD_DETACH_REQUEST_MAGIC) {
         const uint32_t cause = detachCause_;
@@ -945,47 +904,7 @@ void NrfUsbdDriver::irqHandler() {
             serviceNotificationIn(true);
         }
     }
-    if (serviceTouchPending_) {
-        const bool resetArmed = configuredMillis_ != 0UL &&
-            (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-        const bool windowStarted = serviceTouchResetMillis_ != 0UL;
-        const bool windowElapsed = windowStarted &&
-            (millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS;
-        const bool inConfirmWindow = windowStarted && !windowElapsed;
-        if (windowElapsed) {
-            // The confirm window opened and fully elapsed: commit the touch and
-            // reboot. We deliberately do NOT re-check DTR here. Windows
-            // re-asserts DTR on the port close that immediately follows the
-            // touch, so if poll()/the ISR first runs AFTER the window elapsed
-            // with DTR back high, re-checking it would cancel an already-armed
-            // touch. This hazard is largest with usbcdc=disabled, where the
-            // single service CDC sees little traffic and the ISR can land
-            // outside the short confirm window.
-            serviceTouchPending_ = false;
-            serviceTouchResetMillis_ = 0UL;
-            if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
-                ++ignoredResetTouchCount_;
-            } else {
-                detachCause_ = USBD_DIAG_CAUSE_1200_TOUCH;
-                detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
-            }
-        } else if (!configured_ ||
-                   (dtr_ && !inConfirmWindow) || lineCoding_.baudRate != 1200UL) {
-            // NOTE: the 1200-bps-touch reboot is honored regardless of the build's
-            // default upload mode (it used to be gated on prefersUsbUpload). The
-            // touch is the universal DFU *recovery* path; disabling it on a
-            // jlink/openocd-profile build means one wrong-profile flash can leave a
-            // board with no host-side way back into the bootloader. It still only
-            // fires on a configured port seeing 1200 baud + a DTR drop on the
-            // service CDC, which never happens for normal data.
-            serviceTouchPending_ = false;
-            serviceTouchResetMillis_ = 0UL;
-        } else if (!resetArmed) {
-            serviceTouchResetMillis_ = 0UL;
-        } else if (serviceTouchResetMillis_ == 0UL) {
-            serviceTouchResetMillis_ = millis();
-        }
-    }
+    serviceTouchTimer();
     if (detachRequestMagic_ == USBD_DETACH_REQUEST_MAGIC) {
         const uint32_t cause = detachCause_;
         detachRequestMagic_ = 0UL;
@@ -1001,7 +920,12 @@ void NrfUsbdDriver::irqHandler() {
 // CDC open at 1200 bps before we reboot to the bootloader. The stub busy-loops
 // the pump, so this is a debounce against a transient line-coding readout, not
 // a wall-clock interval (millis() is frozen during the DebugMon halt).
-constexpr uint32_t USBD_HALT_TOUCH_CONFIRM_TICKS = 1024UL;
+// The halted stub has already observed a configured service CDC at 1200 baud;
+// this is an explicit upload request, not ambient serial traffic. Keep a short
+// poll debounce to reject a torn control transfer, but do not make recovery
+// depend on thousands of USB service passes (some passes wait on EasyDMA and
+// turned a valid touch into a tens-of-seconds escape).
+constexpr uint32_t USBD_HALT_TOUCH_CONFIRM_TICKS = 32UL;
 
 void NrfUsbdDriver::setStubHalted(bool halted) {
     stubHalted_ = halted;
@@ -1279,6 +1203,50 @@ bool NrfUsbdDriver::connected() const {
     return enabled_ && attached_ && ready_ && configured_ && !suspended_ &&
         effectiveVbusDetected() && dtr_ && dtrAssertedMillis_ != 0UL &&
         (millis() - dtrAssertedMillis_) >= USBD_CDC_OPEN_SETTLE_MS;
+}
+
+void NrfUsbdDriver::serviceTouchTimer() {
+    if (!serviceTouchPending_) {
+        return;
+    }
+
+    const bool resetArmed = configuredMillis_ != 0UL &&
+        (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
+    const bool windowStarted = serviceTouchResetMillis_ != 0UL;
+    const bool windowElapsed = windowStarted &&
+        (millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS;
+    const bool inConfirmWindow = windowStarted && !windowElapsed;
+
+    if (windowElapsed) {
+        // The 1200-bps line coding plus DTR drop is already explicit host intent.
+        // Do not re-check DTR: usbser may reassert it while closing the handle.
+        serviceTouchPending_ = false;
+        serviceTouchResetMillis_ = 0UL;
+        if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
+            ++ignoredResetTouchCount_;
+        } else {
+            markResetCause(USBD_DIAG_CAUSE_1200_TOUCH);
+            requestBootloaderReset();
+        }
+        return;
+    }
+
+    if (!configured_ || (dtr_ && !inConfirmWindow) ||
+        lineCoding_.baudRate != 1200UL) {
+        serviceTouchPending_ = false;
+        serviceTouchResetMillis_ = 0UL;
+    } else if (!resetArmed) {
+        serviceTouchResetMillis_ = 0UL;
+    } else if (!windowStarted) {
+        serviceTouchResetMillis_ = millis();
+    }
+}
+
+void NrfUsbdDriver::serviceTick() {
+    if (!enabled_ || stubHalted_) {
+        return;
+    }
+    serviceTouchTimer();
 }
 
 bool NrfUsbdDriver::userConnected() const {
@@ -1722,9 +1690,6 @@ void NrfUsbdDriver::clearEvents() {
 }
 
 void NrfUsbdDriver::enableInterrupts() {
-#if defined(NRF_USBD_POLL_ONLY) && (NRF_USBD_POLL_ONLY == 1)
-    return;
-#endif
     const uint32_t interruptMask =
         USBD_INT_USBRESET_MASK |
         USBD_INT_STARTED_MASK |

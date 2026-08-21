@@ -26,6 +26,17 @@ void USBD_IRQHandler(void);
 void nrfSoftDeviceBootDetect(void);
 }
 
+// Linker-owned diagnostics are safe in every RAM layout. They are intentionally
+// excluded from C runtime clearing so a debugger can inspect the last reset or
+// fault, without writing into a guessed application or SoftDevice address.
+extern "C" {
+volatile uint32_t g_nrfDiagResetMarker __attribute__((section(".noinit"), used));
+volatile uint32_t g_nrfDiagCause __attribute__((section(".noinit"), used));
+volatile uint32_t g_nrfDiagFaultInfo __attribute__((section(".noinit"), used));
+volatile uint32_t g_nrfDiagSoftDeviceMarker __attribute__((section(".noinit"), used));
+volatile uint32_t g_nrfDiagSoftDeviceAppStart __attribute__((section(".noinit"), used));
+}
+
 using IsrVector = void (*)(void);
 extern const IsrVector g_isrVectors[];
 
@@ -69,14 +80,6 @@ constexpr uint32_t kGpregretRecoveryMagic = 0x4EUL; // DFU_MAGIC_SERIAL_ONLY_RES
 constexpr uint32_t kGpregretRecoveryMagic = 0x57UL; // DFU_MAGIC_UF2_RESET
 #endif
 
-// Diagnostic marker written once at the very start of Reset_Handler.
-// Stored in the SoftDevice-reserved SRAM zone (0x20000000-0x20005FFF), which
-// is not touched by either the bootloader startup or our own linker script,
-// so it survives every NVIC_SystemReset() round-trip. Reading this location
-// from a running app confirms that Reset_Handler executed at least once.
-constexpr uint32_t kDiagSramAddr      = 0x20004000UL;
-constexpr uint32_t kDiagCauseSramAddr = 0x20004004UL;
-constexpr uint32_t kDiagFaultInfoSramAddr = 0x20004008UL;  // VECTACTIVE (Default) or stacked PC (HardFault)
 constexpr uint32_t kDiagResetHandlerMark = 0xA55A0001UL;  // app Reset_Handler ran
 constexpr uint32_t kDiagCauseDefaultHandler = 0xCA5E0DEFUL;
 constexpr uint32_t kDiagCauseHardFault = 0xCA5E0FA1UL;
@@ -158,7 +161,7 @@ extern "C" void nrfWdtFeed(void) {
 }
 
 extern "C" void WDT_IRQHandler(void) {
-    raw32(kDiagCauseSramAddr) = kDiagCauseWdtIrq;
+    g_nrfDiagCause = kDiagCauseWdtIrq;
     raw32(kWdtBase + kWdtEventsTimeout) = 0UL;
     feedBootloaderWdt();
 }
@@ -180,9 +183,9 @@ extern "C" void Default_Handler(void) {
     // Capture WHICH exception/IRQ landed here (SCB->ICSR VECTACTIVE, bits 0..8)
     // into the bootloader-persistent diag slot so a post-reset SWD read names
     // the offending vector. For a peripheral IRQ, IRQn = VECTACTIVE - 16.
-    raw32(kDiagFaultInfoSramAddr) =
+    g_nrfDiagFaultInfo =
         (*reinterpret_cast<volatile uint32_t *>(0xE000ED04UL)) & 0x1FFUL;
-    raw32(kDiagCauseSramAddr) = kDiagCauseDefaultHandler;
+    g_nrfDiagCause = kDiagCauseDefaultHandler;
     raw32(kGpregretAddr) = kGpregretRecoveryMagic;
     raw32(kAircrAddr) = kAircrSysresetReq;
     while (true) { }
@@ -192,10 +195,9 @@ extern "C" void Default_Handler(void) {
 // active.  Guard against the linker seeing two strong definitions.
 #if !defined(NRF_SYSTEM_USB_GDB_STUB) || (NRF_SYSTEM_USB_GDB_STUB == 0)
 extern "C" void HardFault_Handler(void) {
-    // Write a distinct marker before resetting so the next app run can detect
-    // that a HardFault occurred (read 0x20004002 for the fault flag byte).
-    *reinterpret_cast<volatile uint32_t *>(kDiagSramAddr) =
-        (*reinterpret_cast<volatile uint32_t *>(kDiagSramAddr) & 0xFFFF0000UL) | 0x0000FA1UL;
+    // Write a distinct marker before resetting so a debugger can distinguish a
+    // HardFault from a normal reset.
+    g_nrfDiagResetMarker = (g_nrfDiagResetMarker & 0xFFFF0000UL) | 0x00000FA1UL;
     // Capture the stacked faulting PC (exception frame offset 0x18) into the
     // persistent diag slot so a post-reset SWD read points at the instruction
     // that faulted. Assumes the fault was taken from an MSP context (the
@@ -203,9 +205,9 @@ extern "C" void HardFault_Handler(void) {
     {
         uint32_t msp;
         __asm volatile("mrs %0, msp" : "=r"(msp));
-        raw32(kDiagFaultInfoSramAddr) = reinterpret_cast<volatile uint32_t *>(msp)[6];
+        g_nrfDiagFaultInfo = reinterpret_cast<volatile uint32_t *>(msp)[6];
     }
-    raw32(kDiagCauseSramAddr) = kDiagCauseHardFault;
+    g_nrfDiagCause = kDiagCauseHardFault;
     raw32(kGpregretAddr) = kGpregretRecoveryMagic;
     raw32(kAircrAddr) = kAircrSysresetReq;
     while (true) { }
@@ -222,11 +224,9 @@ extern "C" void Reset_Handler(void) {
     sanitizeExecutionState();
     applySystemInitWorkarounds();
 
-    // Write a diagnostic marker to a SRAM location that is not touched by
-    // either the bootloader startup or our own linker script (SoftDevice-
-    // reserved zone, 0x20000000–0x20005FFF).  This allows a subsequent app
-    // run to detect whether this Reset_Handler ever executed.
-    *reinterpret_cast<volatile uint32_t *>(kDiagSramAddr) = kDiagResetHandlerMark;
+    // The linker keeps this diagnostic word outside initialized data and BSS,
+    // so it remains safe for bare and SoftDevice-compatible RAM layouts.
+    g_nrfDiagResetMarker = kDiagResetHandlerMark;
 
     // If the bootloader started its WDT before jumping to the app it cannot
     // be stopped on nRF52840 (PS §24.3).  Feed every active channel once here
@@ -245,8 +245,8 @@ extern "C" void Reset_Handler(void) {
     // Record whether an MBR + SoftDevice image is present in flash.  The core
     // never enables it (all wireless stacks own the radio bare-metal), so this
     // is purely awareness: a dormant SoftDevice keeps every peripheral free for
-    // the application.  The marker lands in a persistent diag SRAM slot so it
-    // can be read back over SWD on a board with no serial console.
+    // the application. The marker lands in linker-owned diagnostic storage so
+    // it can be read back over SWD on a board with no serial console.
     nrfSoftDeviceBootDetect();
 
     uint32_t *source = &_sidata;

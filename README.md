@@ -7,7 +7,7 @@
 [![platform](https://img.shields.io/badge/platform-Arduino-00979D)](https://www.arduino.cc/)
 [![mcu](https://img.shields.io/badge/MCU-nRF52840%20%2F%20nRF52833-0a7bbb)](https://www.nordicsemi.com/)
 [![boards](https://img.shields.io/badge/boards-10-success)](#-supported-boards)
-[![version](https://img.shields.io/badge/version-0.4.0-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.4.0)
+[![version](https://img.shields.io/badge/version-0.4.1-blue)](https://github.com/dunknowcoding/ArduinoNRF/releases/tag/v0.4.1)
 [![upload](https://img.shields.io/badge/upload-no%20button%2C%20one%20cable-brightgreen)](#-hands-free-uploads)
 [![debug](https://img.shields.io/badge/debug-USB%20CDC%20GDB%20stub-orange)](#-single-cable-debugging)
 [![ble](https://img.shields.io/badge/BLE-NimBLE%20GATT%20verified-blueviolet)](#-bluetooth-low-energy-nimble)
@@ -76,6 +76,8 @@ The host-side pipeline (`upload.ps1`) is hardened against the messy real world:
 - **Same-device port resolution** — selecting the *user* CDC safely remaps to that exact composite device's service CDC; ambiguous peers fail closed before firmware is touched.
 - **UF2-aware** — on Windows, `Auto-detect` prefers the selected board's mounted UF2 drive when it is present, and falls back only to the requested serial-DFU path.
 - **Multi-board safe** — UF2 volumes are matched to the selected upload COM by stable USB identity, so two `NICENANO` drives do not collide.
+- **Image-safe** — Intel HEX framing, vector table, flash range, and ELF load addresses are validated before a board is touched; a mismatched layout fails closed.
+- **Power-safe** — System ON idle keeps USB interrupt-driven, while SystemOFF is blocked whenever VBUS is already present unless the application explicitly opts into disconnecting it.
 - **Fast** — slow Windows PnP enumerations are cached during the stable pre-touch window (~3 s saved per upload).
 
 See **[docs/uploads/hands_free_upload.md](docs/uploads/hands_free_upload.md)** and **[docs/platform/UPLOAD_BEHAVIOR.md](docs/platform/UPLOAD_BEHAVIOR.md)**.
