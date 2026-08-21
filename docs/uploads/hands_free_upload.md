@@ -102,6 +102,10 @@ On dual-CDC runtimes, Linux sysfs or the macOS IOUSB registry ties the selected
 serial endpoint to its exact USB composite and resolves interface zero before
 the 1200-bps touch. The same scope must yield exactly one bootloader interface;
 the wrapper does not rely on upstream's 1.5-second sleep and same-tty reopen.
+When the host exposes an enumeration token, the wrapper also detects a fast
+same-VID/PID reset even if polling misses the brief tty absence, and rejects a
+changed session before the reset gesture or a session that changes during the
+settle interval.
 Post-upload verification accepts the returning composite
 once its declared runtime identity and captured USB serial are present; it does
 not mistake the two CDC interfaces for two boards.

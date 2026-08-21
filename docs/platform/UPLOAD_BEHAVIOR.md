@@ -174,7 +174,8 @@ choices because it has no native USB upload path in this package.
 
 - `upload.py` accepts the selected port only when it matches either the board
   recipe's runtime identity or its bootloader identity; the script then owns
-  the 1200-bps transition through `adafruit-nrfutil`.
+  the single 1200-bps/DTR transition itself and disables the transport tool's
+  fixed-name touch.
 - The Arduino recipe passes the selected bootloader transport explicitly.
   Adafruit serial-DFU and Adafruit-compatible UF2 layouts use the verified serial
   service. `auto` and Nordic USB DFU fail before image or USB access rather than
@@ -208,8 +209,14 @@ choices because it has no native USB upload path in this package.
   package generation, transfer, and runtime verification. A concurrent uploader
   fails before touching that target, while the OS releases the lock after exit.
 - Linux and macOS re-prove the selected physical identity after acquiring that lock
-  and re-resolve its maintenance endpoint before any touch or transfer. A detach,
-  tty renumber, or peer replacement in the discovery-to-lock window fails closed.
+  and re-resolve its maintenance endpoint before any touch or transfer. They prove
+  it again after package generation, immediately before the first target-visible
+  action. A detach, tty renumber, session replacement, peer replacement, or stale
+  pre-existing bootloader endpoint fails closed.
+- Linux `devnum` and the macOS device-level registry session are used as
+  enumeration tokens when available. A same-VID/PID bootloader may satisfy a fast
+  transition without a sampled absence only after that token changes; the selected
+  port and token must then remain stable through the bounded settle interval.
 - USB IDs, address ranges, process/runtime timeouts, DFU/touch baud rates, device
   type, and SoftDevice requirement are finite and range-checked before transfer;
   malformed touch input cannot silently disable the bootloader transition.

@@ -150,6 +150,11 @@ def linux_tty_usb_identity(port: str):
             continue
         serial_file = parent / "serial"
         serial = serial_file.read_text(errors="ignore").strip() if serial_file.exists() else ""
+        devnum_file = parent / "devnum"
+        session = (
+            "devnum:" + devnum_file.read_text(errors="ignore").strip()
+            if devnum_file.exists() else ""
+        )
         interface_number = None
         for interface in (node,) + tuple(node.parents):
             number_file = interface / "bInterfaceNumber"
@@ -166,6 +171,7 @@ def linux_tty_usb_identity(port: str):
             "/dev/" + tty,
             interface_number,
             str(parent),
+            session,
         )
     return None
 
@@ -224,6 +230,9 @@ def mac_serial_devices():
         location_id = as_int(first_value(
             value, ("locationID", "locationId", "USB Location ID")
         ))
+        session_id = as_int(first_value(
+            value, ("IORegistryEntryID", "USB Address", "USB Device Address")
+        ))
         if vid is not None:
             current["vid"] = vid
         if pid is not None:
@@ -234,11 +243,17 @@ def mac_serial_devices():
             current["interface"] = interface_number
         if location_id is not None:
             current["stable_id"] = f"location:{location_id:08x}"
+        # Capture the device-level enumeration token, not a child interface's
+        # registry id. It changes across a fast same-VID/PID reset even when the
+        # physical location and serial remain identical.
+        if (vid is not None or pid is not None) and session_id is not None:
+            current["session"] = f"session:{session_id:x}"
         port = first_value(value, ("IOCalloutDevice", "IODialinDevice"))
         if port and "vid" in current and "pid" in current:
             devices.append((
                 current["vid"], current["pid"], current.get("serial", ""),
                 str(port), current.get("interface"), current.get("stable_id", ""),
+                current.get("session", ""),
             ))
         for child in value.get("IORegistryEntryChildren", []):
             walk(child, current)
@@ -264,6 +279,10 @@ def matches_target_scope(identity, serial: str, stable_id: str) -> bool:
     return False
 
 
+def identity_session(identity) -> str:
+    return identity[6] if len(identity) > 6 else ""
+
+
 def same_captured_target(
     expected_serial: str,
     expected_stable_id: str,
@@ -274,6 +293,26 @@ def same_captured_target(
     if expected_stable_id:
         return current_stable_id == expected_stable_id
     return bool(expected_serial) and current_serial == expected_serial
+
+
+def same_pre_mutation_target(
+    expected_serial: str,
+    expected_stable_id: str,
+    expected_session: str,
+    current_serial: str,
+    current_stable_id: str,
+    current_session: str,
+) -> bool:
+    if not same_captured_target(
+        expected_serial, expected_stable_id, current_serial, current_stable_id
+    ):
+        return False
+    # A host that exposes an enumeration token gives us a stronger TOCTOU
+    # boundary than topology/serial alone. Before the reset gesture, a changed
+    # token means this is no longer the endpoint instance we locked.
+    if expected_session and current_session:
+        return expected_session == current_session
+    return True
 
 
 def advance_runtime_stability(ready: bool, now: float, ready_since, stable_s: float):
@@ -330,14 +369,14 @@ def serial_identities():
     return []
 
 
-def select_scoped_control_port(
+def scoped_control_ports(
     identities,
     vid: int,
     pid: int,
     serial: str,
     stable_id: str,
 ):
-    """Return one exact maintenance endpoint, or None while it is ambiguous."""
+    """Return the unique physical-scope maintenance port set."""
     matches = [
         identity for identity in identities
         if (identity[0], identity[1]) == (vid, pid)
@@ -347,13 +386,25 @@ def select_scoped_control_port(
     if interface_zero:
         matches = interface_zero
     elif any(identity[4] is not None for identity in matches):
-        return None
+        return []
     unique_ports = []
     for identity in matches:
         port = identity[3]
         if port not in unique_ports:
             unique_ports.append(port)
-    return unique_ports[0] if len(unique_ports) == 1 else None
+    return unique_ports
+
+
+def select_scoped_control_port(
+    identities,
+    vid: int,
+    pid: int,
+    serial: str,
+    stable_id: str,
+):
+    """Return one exact maintenance endpoint, or None while it is ambiguous."""
+    ports = scoped_control_ports(identities, vid, pid, serial, stable_id)
+    return ports[0] if len(ports) == 1 else None
 
 
 def touch_serial_port(port: str, baud: int) -> None:
@@ -407,6 +458,7 @@ def wait_for_bootloader_control_port(
     runtime_pid: int,
     serial: str,
     stable_id: str,
+    prior_session: str,
     timeout_s: float,
     identity_source=None,
     monotonic=None,
@@ -419,7 +471,7 @@ def wait_for_bootloader_control_port(
     deadline = monotonic() + timeout_s
     same_identity = (boot_vid, boot_pid) == (runtime_vid, runtime_pid)
     saw_absence = not same_identity
-    stable_port = None
+    stable_candidate = None
     stable_since = None
 
     while monotonic() < deadline:
@@ -436,16 +488,42 @@ def wait_for_bootloader_control_port(
             )
             if not current_present:
                 saw_absence = True
-            candidate = None
+            elif candidate and prior_session:
+                candidate_identity = next(
+                    (
+                        identity for identity in identities
+                        if identity[3] == candidate
+                        and matches_target_scope(identity, serial, stable_id)
+                    ),
+                    None,
+                )
+                if (candidate_identity is not None and
+                        identity_session(candidate_identity) and
+                        identity_session(candidate_identity) != prior_session):
+                    saw_absence = True
+            if not saw_absence:
+                candidate = None
 
         if saw_absence and candidate:
-            if candidate != stable_port:
-                stable_port = candidate
+            candidate_identity = next(
+                (
+                    identity for identity in identities
+                    if identity[3] == candidate
+                    and matches_target_scope(identity, serial, stable_id)
+                ),
+                None,
+            )
+            candidate_key = (
+                candidate,
+                identity_session(candidate_identity) if candidate_identity else "",
+            )
+            if candidate_key != stable_candidate:
+                stable_candidate = candidate_key
                 stable_since = monotonic()
             elif monotonic() - stable_since >= 0.20:
                 return candidate
         else:
-            stable_port = None
+            stable_candidate = None
             stable_since = None
         sleep(0.05 if sys.platform.startswith("linux") else 0.20)
 
@@ -526,7 +604,7 @@ def capture_target_identity(
     boot_pid: int,
     runtime_vid: int,
     runtime_pid: int,
-) -> tuple[str, str, int, int]:
+) -> tuple[str, str, int, int, str]:
     allowed = {(boot_vid, boot_pid), (runtime_vid, runtime_pid)}
     if sys.platform.startswith("linux"):
         identity = linux_tty_usb_identity(port)
@@ -542,7 +620,7 @@ def capture_target_identity(
             )
         if not identity[2] and not identity[5]:
             fail("selected serial port has no stable USB topology or serial identity", code=4)
-        return identity[2], identity[5], identity[0], identity[1]
+        return identity[2], identity[5], identity[0], identity[1], identity_session(identity)
     if sys.platform == "darwin":
         matches = [d for d in mac_serial_devices()
                    if same_mac_serial_endpoint(d[3], port)]
@@ -560,7 +638,10 @@ def capture_target_identity(
             )
         if not matches[0][2] and not matches[0][5]:
             fail("selected serial endpoint has no stable USB topology or serial identity", code=4)
-        return matches[0][2], matches[0][5], matches[0][0], matches[0][1]
+        return (
+            matches[0][2], matches[0][5], matches[0][0], matches[0][1],
+            identity_session(matches[0]),
+        )
     fail("unsupported host for identity-verified serial DFU: " + sys.platform, code=4)
 
 
@@ -653,6 +734,13 @@ def main() -> int:
             ],
             0x239A, 0x0001, "", "scope",
         ) is None
+        assert scoped_control_ports(
+            [
+                (0x239A, 0x0001, "runtime", "/dev/ttyACM1", 0, "scope"),
+                (0x239A, 0x0001, "runtime", "/dev/ttyACM3", 0, "scope"),
+            ],
+            0x239A, 0x0001, "", "scope",
+        ) == ["/dev/ttyACM1", "/dev/ttyACM3"]
         assert select_scoped_control_port(
             [(0x239A, 0x0001, "runtime", "/dev/ttyACM2", 2, "scope")],
             0x239A, 0x0001, "", "scope",
@@ -663,7 +751,7 @@ def main() -> int:
         assert transfer_command.count("--verbose") == 1
         assert "-t" not in transfer_command and "--touch" not in transfer_command
 
-        def simulated_wait(samples, boot_pid, runtime_pid):
+        def simulated_wait(samples, boot_pid, runtime_pid, prior_session=""):
             clock = [0.0]
             index = [0]
 
@@ -676,7 +764,7 @@ def main() -> int:
 
             return wait_for_bootloader_control_port(
                 "/dev/ttyACM1", 0x239A, boot_pid, 0x239A, runtime_pid,
-                "", "scope", 1.0,
+                "", "scope", prior_session, 1.0,
                 identity_source=source,
                 monotonic=lambda: clock[0],
                 sleep=sleeper,
@@ -694,6 +782,37 @@ def main() -> int:
             0x00B3,
             0x00B3,
         ) == "/dev/ttyACM9"
+        boot_same_new_session = (
+            0x239A, 0x00B3, "boot", "/dev/ttyACM1", 0, "scope", "devnum:12"
+        )
+        assert simulated_wait(
+            [[boot_same_new_session]] * 6,
+            0x00B3,
+            0x00B3,
+            "devnum:11",
+        ) == "/dev/ttyACM1"
+        boot_same_old_session = (
+            0x239A, 0x00B3, "boot", "/dev/ttyACM1", 0, "scope", "devnum:11"
+        )
+        try:
+            simulated_wait(
+                [[boot_same_old_session]] * 6,
+                0x00B3,
+                0x00B3,
+                "devnum:11",
+            )
+        except TimeoutError:
+            pass
+        else:
+            raise AssertionError("unchanged same-identity USB session was accepted")
+        assert same_pre_mutation_target(
+            "runtime", "scope", "devnum:11",
+            "runtime", "scope", "devnum:11",
+        )
+        assert not same_pre_mutation_target(
+            "runtime", "scope", "devnum:11",
+            "runtime", "scope", "devnum:12",
+        )
         since, stable = advance_runtime_stability(True, 1.0, None, 0.3)
         assert since == 1.0 and not stable
         since, stable = advance_runtime_stability(False, 1.2, since, 0.3)
@@ -883,7 +1002,7 @@ def main() -> int:
             code=3,
         )
 
-    target_serial, target_stable_id, _, _ = capture_target_identity(
+    target_serial, target_stable_id, _, _, target_session = capture_target_identity(
         args.port, boot_vid, boot_pid, runtime_vid, runtime_pid
     )
     control_port = resolve_service_serial_port(
@@ -902,11 +1021,14 @@ def main() -> int:
         # Identity discovery happens before the lock only to derive its stable key.
         # Re-prove the selected endpoint after acquiring ownership so a detach,
         # renumber, or peer replacement in that window cannot redirect the transfer.
-        current_serial, current_stable_id, current_vid, current_pid = capture_target_identity(
-            control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
+        current_serial, current_stable_id, current_vid, current_pid, current_session = (
+            capture_target_identity(
+                control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
+            )
         )
-        if not same_captured_target(
-            target_serial, target_stable_id, current_serial, current_stable_id
+        if not same_pre_mutation_target(
+            target_serial, target_stable_id, target_session,
+            current_serial, current_stable_id, current_session,
         ):
             fail(
                 "selected physical target changed before the upload lock was acquired; "
@@ -922,13 +1044,14 @@ def main() -> int:
                 f"using same-device SERVICE CDC {locked_control_port}\n"
             )
             control_port = locked_control_port
-            current_serial, current_stable_id, current_vid, current_pid = (
+            current_serial, current_stable_id, current_vid, current_pid, current_session = (
                 capture_target_identity(
                     control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
                 )
             )
-            if not same_captured_target(
-                target_serial, target_stable_id, current_serial, current_stable_id
+            if not same_pre_mutation_target(
+                target_serial, target_stable_id, target_session,
+                current_serial, current_stable_id, current_session,
             ):
                 fail(
                     "resolved maintenance endpoint does not belong to the selected "
@@ -956,6 +1079,38 @@ def main() -> int:
         if rc != 0:
             return rc
 
+        # Package generation may take long enough for a port to disappear or
+        # be rebound. Re-prove the exact pre-reset endpoint immediately before
+        # the first target-visible action, not merely before building the ZIP.
+        current_serial, current_stable_id, current_vid, current_pid, current_session = (
+            capture_target_identity(
+                control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
+            )
+        )
+        if not same_pre_mutation_target(
+            target_serial, target_stable_id, target_session,
+            current_serial, current_stable_id, current_session,
+        ):
+            fail(
+                "selected endpoint changed while the DFU package was built; "
+                "no touch or transfer was attempted",
+                code=4,
+            )
+
+        if (current_vid, current_pid) == (runtime_vid, runtime_pid) and (
+                boot_vid, boot_pid) != (runtime_vid, runtime_pid):
+            preexisting_boot_ports = scoped_control_ports(
+                serial_identities(), boot_vid, boot_pid,
+                target_serial, target_stable_id,
+            )
+            if preexisting_boot_ports:
+                fail(
+                    "a bootloader maintenance endpoint for this physical scope "
+                    "already existed before the reset gesture; refusing stale or "
+                    "ambiguous transition evidence",
+                    code=4,
+                )
+
         transfer_touch = effective_touch_baud(
             touch,
             current_vid,
@@ -976,6 +1131,7 @@ def main() -> int:
                     runtime_pid,
                     target_serial,
                     target_stable_id,
+                    current_session,
                     bootloader_timeout,
                 )
             except (OSError, TimeoutError, ValueError) as error:
@@ -991,7 +1147,7 @@ def main() -> int:
                 code=4,
             )
 
-        boot_serial, boot_stable_id, endpoint_vid, endpoint_pid = (
+        boot_serial, boot_stable_id, endpoint_vid, endpoint_pid, _boot_session = (
             capture_target_identity(
                 control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
             )
