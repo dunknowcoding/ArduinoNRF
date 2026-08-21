@@ -68,6 +68,10 @@ choices because it has no native USB upload path in this package.
   when MSC metadata is unavailable, select the explicit serial-DFU layout instead
   of asking the uploader to infer an application start.
 - UF2 drives are matched to the selected serial port by stable USB identity. If two boards expose the same volume label, the wrapper refuses ambiguous matches instead of choosing the first drive.
+- Selecting a USER CDC never permits a VID/PID-only jump to another board's
+  SERVICE CDC. The uploader and USB GDB bridge require the service interface to
+  share the selected interface's composite parent identity; a missing,
+  unscoped, or ambiguous sibling fails before reset or write.
 - For bootloaders whose USB PID differs from the application PID, the wrapper
   accepts the selected board's scoped UF2 volume as transition proof. It never
   waits for the old runtime COM to return before copying firmware; that COM can

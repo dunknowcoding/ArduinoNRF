@@ -193,6 +193,9 @@ if ([string]::IsNullOrWhiteSpace($SerialPort)) {
 
 if (-not [string]::IsNullOrWhiteSpace($Board)) {
     $portResolution = Resolve-AdafruitSerialControlPortWithBoardIdentity -SelectedPort $SerialPort -BoardName $Board
+    if ($portResolution -and ([string]$portResolution.Reason) -match '^runtime user CDC (parent identity is unavailable|has no same-device service sibling|has ambiguous same-device service siblings)') {
+        throw ('Selected USER CDC cannot be mapped to its own SERVICE CDC: {0}. Refusing to use another board or an ambiguous interface.' -f $portResolution.Reason)
+    }
     if ($portResolution -and -not [string]::IsNullOrWhiteSpace($portResolution.Port) -and $portResolution.Port -ne $SerialPort) {
         Write-Host ("USB CDC GDB stub remap: selected {0}, using {1} ({2})" -f $SerialPort, $portResolution.Port, $portResolution.Reason)
         $SerialPort = $portResolution.Port

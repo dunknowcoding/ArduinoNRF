@@ -4217,6 +4217,13 @@ try {
         if (-not $portResolution) {
             $portResolution = Resolve-AdafruitSerialControlPortWithBoardIdentity -SelectedPort $Port -BoardName $Board
         }
+        if ($portResolution -and ([string]$portResolution.Reason) -match '^runtime user CDC (parent identity is unavailable|has no same-device service sibling|has ambiguous same-device service siblings)') {
+            Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output (@(
+                        ('Selected port {0} is the USER CDC, but its own SERVICE CDC cannot be identified: {1}.' -f $Port, $portResolution.Reason),
+                        'No reset, bootloader request, or firmware write was attempted. Wait for this board''s complete USB composite to enumerate, then retry.',
+                        'ZH: The selected USER CDC has no uniquely attributable SERVICE CDC sibling. No USB mutation was attempted.'
+                    ) -join [Environment]::NewLine) -Exe $toolPath)
+        }
         if ($portResolution -and -not [string]::IsNullOrWhiteSpace($portResolution.Port)) {
             $remapWouldChange = ($portResolution.Port.Trim().ToUpperInvariant() -ne $Port.Trim().ToUpperInvariant())
             $strictRejectUserCdc = ($env:NIUS_REJECT_USER_CDC_UPLOAD_PORT -eq '1')

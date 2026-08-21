@@ -615,29 +615,31 @@ function Resolve-AdafruitSerialControlPort {
         $pnpId = ([string]$_.PNPDeviceID).ToUpperInvariant()
         $pnpId.StartsWith($runtimeNeedle) -and $pnpId -like '*&MI_00\*'
     })
-    if ($siblingCandidates.Count -eq 1) {
+    $selectedParentPrefix = Get-UsbInterfaceParentInstancePrefix -PnpInstanceId $selectedPnpId
+    if ([string]::IsNullOrWhiteSpace($selectedParentPrefix)) {
         return [pscustomobject]@{
-            Port = [string]$siblingCandidates[0].DeviceID
-            Reason = ('runtime user CDC {0} remapped to sibling service CDC {1}' -f $SelectedPort, [string]$siblingCandidates[0].DeviceID)
+            Port = $SelectedPort
+            Reason = 'runtime user CDC parent identity is unavailable; refusing an unscoped service remap'
         }
     }
 
-    if ($selectedPnpId -match '^USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}&MI_[0-9A-F]{2}\\(?<parent>.+&)[0-9A-F]{4}$') {
-        $parentPrefix = $matches['parent'].ToUpperInvariant()
-        $parentMatch = @($siblingCandidates | Where-Object {
-            ([string]$_.PNPDeviceID).ToUpperInvariant() -like ('*\' + $parentPrefix + '*')
-        } | Select-Object -First 1)
-        if ($parentMatch) {
-            return [pscustomobject]@{
-                Port = [string]$parentMatch.DeviceID
-                Reason = ('runtime user CDC {0} remapped to sibling service CDC {1} via parent instance match' -f $SelectedPort, [string]$parentMatch.DeviceID)
-            }
+    $sameCompositeSiblings = @($siblingCandidates | Where-Object {
+        (Get-UsbInterfaceParentInstancePrefix -PnpInstanceId ([string]$_.PNPDeviceID)) -eq $selectedParentPrefix
+    })
+    if ($sameCompositeSiblings.Count -eq 1) {
+        return [pscustomobject]@{
+            Port = [string]$sameCompositeSiblings[0].DeviceID
+            Reason = ('runtime user CDC {0} remapped to same-device service CDC {1}' -f $SelectedPort, [string]$sameCompositeSiblings[0].DeviceID)
         }
     }
 
     return [pscustomobject]@{
         Port = $SelectedPort
-        Reason = 'runtime sibling service CDC not found'
+        Reason = $(if ($sameCompositeSiblings.Count -eq 0) {
+                'runtime user CDC has no same-device service sibling'
+            } else {
+                'runtime user CDC has ambiguous same-device service siblings'
+            })
     }
 }
 
