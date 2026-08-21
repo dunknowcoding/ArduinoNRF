@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,43 @@ def parse_bounded_float(value: str, name: str, minimum: float, maximum: float) -
     if not math.isfinite(parsed) or not minimum <= parsed <= maximum:
         raise ValueError(f"{name} must be finite and in [{minimum}, {maximum}]")
     return parsed
+
+
+def run_owned_command(argv, timeout_s: float) -> int:
+    """Run one uploader child and contain its complete process group on timeout.
+
+    The Linux/macOS uploader must never leave a converter or transport helper
+    holding the selected tty after its bounded parent command has failed.  A new
+    session gives this invocation an exact ownership boundary; timeout cleanup
+    signals only that group and preserves the original TimeoutExpired failure.
+    """
+    if os.name != "posix":
+        # This file is not the Windows upload route.  Keeping the direct fallback
+        # makes its pure self-test importable there without pretending to provide
+        # Windows process-tree ownership.
+        return subprocess.run(argv, timeout=timeout_s).returncode
+
+    process = subprocess.Popen(argv, start_new_session=True, close_fds=True)
+    try:
+        return process.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
+        # The direct child may exit on SIGTERM while a grandchild that inherited
+        # the tty ignores it.  Kill the still-owned group unconditionally; ESRCH
+        # means the whole group already ended.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+        raise
 
 
 class UploadBusyError(RuntimeError):
@@ -445,7 +483,7 @@ def main() -> int:
             pass
         else:
             raise AssertionError("oversized USB identity accepted")
-        if sys.platform.startswith("linux") or sys.platform == "darwin":
+        if os.name == "posix":
             lock_id = "upload-selftest-" + str(os.getpid())
             with exclusive_target_lock(lock_id):
                 try:
@@ -453,6 +491,14 @@ def main() -> int:
                         raise AssertionError("duplicate target lock acquired")
                 except UploadBusyError:
                     pass
+            try:
+                run_owned_command(
+                    [sys.executable, "-c", "import time; time.sleep(10)"], 0.05
+                )
+            except subprocess.TimeoutExpired:
+                pass
+            else:
+                raise AssertionError("owned command timeout was not enforced")
         print("upload.py selftest: PASS")
         return 0
 
@@ -604,7 +650,7 @@ def main() -> int:
         if args.verbose:
             sys.stderr.write("[nius-upload] + " + " ".join(genpkg) + "\n")
         try:
-            rc = subprocess.run(genpkg, timeout=120).returncode
+            rc = run_owned_command(genpkg, timeout_s=120)
         except subprocess.TimeoutExpired:
             fail("adafruit-nrfutil genpkg timed out", code=5)
         except OSError as error:
@@ -624,7 +670,7 @@ def main() -> int:
         if args.verbose:
             sys.stderr.write("[nius-upload] + " + " ".join(dfu) + "\n")
         try:
-            rc = subprocess.run(dfu, timeout=240).returncode
+            rc = run_owned_command(dfu, timeout_s=240)
         except subprocess.TimeoutExpired:
             fail("adafruit serial DFU timed out", code=5)
         except OSError as error:
