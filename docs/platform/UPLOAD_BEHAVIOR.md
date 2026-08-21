@@ -137,6 +137,10 @@ choices because it has no native USB upload path in this package.
   invocation. A timeout, cable loss, protocol failure, or interrupted write is
   terminal and keeps its original error; the wrapper never infers that a
   second single-bank transfer or a wildcard SoftDevice requirement is safe.
+- That sole transfer is launched only after the exact bootloader maintenance
+  CDC is proven in the selected physical scope. An unconfirmed touch and an
+  unresolved bootloader port are terminal; the old runtime COM is never used as
+  a speculative DFU endpoint.
 - Linux and macOS do not delegate 1200-baud transition ownership to
   `adafruit-nrfutil`: upstream sleeps and reopens the same tty without checking
   physical identity. ArduinoNRF sends one DTR edge, resolves exactly one

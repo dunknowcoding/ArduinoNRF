@@ -4630,26 +4630,16 @@ try {
                     Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output ('Could not open port {0}: access is denied because another process owns the selected runtime/service CDC. No bootloader request or flash operation was attempted. Close only that serial monitor or console and retry.' -f $adafruitControlPort) -Exe $toolPath)
                 }
                 if ($runtimeSharesUploadIdentity -and $BootloaderMode -eq 'adafruit-dfu') {
-                    Write-NiusDetail ('[nius] Same-PID 1200 bps touch on {0} produced no host-visible transition; proceeding with direct serial DFU on the same COM.' -f $adafruitControlPort) -ForegroundColor DarkGray
+                    Write-NiusDetail ('[nius] Same-PID 1200 bps touch on {0} produced no host-visible transition; the identity-scoped resolver must still prove a bootloader CDC before transfer.' -f $adafruitControlPort) -ForegroundColor DarkGray
                 }
                 else {
-                    Write-NiusDetail ('[warn] Unable to confirm 1200 bps touch on {0}; proceeding with a direct serial DFU attempt in case the board is already in bootloader mode.' -f $adafruitControlPort) -ForegroundColor DarkYellow
+                    Write-NiusDetail ('[warn] Unable to confirm 1200 bps touch on {0}; the identity-scoped resolver must prove an already-running bootloader before transfer.' -f $adafruitControlPort) -ForegroundColor DarkYellow
                 }
             }
         } else {
             Write-NiusDetail '[nius] 1200 bps touch skipped; using already-detected bootloader state.' -ForegroundColor DarkGray
         }
 
-        # Wait for the board to enter bootloader after the 1200 bps touch.
-        if ($touchPrepared -and $runtimeSharesUploadIdentity -and $BootloaderMode -eq 'adafruit-dfu' -and -not $bootloaderTransitionConfirmed) {
-            try {
-                Wait-SerialPortResetCycle -PortName $adafruitControlPort -Purpose '1200 bps touch reset cycle'
-            }
-            catch {
-                Write-NiusDetail ('[warn] No confirmed USB reset cycle observed on {0} after touch: {1}' -f $adafruitControlPort, $_.Exception.Message) -ForegroundColor DarkYellow
-                Write-NiusDetail ('[nius] Continuing with a direct serial DFU attempt on {0} because this board reuses the same COM identity in runtime and bootloader.' -f $adafruitControlPort) -ForegroundColor DarkGray
-            }
-        }
         if ($touchPrepared) {
             if ($BootloaderMode -eq 'uf2') {
                 # The transition gate already observed this board's scoped UF2
@@ -4755,8 +4745,8 @@ try {
                 }
                 $adafruitControlPort = $resolvedBootloaderPort
             }
-            elseif ($UseTouch1200 -eq 'true' -and $bootloaderTransitionConfirmed) {
-                Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output ('The selected board entered its bootloader, but its identity-scoped service CDC did not enumerate within the bounded wait: {0}. Refusing to open the old runtime COM or another attached board.' -f $bootloaderPortResolution.Reason) -Exe $toolPath)
+            else {
+                Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output ('No identity-scoped bootloader service CDC was proven within the bounded wait: {0}. Refusing to open the old runtime COM or another attached board; no mutating transfer was launched.' -f $bootloaderPortResolution.Reason) -Exe $toolPath)
             }
 
             # Serial-only bootloaders need no mass-storage interface.  When the
