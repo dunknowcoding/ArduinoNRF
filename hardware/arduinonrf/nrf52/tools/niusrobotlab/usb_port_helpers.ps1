@@ -159,8 +159,8 @@ function Clear-SerialPortInventoryCache {
 $script:NiusPnpDeviceCache = $null
 $script:NiusPnpCacheArmed = $false
 function Set-PnpDeviceCacheArmed {
-    # Get-PnpDevice -PresentOnly is a ~2-3 s full device enumeration; the
-    # pre-touch identity/port checks call it 2-3x for the same VID/PID on a
+    # A full PnP snapshot is relatively expensive; the pre-touch identity/port
+    # checks call it 2-3x for the same VID/PID on a
     # stable (not-yet-touched) port set, so one cached scan saves several
     # seconds. Arm ONLY for that pre-touch window. MUST be disarmed before the
     # 1200 bps touch: the post-touch transition pollers also filter PnP and
@@ -176,40 +176,30 @@ function Get-PnpDeviceInventory {
     }
 
     $snap = $null
-    # FAST PATH (pre-touch window only): Get-PnpDevice -PresentOnly pays a full
-    # device-presence walk (~2.5 s on this machine, independent of -Class).
-    # Get-CimInstance Win32_PnPEntity returns the same present USB interfaces
+    # Win32_PnPEntity returns the present USB interfaces
     # (verified incl. composite + all MI_xx, including no-driver control
-    # interfaces) in ~1.1 s, projected here to the Get-PnpDevice object shape
+    # interfaces), projected here to the Get-PnpDevice object shape
     # the callers expect (.InstanceId/.FriendlyName/.Class/.HardwareID/.Status).
     #
-    # Scoped to $NiusPnpCacheArmed (the armed pre-touch identity/port window,
-    # where the port set is stable) so the DELICATE post-touch transition
-    # pollers - which run with the cache DISARMED and must catch the brief
-    # app->bootloader detach on same-PID clones - keep the proven -PresentOnly
-    # path untouched. Force-disable with NIUS_FORCE_PNP_LEGACY=1.
-    if ($script:NiusPnpCacheArmed -and $env:NIUS_FORCE_PNP_LEGACY -ne '1') {
-        try {
-            $cim = @(Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction Stop)
-            if ($cim.Count -gt 0) {
-                $snap = @($cim | Where-Object { ($null -eq $_.Present) -or $_.Present } | ForEach-Object {
-                    [pscustomobject]@{
-                        InstanceId   = $_.DeviceID
-                        FriendlyName = $_.Name
-                        Class        = $_.PNPClass
-                        HardwareID   = $_.HardwareID
-                        Status       = $_.Status
-                    }
-                })
+    # Every pre/post-touch call has a finite provider budget. A failed snapshot
+    # returns no candidates so identity admission fails closed; it never falls
+    # into Get-PnpDevice, whose provider walk has no caller-controlled deadline
+    # and can hang behind a stale child interface.
+    try {
+        $cim = @(Get-CimInstance -ClassName Win32_PnPEntity `
+                -OperationTimeoutSec 2 -ErrorAction Stop)
+        $snap = @($cim | Where-Object { ($null -eq $_.Present) -or $_.Present } | ForEach-Object {
+            [pscustomobject]@{
+                InstanceId   = $_.DeviceID
+                FriendlyName = $_.Name
+                Class        = $_.PNPClass
+                HardwareID   = $_.HardwareID
+                Status       = $_.Status
             }
-        }
-        catch {
-            $snap = $null
-        }
+        })
     }
-
-    if ($null -eq $snap -or $snap.Count -eq 0) {
-        $snap = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue)
+    catch {
+        $snap = @()
     }
     if ($script:NiusPnpCacheArmed) { $script:NiusPnpDeviceCache = $snap }
     return $snap

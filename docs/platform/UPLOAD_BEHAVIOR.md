@@ -78,9 +78,10 @@ choices because it has no native USB upload path in this package.
   only return after the copy and reboot have completed.
 - On Windows, runtime verification reads only the expected VID/PID branch and
   confirms that its COM endpoint is currently present. Stale registry records
-  are rejected, and the full PnP-provider scan remains a compatibility fallback.
-  The UF2 evidence observed during touch is reused instead of rediscovering the
-  same volume before transfer.
+  are rejected. Any required full PnP snapshot uses a two-second CIM operation
+  bound and returns no candidates on provider failure; it never falls into the
+  unbounded `Get-PnpDevice` walk. The UF2 evidence observed during touch is
+  reused instead of rediscovering the same volume before transfer.
 - A temporarily absent Windows interface-parent property is not cached as a
   negative identity. The bounded resolver retries it after composite
   enumeration progresses; only a nonempty proved parent mapping is cached.
