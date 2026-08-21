@@ -11,6 +11,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "PluggableUSB.h"
+
 struct NrfUsbdStatus {
     bool enabled;
     bool started;
@@ -141,6 +143,7 @@ private:
         None,
         ServiceLineCoding,
         UserLineCoding,
+        Pluggable,
     };
 
     enum class Ep0InXferPhase : uint8_t {
@@ -165,6 +168,8 @@ private:
     void serviceNotificationIn(bool userPort);
     void serviceSetup();
     void completeControlOutTransfer();
+    bool armNextControlOutPacket();
+    void resetControlOutTransfer();
     void handleStandardRequest(uint8_t request, uint16_t value, uint16_t index, uint16_t length);
     void handleClassRequest(uint8_t requestType, uint8_t request, uint16_t value, uint16_t index, uint16_t length);
     void startControlIn(const uint8_t *data, size_t length);
@@ -256,7 +261,12 @@ private:
     NrfUsbLineCoding lineCoding_ = {115200UL, 0U, 0U, 8U};
     NrfUsbLineCoding userLineCoding_ = {115200UL, 0U, 0U, 8U};
     ControlOutTransfer pendingControlOut_ = ControlOutTransfer::None;
-    uint8_t controlOutBuffer_[16] = {0};
+    USBSetup pendingControlOutSetup_ = {0U, 0U, 0U, 0U, 0U};
+    PluggableUSBModule *pendingControlOutOwner_ = nullptr;
+    // A bounded control-OUT transaction may span four EP0 packets. Modules see
+    // the payload only after the complete request has arrived, so aborts,
+    // short packets, and ownership ambiguity cannot expose partial state.
+    uint8_t controlOutBuffer_[256] = {0};
     // 256 bytes — full configuration descriptor payload (dual CDC + DFU +
     // PluggableUSB). EP0 responses are staged here; multi-packet control IN is
     // split in software at CONTROL_EP_MAX_PACKET with mandatory STATUS via EP0STATUS.

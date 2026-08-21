@@ -25,6 +25,14 @@ public:
     // negative, overflowed, or mismatched responses are rejected transactionally.
     virtual int getDescriptor(USBSetup &setup) = 0;
     virtual int getSetupResponse(USBSetup &setup);
+    // A nonzero-length control-OUT transfer is two-phase. claimControlOut()
+    // must be a side-effect-free ownership query; the core accepts the
+    // request only when exactly one admitted module claims it. The bounded
+    // payload is delivered atomically to completeControlOut() only after every
+    // packet has arrived. Returning false from completion stalls the status
+    // stage, so malformed payloads cannot be acknowledged.
+    virtual bool claimControlOut(const USBSetup &setup);
+    virtual bool completeControlOut(const USBSetup &setup, const uint8_t *data, size_t length);
     virtual bool setup(USBSetup &setup) = 0;
     virtual uint8_t getShortName(char *name);
     virtual void onEndpointComplete(uint8_t endpoint);
@@ -65,6 +73,9 @@ private:
     friend class NrfUsbdDriver;
     // Only the controller driver may open/close a bounded response transaction;
     // modules can contribute bytes solely through appendDescriptor().
+    PluggableUSBModule *controlOutOwner(const USBSetup &setup);
+    bool completeControlOut(PluggableUSBModule *owner, const USBSetup &setup,
+                            const uint8_t *data, size_t length);
     void beginDescriptorBuild(uint8_t *buffer, size_t capacity, size_t initialLength = 0U);
     size_t endDescriptorBuild();
 

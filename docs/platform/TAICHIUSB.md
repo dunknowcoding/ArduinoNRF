@@ -125,9 +125,14 @@ control-IN request must append exactly the positive byte count it reports. A
 zero return must append nothing. Negative, overflowed, or mismatched responses
 are rolled back and stalled, and dispatch stops at the first valid owner instead
 of concatenating two modules' replies or exposing stale EP0 buffer bytes.
-The current boolean `setup()` callback owns metadata-only control-OUT requests;
-nonzero OUT payloads and nonexistent interface recipients stall until a bounded
-payload/completion API is explicitly implemented.
+The boolean `setup()` callback remains the metadata-only, zero-length route.
+Nonzero control-OUT payloads use the two-phase `claimControlOut()` and
+`completeControlOut()` contract. Claims are side-effect-free and exactly one
+admitted module must claim the request. TaichiUSB then receives up to 256 bytes
+across bounded 64-byte EP0 packets and delivers the payload atomically only when
+the complete declared length is present. Short, overlong, interrupted,
+ambiguous, or rejected transfers stall without exposing partial bytes or
+acknowledging success. Nonexistent interface recipients also stall.
 
 A newer SETUP token aborts the previous control transfer before any old payload
 or status completion is committed. If SETUP and `EP0DATADONE` are observed

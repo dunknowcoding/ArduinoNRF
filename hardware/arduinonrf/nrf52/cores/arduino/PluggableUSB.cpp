@@ -16,6 +16,19 @@ int PluggableUSBModule::getSetupResponse(USBSetup &setup) {
     return 0;
 }
 
+bool PluggableUSBModule::claimControlOut(const USBSetup &setup) {
+    (void)setup;
+    return false;
+}
+
+bool PluggableUSBModule::completeControlOut(const USBSetup &setup, const uint8_t *data,
+                                            size_t length) {
+    (void)setup;
+    (void)data;
+    (void)length;
+    return false;
+}
+
 uint8_t PluggableUSBModule::getShortName(char *name) {
     (void)name;
     return 0U;
@@ -168,6 +181,37 @@ int PluggableUSB_::getSetupResponse(USBSetup &setup) {
         return reported;
     }
     return 0;
+}
+
+PluggableUSBModule *PluggableUSB_::controlOutOwner(const USBSetup &setup) {
+    PluggableUSBModule *owner = nullptr;
+    for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
+        if (!node->descriptorAdmitted || !node->claimControlOut(setup)) {
+            continue;
+        }
+        if (owner != nullptr) {
+            // Ambiguous ownership is never resolved by link order. A module's
+            // claim callback is a query and must not mutate state, so rejecting
+            // the whole request is transactional.
+            return nullptr;
+        }
+        owner = node;
+    }
+    return owner;
+}
+
+bool PluggableUSB_::completeControlOut(PluggableUSBModule *owner, const USBSetup &setup,
+                                       const uint8_t *data, size_t length) {
+    if (owner == nullptr || data == nullptr || length == 0U) {
+        return false;
+    }
+    for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
+        if (node == owner) {
+            return node->descriptorAdmitted &&
+                node->completeControlOut(setup, data, length);
+        }
+    }
+    return false;
 }
 
 bool PluggableUSB_::setup(USBSetup &setup) {

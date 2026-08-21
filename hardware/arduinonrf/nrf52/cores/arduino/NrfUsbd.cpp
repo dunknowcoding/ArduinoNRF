@@ -7,6 +7,7 @@
 #include "NrfBoard.h"
 #include "NrfSystem.h"
 #include "PluggableUSB.h"
+#include "NrfUsbdControlPolicy.h"
 
 namespace {
 constexpr uint8_t USB_DIR_OUT = 0x00U;
@@ -212,13 +213,6 @@ constexpr bool readyAfterUsbEvent(bool ready, bool attached, bool hasVbus,
         : ready;
 }
 
-constexpr bool ep0DataDoneMayCommit(bool newerSetupPending) {
-    // A new SETUP token aborts the older control transfer. Because firmware
-    // must arm the new data stage after reading SETUP, a simultaneously latched
-    // EP0DATADONE belongs to the aborted request.
-    return !newerSetupPending;
-}
-
 constexpr bool configurationRequestAllowed(uint8_t address) {
     // SET/GET_CONFIGURATION are valid only after SET_ADDRESS completed. A
     // default-state request must not construct endpoint/session state.
@@ -255,8 +249,8 @@ static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_SUSPEND_MASK |
                                            USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(readyAfterUsbEvent(false, true, true, USBD_EVENTCAUSE_READY_MASK));
 static_assert(!readyAfterUsbEvent(true, true, false, USBD_EVENTCAUSE_RESUME_MASK));
-static_assert(ep0DataDoneMayCommit(false));
-static_assert(!ep0DataDoneMayCommit(true));
+static_assert(nrf_usbd_detail::ep0DataDoneMayCommit(false));
+static_assert(!nrf_usbd_detail::ep0DataDoneMayCommit(true));
 static_assert(!configurationRequestAllowed(0U));
 static_assert(configurationRequestAllowed(1U));
 static_assert(!elapsedAtLeast(9U, 5U, 5U));
@@ -360,15 +354,14 @@ static_assert(!validCdcLineCoding(3U, 0U, 8U));
 static_assert(!validCdcLineCoding(0U, 5U, 8U));
 static_assert(!validCdcLineCoding(0U, 0U, 9U));
 
-constexpr bool pluggableControlOutSupported(uint16_t length) {
-    // The current setup() callback carries metadata only; it has no bounded
-    // payload buffer or completion callback. A nonzero OUT data stage must not
-    // be acknowledged until that ownership contract exists.
-    return length == 0U;
-}
-
-static_assert(pluggableControlOutSupported(0U));
-static_assert(!pluggableControlOutSupported(1U));
+static_assert(!nrf_usbd_detail::pluggableControlOutPayloadSupported(0U, 256U));
+static_assert(nrf_usbd_detail::pluggableControlOutPayloadSupported(1U, 256U));
+static_assert(nrf_usbd_detail::pluggableControlOutPayloadSupported(256U, 256U));
+static_assert(!nrf_usbd_detail::pluggableControlOutPayloadSupported(257U, 256U));
+static_assert(nrf_usbd_detail::nextControlOutPacketSize(256U, 0U, 64U) == 64U);
+static_assert(nrf_usbd_detail::nextControlOutPacketSize(256U, 192U, 64U) == 64U);
+static_assert(nrf_usbd_detail::nextControlOutPacketSize(255U, 192U, 64U) == 63U);
+static_assert(nrf_usbd_detail::nextControlOutPacketSize(255U, 255U, 64U) == 0U);
 
 inline bool servicePortEnabled() {
     return nrfUsbServicePortEnabled();
@@ -1054,9 +1047,7 @@ void NrfUsbdDriver::end() {
     }
     ready_ = false;
     resetConnectionState();
-    pendingControlOut_ = ControlOutTransfer::None;
-    controlOutExpected_ = 0U;
-    controlOutLength_ = 0U;
+    resetControlOutTransfer();
     rxHead_ = 0U;
     rxTail_ = 0U;
     txHead_ = 0U;
@@ -1325,7 +1316,7 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         reg32(USBD_BASE, eventEndEpinOffset(USER_NOTIFICATION_EP)) = 0UL;
     }
 
-    if (ep0DataDoneMayCommit(ep0SetupPending) &&
+    if (nrf_usbd_detail::ep0DataDoneMayCommit(ep0SetupPending) &&
         reg32(USBD_BASE, EVENTS_EP0DATADONE) != 0UL) {
         reg32(USBD_BASE, EVENTS_EP0DATADONE) = 0UL;
         if (pollTraceEnabled()) {
@@ -1363,9 +1354,7 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
                 // A bounded EasyDMA failure must not leave EP0 permanently
                 // owned by a stale control-OUT transfer. Abort this request and
                 // let the host recover through the normal control-pipe retry.
-                pendingControlOut_ = ControlOutTransfer::None;
-                controlOutExpected_ = 0U;
-                controlOutLength_ = 0U;
+                resetControlOutTransfer();
                 stallControlEndpoint();
             }
         }
@@ -1933,9 +1922,7 @@ void NrfUsbdDriver::resetConnectionState() {
     userDtrAssertedMillis_ = 0UL;
     lineCoding_ = {115200UL, 0U, 0U, 8U};
     userLineCoding_ = {115200UL, 0U, 0U, 8U};
-    pendingControlOut_ = ControlOutTransfer::None;
-    controlOutExpected_ = 0U;
-    controlOutLength_ = 0U;
+    resetControlOutTransfer();
     detachRequestMagic_ = 0UL;
     detachCause_ = 0UL;
     detachRequestedMillis_ = 0UL;
@@ -2302,9 +2289,7 @@ void NrfUsbdDriver::serviceSetup() {
     // A SETUP token aborts any older control transfer. Do not let a short or
     // interrupted class OUT request retain ownership of EP0 and consume the
     // payload/status event belonging to the new request.
-    pendingControlOut_ = ControlOutTransfer::None;
-    controlOutExpected_ = 0U;
-    controlOutLength_ = 0U;
+    resetControlOutTransfer();
     resetEp0InXferState();
 
     const uint8_t requestType = static_cast<uint8_t>(reg32(USBD_BASE, BMREQUESTTYPE) & 0xFFUL);
@@ -2328,94 +2313,107 @@ void NrfUsbdDriver::serviceSetup() {
 }
 
 void NrfUsbdDriver::completeControlOutTransfer() {
-    controlOutLength_ = reg32(USBD_BASE, epoutAmountOffset(0U));
-
-    if (controlOutLength_ != controlOutExpected_) {
-        // CDC line coding is a fixed-size request. A short/overlong data stage
-        // is malformed and must not partially update state or receive a false
-        // success status.
-        pendingControlOut_ = ControlOutTransfer::None;
-        controlOutExpected_ = 0U;
-        controlOutLength_ = 0U;
+    const size_t packetLength = reg32(USBD_BASE, epoutAmountOffset(0U));
+    const nrf_usbd_detail::ControlOutPacketProgress progress =
+        nrf_usbd_detail::acceptControlOutPacket(
+            controlOutExpected_, controlOutLength_, packetLength,
+            CONTROL_EP_MAX_PACKET);
+    if (!progress.accepted) {
+        // The bounded API is exact-length and transactional. A short, overlong,
+        // duplicated, or late packet cannot expose partial data to CDC or a
+        // pluggable module and never receives a false-success status stage.
+        resetControlOutTransfer();
         stallControlEndpoint();
         return;
     }
 
+    controlOutLength_ = progress.received;
+    if (!progress.complete) {
+        if (!armNextControlOutPacket()) {
+            resetControlOutTransfer();
+            stallControlEndpoint();
+        }
+        return;
+    }
+
+    bool accepted = true;
     switch (pendingControlOut_) {
         case ControlOutTransfer::ServiceLineCoding:
-            if (controlOutLength_ == 7U) {
+            if (controlOutLength_ != 7U) {
+                accepted = false;
+            } else {
                 const uint8_t stopBits = controlOutBuffer_[4];
                 const uint8_t parity = controlOutBuffer_[5];
                 const uint8_t dataBits = controlOutBuffer_[6];
                 if (!validCdcLineCoding(stopBits, parity, dataBits)) {
-                    pendingControlOut_ = ControlOutTransfer::None;
-                    controlOutExpected_ = 0U;
-                    controlOutLength_ = 0U;
-                    stallControlEndpoint();
-                    return;
-                }
-                const uint32_t baudRate =
-                    static_cast<uint32_t>(controlOutBuffer_[0]) |
-                    (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
-                    (static_cast<uint32_t>(controlOutBuffer_[2]) << 16U) |
-                    (static_cast<uint32_t>(controlOutBuffer_[3]) << 24U);
-                lineCoding_ = {baudRate, stopBits, parity, dataBits};
-                if (lineCoding_.baudRate != 1200UL) {
-                    // Don't let the host's post-touch 115200 re-open cancel a
-                    // touch that is already counting down its confirm window.
-                    const bool inConfirmWindow =
-                        (serviceTimerFlags_ & USBD_SERVICE_TIMER_TOUCH_WINDOW) != 0U &&
-                        !elapsedAtLeast(millis(), serviceTouchResetMillis_,
-                                        USBD_TOUCH_RESET_CONFIRM_MS);
-                    if (!inConfirmWindow) {
-                        serviceTouchPending_ = false;
-                        serviceTimerFlags_ &=
-                            static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
-                        serviceTouchResetMillis_ = 0UL;
-                    }
+                    accepted = false;
                 } else {
-                    markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_LINE_CODING);
-                    serviceTimerFlags_ |= USBD_SERVICE_TIMER_SAW_1200;
-                    serviceSaw1200Millis_ = millis();
-                    // Line coding alone is not an upload gesture. Windows can
-                    // replay a port's saved 1200-baud setting while DTR is
-                    // already low during enumeration. Arming here made that
-                    // harmless replay turn into a delayed reboot and apparent
-                    // COM-port loss. SET_CONTROL_LINE_STATE owns the explicit
-                    // DTR high-to-low edge that authorizes bootloader entry.
+                    const uint32_t baudRate =
+                        static_cast<uint32_t>(controlOutBuffer_[0]) |
+                        (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
+                        (static_cast<uint32_t>(controlOutBuffer_[2]) << 16U) |
+                        (static_cast<uint32_t>(controlOutBuffer_[3]) << 24U);
+                    lineCoding_ = {baudRate, stopBits, parity, dataBits};
+                    if (lineCoding_.baudRate != 1200UL) {
+                        // Don't let the host's post-touch 115200 re-open cancel a
+                        // touch that is already counting down its confirm window.
+                        const bool inConfirmWindow =
+                            (serviceTimerFlags_ & USBD_SERVICE_TIMER_TOUCH_WINDOW) != 0U &&
+                            !elapsedAtLeast(millis(), serviceTouchResetMillis_,
+                                            USBD_TOUCH_RESET_CONFIRM_MS);
+                        if (!inConfirmWindow) {
+                            serviceTouchPending_ = false;
+                            serviceTimerFlags_ &=
+                                static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
+                            serviceTouchResetMillis_ = 0UL;
+                        }
+                    } else {
+                        markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_LINE_CODING);
+                        serviceTimerFlags_ |= USBD_SERVICE_TIMER_SAW_1200;
+                        serviceSaw1200Millis_ = millis();
+                        // Line coding alone is not an upload gesture. Windows can
+                        // replay a saved value during enumeration; the explicit
+                        // DTR high-to-low edge remains the reset authority.
+                    }
                 }
             }
-            sendZeroLengthStatus();
             break;
         case ControlOutTransfer::UserLineCoding:
-            if (controlOutLength_ == 7U) {
+            if (controlOutLength_ != 7U) {
+                accepted = false;
+            } else {
                 const uint8_t stopBits = controlOutBuffer_[4];
                 const uint8_t parity = controlOutBuffer_[5];
                 const uint8_t dataBits = controlOutBuffer_[6];
                 if (!validCdcLineCoding(stopBits, parity, dataBits)) {
-                    pendingControlOut_ = ControlOutTransfer::None;
-                    controlOutExpected_ = 0U;
-                    controlOutLength_ = 0U;
-                    stallControlEndpoint();
-                    return;
+                    accepted = false;
+                } else {
+                    const uint32_t baudRate =
+                        static_cast<uint32_t>(controlOutBuffer_[0]) |
+                        (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
+                        (static_cast<uint32_t>(controlOutBuffer_[2]) << 16U) |
+                        (static_cast<uint32_t>(controlOutBuffer_[3]) << 24U);
+                    userLineCoding_ = {baudRate, stopBits, parity, dataBits};
                 }
-                const uint32_t baudRate =
-                    static_cast<uint32_t>(controlOutBuffer_[0]) |
-                    (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
-                    (static_cast<uint32_t>(controlOutBuffer_[2]) << 16U) |
-                    (static_cast<uint32_t>(controlOutBuffer_[3]) << 24U);
-                userLineCoding_ = {baudRate, stopBits, parity, dataBits};
             }
-            sendZeroLengthStatus();
+            break;
+        case ControlOutTransfer::Pluggable:
+            accepted = PluggableUSB().completeControlOut(
+                pendingControlOutOwner_, pendingControlOutSetup_,
+                controlOutBuffer_, controlOutLength_);
             break;
         case ControlOutTransfer::None:
         default:
+            accepted = false;
             break;
     }
 
-    pendingControlOut_ = ControlOutTransfer::None;
-    controlOutExpected_ = 0U;
-    controlOutLength_ = 0U;
+    if (accepted) {
+        sendZeroLengthStatus();
+    } else {
+        stallControlEndpoint();
+    }
+    resetControlOutTransfer();
 }
 
 bool NrfUsbdDriver::interfaceExists(uint8_t interfaceNumber) const {
@@ -2832,10 +2830,22 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
         default:
             {
                 USBSetup setup = {requestType, request, value, index, length};
-                if (pluggableControlOutSupported(length) &&
-                    PluggableUSB().setup(setup)) {
+                if (length == 0U && PluggableUSB().setup(setup)) {
                     sendZeroLengthStatus();
                     return;
+                }
+                if ((requestType & USB_DIR_IN) == 0U &&
+                    nrf_usbd_detail::pluggableControlOutPayloadSupported(
+                        length, sizeof(controlOutBuffer_))) {
+                    PluggableUSBModule *owner = PluggableUSB().controlOutOwner(setup);
+                    if (owner != nullptr) {
+                        expectControlOut(ControlOutTransfer::Pluggable, length);
+                        if (pendingControlOut_ == ControlOutTransfer::Pluggable) {
+                            pendingControlOutSetup_ = setup;
+                            pendingControlOutOwner_ = owner;
+                            return;
+                        }
+                    }
                 }
             }
             stallControlEndpoint();
@@ -3031,10 +3041,23 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                 startControlIn(controlInBuffer_, actualLength);
                 return;
             }
-        } else if (pluggableControlOutSupported(length) &&
-                   PluggableUSB().setup(setup)) {
-            sendZeroLengthStatus();
-            return;
+        } else {
+            if (length == 0U && PluggableUSB().setup(setup)) {
+                sendZeroLengthStatus();
+                return;
+            }
+            if (nrf_usbd_detail::pluggableControlOutPayloadSupported(
+                    length, sizeof(controlOutBuffer_))) {
+                PluggableUSBModule *owner = PluggableUSB().controlOutOwner(setup);
+                if (owner != nullptr) {
+                    expectControlOut(ControlOutTransfer::Pluggable, length);
+                    if (pendingControlOut_ == ControlOutTransfer::Pluggable) {
+                        pendingControlOutSetup_ = setup;
+                        pendingControlOutOwner_ = owner;
+                        return;
+                    }
+                }
+            }
         }
     }
 
@@ -3093,12 +3116,41 @@ void NrfUsbdDriver::startControlIn(const uint8_t *data, size_t length) {
 }
 
 void NrfUsbdDriver::expectControlOut(ControlOutTransfer transferType, size_t length) {
+    resetControlOutTransfer();
+    if (transferType == ControlOutTransfer::None || length == 0U ||
+        length > sizeof(controlOutBuffer_)) {
+        stallControlEndpoint();
+        return;
+    }
     pendingControlOut_ = transferType;
     controlOutExpected_ = length;
     controlOutLength_ = 0U;
-    reg32(USBD_BASE, epoutPtrOffset(0U)) = reinterpret_cast<uint32_t>(&controlOutBuffer_[0]);
-    reg32(USBD_BASE, epoutMaxcntOffset(0U)) = static_cast<uint32_t>(length);
+    if (!armNextControlOutPacket()) {
+        resetControlOutTransfer();
+        stallControlEndpoint();
+    }
+}
+
+bool NrfUsbdDriver::armNextControlOutPacket() {
+    const size_t packetLength = nrf_usbd_detail::nextControlOutPacketSize(
+        controlOutExpected_, controlOutLength_, CONTROL_EP_MAX_PACKET);
+    if (packetLength == 0U || controlOutLength_ >= sizeof(controlOutBuffer_) ||
+        packetLength > (sizeof(controlOutBuffer_) - controlOutLength_)) {
+        return false;
+    }
+    reg32(USBD_BASE, epoutPtrOffset(0U)) =
+        reinterpret_cast<uint32_t>(&controlOutBuffer_[controlOutLength_]);
+    reg32(USBD_BASE, epoutMaxcntOffset(0U)) = static_cast<uint32_t>(packetLength);
     reg32(USBD_BASE, TASKS_EP0RCVOUT) = 1UL;
+    return true;
+}
+
+void NrfUsbdDriver::resetControlOutTransfer() {
+    pendingControlOut_ = ControlOutTransfer::None;
+    pendingControlOutSetup_ = {0U, 0U, 0U, 0U, 0U};
+    pendingControlOutOwner_ = nullptr;
+    controlOutExpected_ = 0U;
+    controlOutLength_ = 0U;
 }
 
 void NrfUsbdDriver::sendZeroLengthStatus() {
