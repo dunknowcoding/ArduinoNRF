@@ -224,6 +224,10 @@ constexpr bool configurationRequestAllowed(uint8_t address) {
     return address != 0U;
 }
 
+constexpr bool elapsedAtLeast(uint32_t now, uint32_t since, uint32_t interval) {
+    return static_cast<uint32_t>(now - since) >= interval;
+}
+
 constexpr bool statusRequestAllowed(uint8_t address,
                                     bool configured,
                                     uint8_t recipient,
@@ -254,6 +258,10 @@ static_assert(ep0CompletionMayCommit(false));
 static_assert(!ep0CompletionMayCommit(true));
 static_assert(!configurationRequestAllowed(0U));
 static_assert(configurationRequestAllowed(1U));
+static_assert(!elapsedAtLeast(9U, 5U, 5U));
+static_assert(elapsedAtLeast(10U, 5U, 5U));
+static_assert(!elapsedAtLeast(2U, 0xFFFFFFFEUL, 5U));
+static_assert(elapsedAtLeast(3U, 0xFFFFFFFEUL, 5U));
 static_assert(!statusRequestAllowed(0U, false, USB_REQ_RECIPIENT_DEVICE, 0U));
 static_assert(statusRequestAllowed(1U, false, USB_REQ_RECIPIENT_DEVICE, 0U));
 static_assert(!statusRequestAllowed(1U, false, USB_REQ_RECIPIENT_INTERFACE, 0U));
@@ -295,6 +303,8 @@ constexpr uint8_t USBD_IGNORE_INITIAL_1200_RESET_COUNT = 0U;
 #endif
 constexpr uint32_t USBD_TOUCH_RESET_CONFIRM_MS = 40UL;
 constexpr uint32_t USBD_DFU_DETACH_RESET_DELAY_MS = 20UL;
+constexpr uint8_t USBD_SERVICE_TIMER_TOUCH_WINDOW = 1U << 0;
+constexpr uint8_t USBD_SERVICE_TIMER_SAW_1200 = 1U << 1;
 // usbser may assert DTR before its first bulk-IN read is posted. A short
 // post-DTR guard prevents the application's first bytes from being committed
 // to the endpoint FIFO before Windows is ready to consume them.
@@ -1527,8 +1537,8 @@ bool NrfUsbdDriver::ready() const {
 
 bool NrfUsbdDriver::connected() const {
     return enabled_ && attached_ && ready_ && configured_ && !suspended_ &&
-        vbusDetected() && dtr_ && dtrAssertedMillis_ != 0UL &&
-        (millis() - dtrAssertedMillis_) >= USBD_CDC_OPEN_SETTLE_MS;
+        vbusDetected() && dtr_ &&
+        elapsedAtLeast(millis(), dtrAssertedMillis_, USBD_CDC_OPEN_SETTLE_MS);
 }
 
 void NrfUsbdDriver::serviceTouchTimer() {
@@ -1536,17 +1546,19 @@ void NrfUsbdDriver::serviceTouchTimer() {
         return;
     }
 
-    const bool resetArmed = configuredMillis_ != 0UL &&
-        (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-    const bool windowStarted = serviceTouchResetMillis_ != 0UL;
+    const bool resetArmed = configured_ &&
+        elapsedAtLeast(millis(), configuredMillis_, USBD_1200_RESET_ARM_MS);
+    const bool windowStarted =
+        (serviceTimerFlags_ & USBD_SERVICE_TIMER_TOUCH_WINDOW) != 0U;
     const bool windowElapsed = windowStarted &&
-        (millis() - serviceTouchResetMillis_) >= USBD_TOUCH_RESET_CONFIRM_MS;
+        elapsedAtLeast(millis(), serviceTouchResetMillis_, USBD_TOUCH_RESET_CONFIRM_MS);
     const bool inConfirmWindow = windowStarted && !windowElapsed;
 
     if (windowElapsed) {
         // The 1200-bps line coding plus DTR drop is already explicit host intent.
         // Do not re-check DTR: usbser may reassert it while closing the handle.
         serviceTouchPending_ = false;
+        serviceTimerFlags_ &= static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
         serviceTouchResetMillis_ = 0UL;
         if (ignoredResetTouchCount_ < USBD_IGNORE_INITIAL_1200_RESET_COUNT) {
             ++ignoredResetTouchCount_;
@@ -1560,11 +1572,14 @@ void NrfUsbdDriver::serviceTouchTimer() {
     if (!configured_ || (dtr_ && !inConfirmWindow) ||
         (!windowStarted && lineCoding_.baudRate != 1200UL)) {
         serviceTouchPending_ = false;
+        serviceTimerFlags_ &= static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
         serviceTouchResetMillis_ = 0UL;
     } else if (!resetArmed) {
+        serviceTimerFlags_ &= static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
         serviceTouchResetMillis_ = 0UL;
     } else if (!windowStarted) {
         serviceTouchResetMillis_ = millis();
+        serviceTimerFlags_ |= USBD_SERVICE_TIMER_TOUCH_WINDOW;
     }
 }
 
@@ -1945,6 +1960,7 @@ void NrfUsbdDriver::resetConnectionState() {
     detachRequestedMillis_ = 0UL;
     resetEp0InXferState();
     serviceTouchPending_ = false;
+    serviceTimerFlags_ = 0U;
     serviceTouchResetMillis_ = 0UL;
     serviceSaw1200Millis_ = 0UL;
     ignoredResetTouchCount_ = 0U;
@@ -2368,14 +2384,19 @@ void NrfUsbdDriver::completeControlOutTransfer() {
                 if (lineCoding_.baudRate != 1200UL) {
                     // Don't let the host's post-touch 115200 re-open cancel a
                     // touch that is already counting down its confirm window.
-                    const bool inConfirmWindow = serviceTouchResetMillis_ != 0UL &&
-                        (millis() - serviceTouchResetMillis_) < USBD_TOUCH_RESET_CONFIRM_MS;
+                    const bool inConfirmWindow =
+                        (serviceTimerFlags_ & USBD_SERVICE_TIMER_TOUCH_WINDOW) != 0U &&
+                        !elapsedAtLeast(millis(), serviceTouchResetMillis_,
+                                        USBD_TOUCH_RESET_CONFIRM_MS);
                     if (!inConfirmWindow) {
                         serviceTouchPending_ = false;
+                        serviceTimerFlags_ &=
+                            static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
                         serviceTouchResetMillis_ = 0UL;
                     }
                 } else {
                     markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_LINE_CODING);
+                    serviceTimerFlags_ |= USBD_SERVICE_TIMER_SAW_1200;
                     serviceSaw1200Millis_ = millis();
                     // Line coding alone is not an upload gesture. Windows can
                     // replay a port's saved 1200-baud setting while DTR is
@@ -2694,6 +2715,7 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             userLineCoding_ = {115200UL, 0U, 0U, 8U};
             serviceSaw1200Millis_ = 0UL;
             serviceTouchPending_ = false;
+            serviceTimerFlags_ = 0U;
             serviceTouchResetMillis_ = 0U;
             ignoredResetTouchCount_ = 0U;
             if (configured_) {
@@ -2919,16 +2941,16 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                     dtr = nextDtr;
                     rts = (value & 0x0002U) != 0U;
                     updateSerialState(userCdc);
-                    const bool resetArmed = configuredMillis_ != 0UL &&
-                        (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
+                    const bool resetArmed = configured_ &&
+                        elapsedAtLeast(millis(), configuredMillis_, USBD_1200_RESET_ARM_MS);
                     // Accept the touch if the line is at 1200 now OR was at 1200
                     // very recently: a host's single-port (usbcdc=disabled)
                     // sequence can drop DTR a few ms after the baud has already
                     // reverted, so requiring exact coincidence could miss the
                     // DTR-drop that arms the touch.
                     const bool recent1200 = lineCoding_.baudRate == 1200UL ||
-                        (serviceSaw1200Millis_ != 0UL &&
-                         (millis() - serviceSaw1200Millis_) < 400UL);
+                        ((serviceTimerFlags_ & USBD_SERVICE_TIMER_SAW_1200) != 0U &&
+                         !elapsedAtLeast(millis(), serviceSaw1200Millis_, 400UL));
                     if (!userCdc && recent1200) {
                         if (explicitTouchGesture(previousDtr, nextDtr, recent1200, resetArmed)) {
                             // Host dropped DTR at 1200 baud: arm the touch and start the 40 ms
@@ -2937,19 +2959,24 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                             markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_TOUCH_PENDING);
                             serviceTouchPending_ = true;
                             serviceTouchResetMillis_ = millis();
-                        } else if (serviceTouchResetMillis_ == 0UL) {
+                            serviceTimerFlags_ |= USBD_SERVICE_TIMER_TOUCH_WINDOW;
+                        } else if ((serviceTimerFlags_ & USBD_SERVICE_TIMER_TOUCH_WINDOW) == 0U) {
                             // V1 latch fix: once the confirm window has started
-                            // (serviceTouchResetMillis_ != 0) we must NOT cancel the pending
+                            // we must NOT cancel the pending
                             // touch on a subsequent DTR=true. Windows usbser.sys re-asserts
                             // DTR on SerialPort.Close() and again on the next CreateFile()
                             // (adafruit-nrfutil opens the port immediately after the touch),
                             // so the host-side touch sequence inevitably ends with DTR back
                             // high within tens of ms. Cancelling here would defeat the touch.
                             serviceTouchPending_ = false;
+                            serviceTimerFlags_ &=
+                                static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
                             serviceTouchResetMillis_ = 0UL;
                         }
                     } else if (!userCdc) {
                         serviceTouchPending_ = false;
+                        serviceTimerFlags_ &=
+                            static_cast<uint8_t>(~USBD_SERVICE_TIMER_TOUCH_WINDOW);
                         serviceTouchResetMillis_ = 0UL;
                     }
                 }

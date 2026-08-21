@@ -102,6 +102,11 @@ coding. In particular, application code cannot prime the maintenance interface
 at 1200 baud; only a validated host `SET_LINE_CODING` followed by the admitted
 DTR transition can request bootloader entry.
 
+CDC-open, configuration-age, recent-1200, and touch-confirm timers do not use a
+zero timestamp as an ownership sentinel. Their accompanying session/validity
+state remains authoritative, so the normal `millis()` wrap boundary cannot make
+a live CDC session appear unopened or suppress an otherwise valid upload touch.
+
 Pluggable modules are admitted transactionally. Registration first rejects an
 endpoint/interface allocation beyond the nRF52840 controller limits. During
 descriptor construction, each module must write exactly the byte and interface

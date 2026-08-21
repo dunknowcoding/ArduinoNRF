@@ -243,6 +243,7 @@ private:
     volatile bool pendingAddressValid_ = false;
     volatile bool serviceTouchPending_ = false;
     volatile bool stubHalted_ = false;
+    volatile uint8_t serviceTimerFlags_ = 0;
     volatile uint32_t haltTouchTicks_ = 0;
     volatile uint32_t serviceTouchResetMillis_ = 0;
     // millis() when the service CDC last saw a 1200-bps SET_LINE_CODING. Lets a
