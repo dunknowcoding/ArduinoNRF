@@ -25,6 +25,7 @@ constexpr uint8_t USB_REQ_TYPE_CLASS = 0x20U;
 constexpr uint8_t USB_REQ_RECIPIENT_DEVICE = 0x00U;
 constexpr uint8_t USB_REQ_RECIPIENT_INTERFACE = 0x01U;
 constexpr uint8_t USB_REQ_RECIPIENT_ENDPOINT = 0x02U;
+constexpr uint16_t USB_FEATURE_ENDPOINT_HALT = 0x0000U;
 constexpr uint8_t USB_DESC_DEVICE = 0x01U;
 constexpr uint8_t USB_DESC_CONFIGURATION = 0x02U;
 constexpr uint8_t USB_DESC_STRING = 0x03U;
@@ -96,6 +97,7 @@ constexpr uint32_t DTOGGLE = 0x50CUL;
 constexpr uint32_t EPINEN = 0x510UL;
 constexpr uint32_t EPOUTEN = 0x514UL;
 constexpr uint32_t EPSTALL = 0x518UL;
+constexpr uint32_t USBD_EPSTALL_STALL = 1UL << 8U;
 constexpr uint32_t EPOUT_PTR_BASE = 0x700UL;
 constexpr uint32_t EPOUT_MAXCNT_BASE = 0x704UL;
 constexpr uint32_t EPOUT_AMOUNT_BASE = 0x708UL;
@@ -223,6 +225,18 @@ constexpr bool controlInNeedsZlp(size_t actualLength,
 static_assert(controlInNeedsZlp(64U, 65U));
 static_assert(!controlInNeedsZlp(64U, 64U));
 static_assert(!controlInNeedsZlp(63U, 64U));
+
+constexpr bool explicitTouchGesture(bool previousDtr,
+                                    bool nextDtr,
+                                    bool recent1200,
+                                    bool resetArmed) {
+    return previousDtr && !nextDtr && recent1200 && resetArmed;
+}
+
+static_assert(explicitTouchGesture(true, false, true, true));
+static_assert(!explicitTouchGesture(false, false, true, true));
+static_assert(!explicitTouchGesture(true, false, false, true));
+static_assert(!explicitTouchGesture(true, false, true, false));
 
 inline bool servicePortEnabled() {
     return nrfUsbServicePortEnabled();
@@ -372,6 +386,10 @@ inline void clearEndpointToggle(uint8_t endpointAddress) {
 
 inline void clearEndpointStall(uint8_t endpointAddress) {
     reg32(USBD_BASE, EPSTALL) = endpointAddress;
+}
+
+inline void stallEndpoint(uint8_t endpointAddress) {
+    reg32(USBD_BASE, EPSTALL) = USBD_EPSTALL_STALL | endpointAddress;
 }
 
 inline void resetEndpointDataState(uint8_t endpointAddress) {
@@ -988,8 +1006,9 @@ void NrfUsbdDriver::irqHandler() {
 }
 
 // Number of consecutive halted-pump iterations the host must hold the service
-// CDC open at 1200 bps before we reboot to the bootloader. The stub busy-loops
-// the pump, so this is a debounce against a transient line-coding readout, not
+// CDC has delivered the explicit 1200-bps/DTR-falling upload gesture before we
+// reboot to the bootloader. The stub busy-loops the pump, so this is a debounce
+// against a torn control transaction, not
 // a wall-clock interval (millis() is frozen during the DebugMon halt).
 // The halted stub has already observed a configured service CDC at 1200 baud;
 // this is an explicit upload request, not ambient serial traffic. Keep a short
@@ -1009,14 +1028,15 @@ void NrfUsbdDriver::serviceHaltedTouch() {
         haltTouchTicks_ = 0UL;
         return;
     }
-    // The host opens the service CDC at exactly 1200 bps solely to request the
-    // DFU touch; nothing in a debug session legitimately does. lineCoding_ is
+    // The maintenance CDC must receive both 1200-bps line coding and a DTR
+    // falling edge. Merely selecting 1200 baud is not an upload request.
+    // lineCoding_ is
     // updated from EP0 control-OUT (completeControlOutTransfer), which still
     // completes while halted — that is how re-enumeration finishes — so this
     // signal is observable even though millis() is frozen.
     // Honor the touch even while halted in the GDB stub debugger, on any profile -
     // a debug build must still be DFU-recoverable over USB.
-    const bool touchSignal = enabled_ && configured_ &&
+    const bool touchSignal = enabled_ && configured_ && serviceTouchPending_ &&
         lineCoding_.baudRate == 1200UL;
     if (!touchSignal) {
         haltTouchTicks_ = 0UL;
@@ -1040,16 +1060,6 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
     if (reg32(USBD_BASE, EVENTS_STARTED) != 0UL) {
         reg32(USBD_BASE, EVENTS_STARTED) = 0UL;
         started_ = true;
-    }
-
-    if (reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL) {
-        reg32(USBD_BASE, EVENTS_EP0SETUP) = 0UL;
-        if (pollTraceEnabled()) {
-            ++g_usbdPollTrace.ep0SetupEvents;
-        }
-        diagResetAtUsbdBeginStage(7UL);
-        serviceSetup();
-        diagResetAtUsbdBeginStage(8UL);
     }
 
     if (reg32(USBD_BASE, eventEndEpinOffset(0U)) != 0UL) {
@@ -1099,7 +1109,7 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
             // to EasyDMA the bytes out of the peripheral into PTR, and only then will
             // EVENTS_ENDEPOUT[0] (+ EPOUT[0].AMOUNT) reflect the actual byte count.
             // Without this step, AMOUNT stays 0, completeControlOutTransfer reads a
-            // zero length, and the `if (controlOutLength_ >= 7U)` guard inside the
+            // zero length, and the exact seven-byte guard inside the
             // ServiceLineCoding case drops the entire SET_LINE_CODING payload — which
             // is precisely why the device's baud was stuck at its 115200 default and
             // the 1200 bps touch never armed.
@@ -1117,6 +1127,22 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
             }
         }
         // Else: spurious EP0DATADONE with neither side tracked — drop silently.
+    }
+
+    // Finish an already-latched data stage before reading a newer SETUP token.
+    // A host can advance to the next control request before this ISR/poll pass;
+    // servicing SETUP first would replace our transfer state and either drop a
+    // completed CDC line-coding payload or route its DONE event into the new IN
+    // request. serviceSetup() then explicitly aborts only a genuinely
+    // incomplete older transfer.
+    if (reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL) {
+        reg32(USBD_BASE, EVENTS_EP0SETUP) = 0UL;
+        if (pollTraceEnabled()) {
+            ++g_usbdPollTrace.ep0SetupEvents;
+        }
+        diagResetAtUsbdBeginStage(7UL);
+        serviceSetup();
+        diagResetAtUsbdBeginStage(8UL);
     }
 
     // A host OUT packet has been buffered when its EPDATASTATUS OUT bit is set
@@ -1172,6 +1198,10 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
             handledInAck |= serviceNotificationAck;
         }
         if ((endpointStatus & serviceInAck) != 0UL) {
+            if (dataInFlight_) {
+                txTail_ = (txTail_ + dataInFlightLength_) % USBD_RING_BUFFER_SIZE;
+            }
+            dataInFlightLength_ = 0U;
             dataInFlight_ = false;
             handledInAck |= serviceInAck;
         }
@@ -1181,6 +1211,10 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
                 handledInAck |= userNotificationAck;
             }
             if ((endpointStatus & userInAck) != 0UL) {
+                if (userDataInFlight_) {
+                    userTxTail_ = (userTxTail_ + userDataInFlightLength_) % USBD_RING_BUFFER_SIZE;
+                }
+                userDataInFlightLength_ = 0U;
                 userDataInFlight_ = false;
                 handledInAck |= userInAck;
             }
@@ -1624,9 +1658,11 @@ void NrfUsbdDriver::resetConnectionState() {
     suspended_ = false;
     cdcActive_ = false;
     dataInFlight_ = false;
+    dataInFlightLength_ = 0U;
     notificationInFlight_ = false;
     notificationPending_ = false;
     userDataInFlight_ = false;
+    userDataInFlightLength_ = 0U;
     userNotificationInFlight_ = false;
     userNotificationPending_ = false;
     dtr_ = false;
@@ -1636,6 +1672,9 @@ void NrfUsbdDriver::resetConnectionState() {
     userRts_ = false;
     userDtrAssertedMillis_ = 0UL;
     pendingAddressValid_ = false;
+    pendingControlOut_ = ControlOutTransfer::None;
+    controlOutExpected_ = 0U;
+    controlOutLength_ = 0U;
     detachRequestMagic_ = 0UL;
     detachCause_ = 0UL;
     resetEp0InXferState();
@@ -1646,6 +1685,8 @@ void NrfUsbdDriver::resetConnectionState() {
     address_ = 0U;
     pendingAddress_ = 0U;
     configuration_ = 0U;
+    haltedInEndpoints_ = 0U;
+    haltedOutEndpoints_ = 0U;
     configStartMillis_ = (enabled_ && attached_) ? millis() : 0UL;
     configuredMillis_ = 0UL;
     serialStateBitmap_ = 0U;
@@ -1923,6 +1964,8 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
         return;
     }
     volatile bool &dataInFlight = userPort ? userDataInFlight_ : dataInFlight_;
+    volatile uint8_t &dataInFlightLength =
+        userPort ? userDataInFlightLength_ : dataInFlightLength_;
     const bool dtr = userPort ? userDtr_ : dtr_;
     const uint32_t dtrAssertedMillis = userPort ? userDtrAssertedMillis_ : dtrAssertedMillis_;
     if (!dtr || dtrAssertedMillis == 0UL ||
@@ -1935,14 +1978,14 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
 
     uint8_t *txBuffer = userPort ? &userTxBuffer_[0] : &this->txBuffer_[0];
     volatile size_t &txHead = userPort ? userTxHead_ : txHead_;
-    volatile size_t &txTail = userPort ? userTxTail_ : txTail_;
+    const size_t txTail = userPort ? userTxTail_ : txTail_;
     uint8_t *endpointBuffer = userPort ? &userEndpointInBuffer_[0] : &endpointInBuffer_[0];
     const uint8_t endpoint = userPort ? USER_DATA_EP : SERVICE_DATA_EP;
-    const size_t savedTail = txTail;
+    size_t cursor = txTail;
     size_t count = 0U;
-    while (count < DATA_EP_MAX_PACKET && txTail != txHead) {
-        endpointBuffer[count++] = txBuffer[txTail];
-        txTail = (txTail + 1U) % USBD_RING_BUFFER_SIZE;
+    while (count < DATA_EP_MAX_PACKET && cursor != txHead) {
+        endpointBuffer[count++] = txBuffer[cursor];
+        cursor = (cursor + 1U) % USBD_RING_BUFFER_SIZE;
     }
 
     if (count == 0U) {
@@ -1955,9 +1998,9 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
     reg32(USBD_BASE, epinPtrOffset(endpoint)) = reinterpret_cast<uint32_t>(endpointBuffer);
     reg32(USBD_BASE, epinMaxcntOffset(endpoint)) = static_cast<uint32_t>(count);
     if (!triggerEndpointStartTask(taskStartEpinOffset(endpoint))) {
-        txTail = savedTail;
         return;
     }
+    dataInFlightLength = static_cast<uint8_t>(count);
     dataInFlight = true;
     if (!userPort) {
         diagResetAtUsbdBeginStage(17UL);
@@ -1993,6 +2036,12 @@ void NrfUsbdDriver::serviceNotificationIn(bool userPort) {
 }
 
 void NrfUsbdDriver::serviceSetup() {
+    // A SETUP token aborts any older control transfer. Do not let a short or
+    // interrupted class OUT request retain ownership of EP0 and consume the
+    // payload/status event belonging to the new request.
+    pendingControlOut_ = ControlOutTransfer::None;
+    controlOutExpected_ = 0U;
+    controlOutLength_ = 0U;
     resetEp0InXferState();
 
     const uint8_t requestType = static_cast<uint8_t>(reg32(USBD_BASE, BMREQUESTTYPE) & 0xFFUL);
@@ -2018,9 +2067,20 @@ void NrfUsbdDriver::serviceSetup() {
 void NrfUsbdDriver::completeControlOutTransfer() {
     controlOutLength_ = reg32(USBD_BASE, epoutAmountOffset(0U));
 
+    if (controlOutLength_ != controlOutExpected_) {
+        // CDC line coding is a fixed-size request. A short/overlong data stage
+        // is malformed and must not partially update state or receive a false
+        // success status.
+        pendingControlOut_ = ControlOutTransfer::None;
+        controlOutExpected_ = 0U;
+        controlOutLength_ = 0U;
+        stallControlEndpoint();
+        return;
+    }
+
     switch (pendingControlOut_) {
         case ControlOutTransfer::ServiceLineCoding:
-            if (controlOutLength_ >= 7U) {
+            if (controlOutLength_ == 7U) {
                 lineCoding_.baudRate =
                     static_cast<uint32_t>(controlOutBuffer_[0]) |
                     (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
@@ -2042,19 +2102,18 @@ void NrfUsbdDriver::completeControlOutTransfer() {
                 } else {
                     markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_LINE_CODING);
                     serviceSaw1200Millis_ = millis();
-                    const bool resetArmed = configuredMillis_ != 0UL &&
-                        (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
-                    if (!dtr_) {  // touch always armed (any profile, incl. debug)
-                        markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_TOUCH_PENDING);
-                        serviceTouchPending_ = true;
-                        serviceTouchResetMillis_ = resetArmed ? millis() : 0UL;
-                    }
+                    // Line coding alone is not an upload gesture. Windows can
+                    // replay a port's saved 1200-baud setting while DTR is
+                    // already low during enumeration. Arming here made that
+                    // harmless replay turn into a delayed reboot and apparent
+                    // COM-port loss. SET_CONTROL_LINE_STATE owns the explicit
+                    // DTR high-to-low edge that authorizes bootloader entry.
                 }
             }
             sendZeroLengthStatus();
             break;
         case ControlOutTransfer::UserLineCoding:
-            if (controlOutLength_ >= 7U) {
+            if (controlOutLength_ == 7U) {
                 userLineCoding_.baudRate =
                     static_cast<uint32_t>(controlOutBuffer_[0]) |
                     (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
@@ -2076,6 +2135,110 @@ void NrfUsbdDriver::completeControlOutTransfer() {
     controlOutLength_ = 0U;
 }
 
+bool NrfUsbdDriver::interfaceExists(uint8_t interfaceNumber) const {
+    size_t offset = 0U;
+    while (offset + 2U <= configurationDescriptorLength_) {
+        const uint8_t descriptorLength = configurationDescriptor_[offset];
+        if (descriptorLength < 2U || offset + descriptorLength > configurationDescriptorLength_) {
+            return false;
+        }
+        if (configurationDescriptor_[offset + 1U] == USB_DESC_INTERFACE &&
+            descriptorLength >= 9U &&
+            configurationDescriptor_[offset + 2U] == interfaceNumber) {
+            return true;
+        }
+        offset += descriptorLength;
+    }
+    return false;
+}
+
+bool NrfUsbdDriver::endpointDescriptorAttributes(uint8_t endpointAddress, uint8_t &attributes) const {
+    size_t offset = 0U;
+    while (offset + 2U <= configurationDescriptorLength_) {
+        const uint8_t descriptorLength = configurationDescriptor_[offset];
+        if (descriptorLength < 2U || offset + descriptorLength > configurationDescriptorLength_) {
+            return false;
+        }
+        if (configurationDescriptor_[offset + 1U] == USB_DESC_ENDPOINT &&
+            descriptorLength >= 7U &&
+            configurationDescriptor_[offset + 2U] == endpointAddress) {
+            attributes = configurationDescriptor_[offset + 3U];
+            return true;
+        }
+        offset += descriptorLength;
+    }
+    return false;
+}
+
+bool NrfUsbdDriver::endpointRequestValid(uint16_t index,
+                                         uint8_t &endpointAddress,
+                                         uint8_t &attributes) const {
+    if ((index & 0xFF70U) != 0U) {
+        return false;
+    }
+    endpointAddress = static_cast<uint8_t>(index & 0x008FU);
+    const uint8_t endpoint = static_cast<uint8_t>(endpointAddress & 0x0FU);
+    if (!configured_ || endpoint == 0U || endpoint >= USB_MAX_ENDPOINTS) {
+        return false;
+    }
+    return endpointDescriptorAttributes(endpointAddress, attributes) &&
+           (attributes & 0x03U) != 0x01U;  // ENDPOINT_HALT is invalid for isochronous endpoints.
+}
+
+void NrfUsbdDriver::setEndpointHalt(uint8_t endpointAddress, bool halted) {
+    const uint8_t endpoint = static_cast<uint8_t>(endpointAddress & 0x0FU);
+    volatile uint8_t &bitmap = (endpointAddress & USB_DIR_IN) != 0U
+        ? haltedInEndpoints_
+        : haltedOutEndpoints_;
+    if (halted) {
+        stallEndpoint(endpointAddress);
+        bitmap = static_cast<uint8_t>(bitmap | endpointMask(endpoint));
+    } else {
+        // If the host ACKed the last IN packet immediately before issuing
+        // CLEAR_FEATURE, commit that acknowledgement before resetting the
+        // endpoint. Otherwise preserve queued CDC bytes for retransmission.
+        const uint32_t ackBit = endpointMask(endpoint);
+        const bool inEndpoint = (endpointAddress & USB_DIR_IN) != 0U;
+        const bool acked = inEndpoint && (reg32(USBD_BASE, EPDATASTATUS) & ackBit) != 0U;
+        if (acked) {
+            if (endpoint == SERVICE_DATA_EP && dataInFlight_) {
+                txTail_ = (txTail_ + dataInFlightLength_) % USBD_RING_BUFFER_SIZE;
+            } else if (userPortEnabled() && endpoint == USER_DATA_EP && userDataInFlight_) {
+                userTxTail_ = (userTxTail_ + userDataInFlightLength_) % USBD_RING_BUFFER_SIZE;
+            } else if (endpoint >= firstDynamicEndpoint() && dynamicInBusy_[endpoint]) {
+                PluggableUSB().endpointInComplete(endpoint);
+            }
+            reg32(USBD_BASE, EPDATASTATUS) = ackBit;
+        }
+
+        if (inEndpoint && endpoint == SERVICE_DATA_EP) {
+            dataInFlight_ = false;
+            dataInFlightLength_ = 0U;
+        } else if (inEndpoint && endpoint == SERVICE_NOTIFICATION_EP) {
+            notificationInFlight_ = false;
+        } else if (inEndpoint && userPortEnabled() && endpoint == USER_DATA_EP) {
+            userDataInFlight_ = false;
+            userDataInFlightLength_ = 0U;
+        } else if (inEndpoint && userPortEnabled() && endpoint == USER_NOTIFICATION_EP) {
+            userNotificationInFlight_ = false;
+        } else if (inEndpoint && endpoint >= firstDynamicEndpoint()) {
+            dynamicInBusy_[endpoint] = false;
+            dynamicInLengths_[endpoint] = 0U;
+        }
+        clearEndpointStall(endpointAddress);
+        clearEndpointToggle(endpointAddress);
+        bitmap = static_cast<uint8_t>(bitmap & ~endpointMask(endpoint));
+    }
+}
+
+bool NrfUsbdDriver::endpointHalted(uint8_t endpointAddress) const {
+    const uint8_t endpoint = static_cast<uint8_t>(endpointAddress & 0x0FU);
+    const uint8_t bitmap = (endpointAddress & USB_DIR_IN) != 0U
+        ? haltedInEndpoints_
+        : haltedOutEndpoints_;
+    return (bitmap & endpointMask(endpoint)) != 0U;
+}
+
 void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint16_t index, uint16_t length) {
     const uint8_t requestType = static_cast<uint8_t>(reg32(USBD_BASE, BMREQUESTTYPE) & 0xFFUL);
     const uint8_t recipient = static_cast<uint8_t>(reg32(USBD_BASE, BMREQUESTTYPE) & 0x1FU);
@@ -2085,6 +2248,11 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             const uint8_t descriptorType = static_cast<uint8_t>((value >> 8U) & 0xFFU);
             const uint8_t descriptorIndex = static_cast<uint8_t>(value & 0xFFU);
             if (descriptorType == USB_DESC_DEVICE) {
+                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) ||
+                    descriptorIndex != 0U || index != 0U) {
+                    stallControlEndpoint();
+                    return;
+                }
                 size_t descriptorLength = length;
                 if (descriptorLength > sizeof(deviceDescriptor_)) {
                     descriptorLength = sizeof(deviceDescriptor_);
@@ -2093,6 +2261,11 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
                 return;
             }
             if (descriptorType == USB_DESC_CONFIGURATION) {
+                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) ||
+                    descriptorIndex != 0U || index != 0U) {
+                    stallControlEndpoint();
+                    return;
+                }
                 size_t descriptorLength = length;
                 if (descriptorLength > configurationDescriptorLength_) {
                     descriptorLength = configurationDescriptorLength_;
@@ -2101,6 +2274,11 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
                 return;
             }
             if (descriptorType == USB_DESC_STRING) {
+                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) ||
+                    (descriptorIndex == 0U ? index != 0U : (index != 0U && index != 0x0409U))) {
+                    stallControlEndpoint();
+                    return;
+                }
                 if (descriptorIndex == 0U) {
                     controlInBuffer_[0] = 4U;
                     controlInBuffer_[1] = USB_DESC_STRING;
@@ -2161,9 +2339,18 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
                 } else if (descriptorIndex == USB_STRING_USER_DATA) {
                     text = "Nius User Data";
                 } else if (descriptorIndex == USB_STRING_DFU) {
+#if !defined(NRF_USB_RUNTIME_DISABLE_APP_DFU) || (NRF_USB_RUNTIME_DISABLE_APP_DFU == 0)
                     text = "Nius Bootloader Control";
+#endif
                 } else {
-                    text = "0001";
+                    stallControlEndpoint();
+                    return;
+                }
+                if (text == nullptr ||
+                    ((!userPortEnabled()) &&
+                     (descriptorIndex == USB_STRING_USER_CONTROL || descriptorIndex == USB_STRING_USER_DATA))) {
+                    stallControlEndpoint();
+                    return;
                 }
                 const size_t stringLength = copyUsbStringDescriptor(text, controlInBuffer_, sizeof(controlInBuffer_));
                 size_t descriptorLength = length;
@@ -2191,26 +2378,66 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             return;
         }
         case USB_REQ_SET_ADDRESS:
-            pendingAddress_ = static_cast<uint8_t>(value & 0x7FU);
+            if (requestType != (USB_DIR_OUT | USB_REQ_RECIPIENT_DEVICE) ||
+                value > 127U || index != 0U || length != 0U || configured_) {
+                stallControlEndpoint();
+                return;
+            }
+            pendingAddress_ = static_cast<uint8_t>(value);
             pendingAddressValid_ = true;
             diagResetAtUsbdBeginStage(9UL);
             sendZeroLengthStatus();
             return;
         case USB_REQ_SET_CONFIGURATION:
-            configuration_ = static_cast<uint8_t>(value & 0xFFU);
+            if (requestType != (USB_DIR_OUT | USB_REQ_RECIPIENT_DEVICE) ||
+                value > 1U || index != 0U || length != 0U) {
+                stallControlEndpoint();
+                return;
+            }
+            configuration_ = static_cast<uint8_t>(value);
             configured_ = configuration_ != 0U;
             if (configured_) {
+                // SET_CONFIGURATION establishes a fresh endpoint state even
+                // when the host selects configuration 1 repeatedly.
+                reg32(USBD_BASE, EPINEN) = endpointMask(0U);
+                reg32(USBD_BASE, EPOUTEN) = endpointMask(0U);
+                haltedInEndpoints_ = 0U;
+                haltedOutEndpoints_ = 0U;
+                dataInFlight_ = false;
+                dataInFlightLength_ = 0U;
+                notificationInFlight_ = false;
+                notificationPending_ = false;
+                userDataInFlight_ = false;
+                userDataInFlightLength_ = 0U;
+                userNotificationInFlight_ = false;
+                userNotificationPending_ = false;
+                resetDynamicEndpoints();
                 configuredMillis_ = millis();
                 startCdcEndpoints();
             } else {
                 configuredMillis_ = 0UL;
                 cdcActive_ = false;
                 dataInFlight_ = false;
+                dataInFlightLength_ = 0U;
                 notificationInFlight_ = false;
                 notificationPending_ = false;
                 userDataInFlight_ = false;
+                userDataInFlightLength_ = 0U;
                 userNotificationInFlight_ = false;
                 userNotificationPending_ = false;
+                dtr_ = false;
+                rts_ = false;
+                dtrAssertedMillis_ = 0U;
+                userDtr_ = false;
+                userRts_ = false;
+                userDtrAssertedMillis_ = 0U;
+                serviceTouchPending_ = false;
+                serviceTouchResetMillis_ = 0U;
+                haltedInEndpoints_ = 0U;
+                haltedOutEndpoints_ = 0U;
+                reg32(USBD_BASE, EPINEN) = endpointMask(0U);
+                reg32(USBD_BASE, EPOUTEN) = endpointMask(0U);
+                resetDynamicEndpoints();
             }
             updateSerialState(false);
             if (userPortEnabled()) {
@@ -2221,27 +2448,90 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             diagResetAtUsbdBeginStage(11UL);
             return;
         case USB_REQ_GET_CONFIGURATION:
+            if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) ||
+                value != 0U || index != 0U || length != 1U) {
+                stallControlEndpoint();
+                return;
+            }
             controlInBuffer_[0] = configuration_;
             startControlIn(controlInBuffer_, 1U);
             return;
-        case USB_REQ_GET_STATUS:
-            controlInBuffer_[0] = 0U;
-            controlInBuffer_[1] = 0U;
-            startControlIn(controlInBuffer_, 2U);
-            return;
-        case USB_REQ_CLEAR_FEATURE:
-        case USB_REQ_SET_FEATURE:
-            if (recipient == USB_REQ_RECIPIENT_DEVICE || recipient == USB_REQ_RECIPIENT_INTERFACE || recipient == USB_REQ_RECIPIENT_ENDPOINT) {
-                sendZeroLengthStatus();
+        case USB_REQ_GET_STATUS: {
+            if ((requestType & USB_DIR_IN) == 0U || value != 0U || length != 2U) {
+                stallControlEndpoint();
                 return;
             }
-            stallControlEndpoint();
+            controlInBuffer_[0] = 0U;
+            controlInBuffer_[1] = 0U;
+            if (recipient == USB_REQ_RECIPIENT_DEVICE) {
+                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) || index != 0U) {
+                    stallControlEndpoint();
+                    return;
+                }
+            } else if (recipient == USB_REQ_RECIPIENT_INTERFACE) {
+                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_INTERFACE) ||
+                    !configured_ || (index & 0xFF00U) != 0U ||
+                    !interfaceExists(static_cast<uint8_t>(index))) {
+                    stallControlEndpoint();
+                    return;
+                }
+            } else if (recipient == USB_REQ_RECIPIENT_ENDPOINT) {
+                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_ENDPOINT) ||
+                    (index & 0xFF70U) != 0U) {
+                    stallControlEndpoint();
+                    return;
+                }
+                const uint8_t endpointAddress = static_cast<uint8_t>(index & 0x008FU);
+                const uint8_t endpoint = static_cast<uint8_t>(endpointAddress & 0x0FU);
+                uint8_t attributes = 0U;
+                if (endpoint >= USB_MAX_ENDPOINTS ||
+                    (endpoint != 0U &&
+                     (!configured_ || !endpointDescriptorAttributes(endpointAddress, attributes)))) {
+                    stallControlEndpoint();
+                    return;
+                }
+                controlInBuffer_[0] = endpointHalted(endpointAddress) ? 1U : 0U;
+            } else {
+                stallControlEndpoint();
+                return;
+            }
+            startControlIn(controlInBuffer_, 2U);
             return;
+        }
+        case USB_REQ_CLEAR_FEATURE:
+        case USB_REQ_SET_FEATURE: {
+            if (requestType != (USB_DIR_OUT | USB_REQ_RECIPIENT_ENDPOINT) ||
+                value != USB_FEATURE_ENDPOINT_HALT || length != 0U) {
+                stallControlEndpoint();
+                return;
+            }
+            uint8_t endpointAddress = 0U;
+            uint8_t attributes = 0U;
+            if (!endpointRequestValid(index, endpointAddress, attributes)) {
+                stallControlEndpoint();
+                return;
+            }
+            setEndpointHalt(endpointAddress, request == USB_REQ_SET_FEATURE);
+            sendZeroLengthStatus();
+            return;
+        }
         case USB_REQ_GET_INTERFACE:
+            if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_INTERFACE) ||
+                value != 0U || length != 1U || !configured_ ||
+                (index & 0xFF00U) != 0U || !interfaceExists(static_cast<uint8_t>(index))) {
+                stallControlEndpoint();
+                return;
+            }
             controlInBuffer_[0] = 0U;
             startControlIn(controlInBuffer_, 1U);
             return;
         case USB_REQ_SET_INTERFACE:
+            if (requestType != (USB_DIR_OUT | USB_REQ_RECIPIENT_INTERFACE) ||
+                value != 0U || length != 0U || !configured_ ||
+                (index & 0xFF00U) != 0U || !interfaceExists(static_cast<uint8_t>(index))) {
+                stallControlEndpoint();
+                return;
+            }
             sendZeroLengthStatus();
             return;
         default:
@@ -2261,7 +2551,12 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
     diagResetAtUsbdBeginStage(12UL);
     const uint8_t recipient = requestType & 0x1FU;
     const bool directionIn = (requestType & USB_DIR_IN) != 0U;
-    if (recipient != USB_REQ_RECIPIENT_INTERFACE) {
+    if (recipient != USB_REQ_RECIPIENT_INTERFACE || !configured_) {
+        stallControlEndpoint();
+        return;
+    }
+
+    if ((index & 0xFF00U) != 0U) {
         stallControlEndpoint();
         return;
     }
@@ -2274,16 +2569,20 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
         volatile bool &rts = userCdc ? userRts_ : rts_;
         switch (request) {
             case CDC_REQ_SET_LINE_CODING:
-                {
-                    size_t expectedLength = length;
-                    if (expectedLength > sizeof(controlOutBuffer_)) {
-                        expectedLength = sizeof(controlOutBuffer_);
-                    }
-                    expectControlOut(userCdc ? ControlOutTransfer::UserLineCoding : ControlOutTransfer::ServiceLineCoding, expectedLength);
+                if (requestType != (USB_DIR_OUT | USB_REQ_TYPE_CLASS | USB_REQ_RECIPIENT_INTERFACE) ||
+                    value != 0U || length != 7U) {
+                    stallControlEndpoint();
+                    return;
                 }
+                expectControlOut(userCdc ? ControlOutTransfer::UserLineCoding : ControlOutTransfer::ServiceLineCoding, 7U);
                 diagResetAtUsbdBeginStage(13UL);
                 return;
             case CDC_REQ_GET_LINE_CODING:
+                if (requestType != (USB_DIR_IN | USB_REQ_TYPE_CLASS | USB_REQ_RECIPIENT_INTERFACE) ||
+                    value != 0U || length != 7U) {
+                    stallControlEndpoint();
+                    return;
+                }
                 controlInBuffer_[0] = static_cast<uint8_t>(lineCoding.baudRate & 0xFFU);
                 controlInBuffer_[1] = static_cast<uint8_t>((lineCoding.baudRate >> 8U) & 0xFFU);
                 controlInBuffer_[2] = static_cast<uint8_t>((lineCoding.baudRate >> 16U) & 0xFFU);
@@ -2301,8 +2600,14 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                 diagResetAtUsbdBeginStage(14UL);
                 return;
             case CDC_REQ_SET_CONTROL_LINE_STATE:
+                if (requestType != (USB_DIR_OUT | USB_REQ_TYPE_CLASS | USB_REQ_RECIPIENT_INTERFACE) ||
+                    (value & 0xFFFCU) != 0U || length != 0U) {
+                    stallControlEndpoint();
+                    return;
+                }
                 {
                     const bool nextDtr = (value & 0x0001U) != 0U;
+                    const bool previousDtr = dtr;
                     volatile uint32_t &dtrAssertedMillis =
                         userCdc ? userDtrAssertedMillis_ : dtrAssertedMillis_;
                     if (nextDtr && !dtr) {
@@ -2326,14 +2631,14 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                     const bool recent1200 = lineCoding_.baudRate == 1200UL ||
                         (serviceSaw1200Millis_ != 0UL &&
                          (millis() - serviceSaw1200Millis_) < 400UL);
-                    if (!userCdc && recent1200) {  // touch always armed (any profile)
-                        if (!dtr) {
+                    if (!userCdc && recent1200) {
+                        if (explicitTouchGesture(previousDtr, nextDtr, recent1200, resetArmed)) {
                             // Host dropped DTR at 1200 baud: arm the touch and start the 40 ms
                             // confirm timer (see USBD_TOUCH_RESET_CONFIRM_MS). The poll/IRQ gate
                             // confirms by writing the GPREGRET magic and triggering SYSRESETREQ.
                             markResetCauseIfUnset(USBD_DIAG_CAUSE_1200_TOUCH_PENDING);
                             serviceTouchPending_ = true;
-                            serviceTouchResetMillis_ = resetArmed ? millis() : 0UL;
+                            serviceTouchResetMillis_ = millis();
                         } else if (serviceTouchResetMillis_ == 0UL) {
                             // V1 latch fix: once the confirm window has started
                             // (serviceTouchResetMillis_ != 0) we must NOT cancel the pending
@@ -2343,6 +2648,7 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                             // so the host-side touch sequence inevitably ends with DTR back
                             // high within tens of ms. Cancelling here would defeat the touch.
                             serviceTouchPending_ = false;
+                            serviceTouchResetMillis_ = 0UL;
                         }
                     } else if (!userCdc) {
                         serviceTouchPending_ = false;
@@ -2362,11 +2668,21 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
     if (interfaceIndex == dfuInterfaceNumber()) {
         switch (request) {
             case DFU_REQ_DETACH:
+                if (requestType != (USB_DIR_OUT | USB_REQ_TYPE_CLASS | USB_REQ_RECIPIENT_INTERFACE) ||
+                    length != 0U) {
+                    stallControlEndpoint();
+                    return;
+                }
                 detachCause_ = USBD_DIAG_CAUSE_DFU_DETACH;
                 detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
                 sendZeroLengthStatus();
                 return;
             case DFU_REQ_GETSTATUS:
+                if (requestType != (USB_DIR_IN | USB_REQ_TYPE_CLASS | USB_REQ_RECIPIENT_INTERFACE) ||
+                    value != 0U || length != 6U) {
+                    stallControlEndpoint();
+                    return;
+                }
                 controlInBuffer_[0] = DFU_STATUS_OK;
                 controlInBuffer_[1] = 1U;
                 controlInBuffer_[2] = 0U;
@@ -2382,6 +2698,11 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                 }
                 return;
             case DFU_REQ_GETSTATE:
+                if (requestType != (USB_DIR_IN | USB_REQ_TYPE_CLASS | USB_REQ_RECIPIENT_INTERFACE) ||
+                    value != 0U || length != 1U) {
+                    stallControlEndpoint();
+                    return;
+                }
                 controlInBuffer_[0] = DFU_STATE_APP_IDLE;
                 startControlIn(controlInBuffer_, 1U);
                 return;

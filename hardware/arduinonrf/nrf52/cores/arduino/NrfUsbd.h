@@ -161,6 +161,11 @@ private:
     void stallControlEndpoint();
     void completePendingAddress();
     void setAddress(uint8_t address);
+    bool interfaceExists(uint8_t interfaceNumber) const;
+    bool endpointDescriptorAttributes(uint8_t endpointAddress, uint8_t &attributes) const;
+    bool endpointRequestValid(uint16_t index, uint8_t &endpointAddress, uint8_t &attributes) const;
+    void setEndpointHalt(uint8_t endpointAddress, bool halted);
+    bool endpointHalted(uint8_t endpointAddress) const;
     void ringPushRx(uint8_t value);
     bool ringPushTx(uint8_t value);
     int ringPopRx();
@@ -194,12 +199,14 @@ private:
     volatile uint32_t dtrAssertedMillis_ = 0;
     volatile bool cdcActive_ = false;
     volatile bool dataInFlight_ = false;
+    volatile uint8_t dataInFlightLength_ = 0;
     volatile bool notificationInFlight_ = false;
     volatile bool notificationPending_ = false;
     volatile bool userDtr_ = false;
     volatile bool userRts_ = false;
     volatile uint32_t userDtrAssertedMillis_ = 0;
     volatile bool userDataInFlight_ = false;
+    volatile uint8_t userDataInFlightLength_ = 0;
     volatile bool userNotificationInFlight_ = false;
     volatile bool userNotificationPending_ = false;
     volatile Ep0InXferPhase ep0InXferPhase_ = Ep0InXferPhase::Idle;
@@ -224,6 +231,8 @@ private:
     volatile uint8_t address_ = 0;
     volatile uint8_t configuration_ = 0;
     volatile uint8_t pendingAddress_ = 0;
+    volatile uint8_t haltedInEndpoints_ = 0;
+    volatile uint8_t haltedOutEndpoints_ = 0;
     volatile uint32_t configStartMillis_ = 0;
     volatile uint32_t configuredMillis_ = 0;
     NrfUsbLineCoding lineCoding_ = {115200UL, 0U, 0U, 8U};
