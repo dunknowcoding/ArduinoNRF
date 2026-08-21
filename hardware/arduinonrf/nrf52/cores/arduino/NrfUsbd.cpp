@@ -224,6 +224,22 @@ constexpr bool configurationRequestAllowed(uint8_t address) {
     return address != 0U;
 }
 
+constexpr bool statusRequestAllowed(uint8_t address,
+                                    bool configured,
+                                    uint8_t recipient,
+                                    uint8_t endpoint) {
+    if (recipient == USB_REQ_RECIPIENT_DEVICE) {
+        return address != 0U;
+    }
+    if (recipient == USB_REQ_RECIPIENT_INTERFACE) {
+        return configured;
+    }
+    if (recipient == USB_REQ_RECIPIENT_ENDPOINT) {
+        return endpoint == 0U ? address != 0U : configured;
+    }
+    return false;
+}
+
 constexpr bool rxRingCanAcceptPacket(size_t freeBytes, size_t packetBytes) {
     return packetBytes <= DATA_EP_MAX_PACKET && freeBytes >= packetBytes;
 }
@@ -238,6 +254,14 @@ static_assert(ep0CompletionMayCommit(false));
 static_assert(!ep0CompletionMayCommit(true));
 static_assert(!configurationRequestAllowed(0U));
 static_assert(configurationRequestAllowed(1U));
+static_assert(!statusRequestAllowed(0U, false, USB_REQ_RECIPIENT_DEVICE, 0U));
+static_assert(statusRequestAllowed(1U, false, USB_REQ_RECIPIENT_DEVICE, 0U));
+static_assert(!statusRequestAllowed(1U, false, USB_REQ_RECIPIENT_INTERFACE, 0U));
+static_assert(statusRequestAllowed(1U, true, USB_REQ_RECIPIENT_INTERFACE, 0U));
+static_assert(!statusRequestAllowed(0U, false, USB_REQ_RECIPIENT_ENDPOINT, 0U));
+static_assert(statusRequestAllowed(1U, false, USB_REQ_RECIPIENT_ENDPOINT, 0U));
+static_assert(!statusRequestAllowed(1U, false, USB_REQ_RECIPIENT_ENDPOINT, 1U));
+static_assert(statusRequestAllowed(1U, true, USB_REQ_RECIPIENT_ENDPOINT, 1U));
 static_assert(rxRingCanAcceptPacket(0U, 0U));
 static_assert(rxRingCanAcceptPacket(1U, 1U));
 static_assert(!rxRingCanAcceptPacket(63U, 64U));
@@ -2733,14 +2757,16 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             controlInBuffer_[0] = 0U;
             controlInBuffer_[1] = 0U;
             if (recipient == USB_REQ_RECIPIENT_DEVICE) {
-                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) || index != 0U) {
+                if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_DEVICE) || index != 0U ||
+                    !statusRequestAllowed(address_, configured_, recipient, 0U)) {
                     stallControlEndpoint();
                     return;
                 }
             } else if (recipient == USB_REQ_RECIPIENT_INTERFACE) {
                 if (requestType != (USB_DIR_IN | USB_REQ_RECIPIENT_INTERFACE) ||
                     !configured_ || (index & 0xFF00U) != 0U ||
-                    !interfaceExists(static_cast<uint8_t>(index))) {
+                    !interfaceExists(static_cast<uint8_t>(index)) ||
+                    !statusRequestAllowed(address_, configured_, recipient, 0U)) {
                     stallControlEndpoint();
                     return;
                 }
@@ -2754,6 +2780,7 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
                 const uint8_t endpoint = static_cast<uint8_t>(endpointAddress & 0x0FU);
                 uint8_t attributes = 0U;
                 if (endpoint >= USB_MAX_ENDPOINTS ||
+                    !statusRequestAllowed(address_, configured_, recipient, endpoint) ||
                     (endpoint != 0U &&
                      (!configured_ || !endpointDescriptorAttributes(endpointAddress, attributes)))) {
                     stallControlEndpoint();

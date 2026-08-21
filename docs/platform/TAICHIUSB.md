@@ -127,7 +127,11 @@ the new request is admitted. An aborted CDC line-coding write therefore cannot
 leave 1200-baud upload authority behind for a later DTR transition.
 `SET_CONFIGURATION` and `GET_CONFIGURATION` are admitted only after a completed
 nonzero `SET_ADDRESS`; malformed default-state requests cannot create endpoint
-or function-session state.
+or function-session state. Chapter 9 `GET_STATUS` follows the same device-state
+boundary: device and endpoint-zero status require Address or Configured state,
+while interface and nonzero-endpoint status require Configured state. Default-
+state retries therefore stall instead of disclosing a state the host has not
+established.
 
 So debugging rides the *same* enumeration-from-ISR USB core as `Serial` and the
 uploader; there is no second USB implementation. Application `Serial` (user CDC)
