@@ -171,7 +171,6 @@ private:
     void expectControlOut(ControlOutTransfer transferType, size_t length);
     void sendZeroLengthStatus();
     void stallControlEndpoint();
-    void completePendingAddress();
     void setAddress(uint8_t address);
     bool interfaceExists(uint8_t interfaceNumber) const;
     bool endpointDescriptorAttributes(uint8_t endpointAddress, uint8_t &attributes) const;
@@ -238,7 +237,6 @@ private:
     volatile uint32_t detachRequestMagic_ = 0;
     volatile uint32_t detachCause_ = 0;
     volatile uint32_t detachRequestedMillis_ = 0;
-    volatile bool pendingAddressValid_ = false;
     volatile bool serviceTouchPending_ = false;
     volatile bool stubHalted_ = false;
     volatile uint8_t serviceTimerFlags_ = 0;
@@ -251,7 +249,6 @@ private:
     volatile uint8_t ignoredResetTouchCount_ = 0;
     volatile uint8_t address_ = 0;
     volatile uint8_t configuration_ = 0;
-    volatile uint8_t pendingAddress_ = 0;
     volatile uint8_t haltedInEndpoints_ = 0;
     volatile uint8_t haltedOutEndpoints_ = 0;
     volatile uint32_t configStartMillis_ = 0;

@@ -8,7 +8,8 @@ function Get-NiusFastUsbSerialRegistrySnapshot {
     param(
         [string]$Vid,
         [string]$ProductId,
-        [string]$PreferredCompositeStableId = ''
+        [string]$PreferredCompositeStableId = '',
+        [string]$PreferredInterfaceParentPrefix = ''
     )
 
     if ([string]::IsNullOrWhiteSpace($Vid) -or [string]::IsNullOrWhiteSpace($ProductId)) {
@@ -24,6 +25,7 @@ function Get-NiusFastUsbSerialRegistrySnapshot {
     $pidLetters = $pidToken.PadLeft(4, '0').ToUpperInvariant()
     $compositeFamily = 'VID_{0}&PID_{1}' -f $vidLetters, $pidLetters
     $preferredStable = $PreferredCompositeStableId.Trim().ToUpperInvariant()
+    $preferredParent = $PreferredInterfaceParentPrefix.Trim().TrimEnd('&').ToUpperInvariant()
     $presentPorts = @{}
     foreach ($name in [System.IO.Ports.SerialPort]::GetPortNames()) {
         $presentPorts[([string]$name).Trim().ToUpperInvariant()] = $true
@@ -65,6 +67,18 @@ function Get-NiusFastUsbSerialRegistrySnapshot {
             if ($null -ne $compositeRoot) { $compositeRoot.Dispose() }
         }
 
+        # Immediately after a bootloader-to-application handoff, Windows can
+        # publish the live MI_00 COM link before the composite parent's
+        # ParentIdPrefix value becomes readable. The exact parent prefix and
+        # stable id were already proven from the selected board before touch;
+        # use that pair to admit only the same interface family during this
+        # short registry-promotion window. This avoids a false post-upload
+        # timeout without accepting another attached board or a stale COM.
+        if (-not [string]::IsNullOrWhiteSpace($preferredStable) -and
+            -not [string]::IsNullOrWhiteSpace($preferredParent)) {
+            $parentToStable[$preferredParent] = $preferredStable
+        }
+
         if ($parentToStable.Count -eq 0) {
             return [pscustomobject]@{ Available = $true; Matches = @() }
         }
@@ -99,7 +113,7 @@ function Get-NiusFastUsbSerialRegistrySnapshot {
                                 # every MI_xx child (for example 8&...&), not the
                                 # composite device instance path. Callers compare
                                 # it with Get-UsbInterfaceParentInstancePrefix.
-                                InterfaceParentPrefix = $parentPrefix
+                                InterfaceParentPrefix = ($parentPrefix + '&')
                                 CompositeStableId = $parentToStable[$parentPrefix]
                             })
                     }

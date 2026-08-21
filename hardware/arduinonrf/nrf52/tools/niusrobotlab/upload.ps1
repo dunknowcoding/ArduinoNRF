@@ -1216,7 +1216,8 @@ function Get-NiusRuntimeComNamesForIdentity {
 
     $fastSnapshot = Get-NiusFastUsbSerialRegistrySnapshot `
         -Vid $RuntimeVid -ProductId $RuntimePid `
-        -PreferredCompositeStableId $PreferredCompositeStableId
+        -PreferredCompositeStableId $PreferredCompositeStableId `
+        -PreferredInterfaceParentPrefix $PreferredInterfaceParentPrefix
     if ($fastSnapshot.Available) {
         $matches = @($fastSnapshot.Matches)
         $preferredParent = $PreferredInterfaceParentPrefix.Trim().ToUpperInvariant()
@@ -1311,6 +1312,12 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         -not [string]::IsNullOrWhiteSpace($BootloaderPid) -and
         $BootloaderVid.Trim().ToUpperInvariant() -eq $RuntimeVid.Trim().ToUpperInvariant() -and
         $BootloaderPid.Trim().ToUpperInvariant() -eq $RuntimePid.Trim().ToUpperInvariant()
+    # Windows assigns a new interface-parent prefix when bootloader and runtime
+    # use different VID/PID identities. The stable composite id persists across
+    # that transition and remains the board-level selector; requiring the old
+    # bootloader prefix would reject the correct application COM. A parent
+    # prefix is meaningful only when both modes share the same USB identity.
+    $runtimeParentPrefix = if ($sameUsbIdentity) { $InterfaceParentPrefix } else { '' }
     $before = @{}
     foreach ($name in @($RuntimePortsBefore)) {
         if (-not [string]::IsNullOrWhiteSpace($name)) {
@@ -1333,7 +1340,7 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         $visibleMaintenancePorts = @(Get-NiusRuntimeComNamesForIdentity `
                 -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid `
                 -PreferredCompositeStableId $PreferredCompositeStableId `
-                -PreferredInterfaceParentPrefix $InterfaceParentPrefix `
+                -PreferredInterfaceParentPrefix $runtimeParentPrefix `
                 -MaintenanceOnly -Fresh)
         $verifiedCandidates = New-Object 'System.Collections.Generic.List[string]'
         foreach ($candidate in $knownCandidates) {
@@ -1374,6 +1381,7 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
                 Write-NiusTiming ('post-upload maintenance runtime verified: {0}' -f $candidate)
                 return [pscustomobject]@{
                     Success = $true
+                    Port = $candidate
                     Summary = ('post-upload maintenance COM {0} retained the expected identity for at least {1} ms' -f $candidate, $requiredStableMs)
                 }
             }
@@ -4621,7 +4629,7 @@ try {
             # not open the fresh application COM, which would compete with the
             # user's Serial Monitor and can block while usbser retires DFU.
             Write-Stage -Percent 94 -Label 'Verifying'
-            $null = Invoke-NiusMisflashGuardAfterSamePidUpload `
+            $runtimeReturn = Invoke-NiusMisflashGuardAfterSamePidUpload `
                 -PortName $adafruitControlPort `
                 -FallbackRuntimePortName $Port `
                 -RuntimeVid $effectiveRuntimeUsbVid `
@@ -4635,7 +4643,7 @@ try {
                 -ExpectedBoardId $Uf2BoardId `
                 -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
                 -InterfaceParentPrefix $adafruitControlPortParentPrefix
-            Write-NiusUploadComplete
+            Write-NiusUploadComplete -Note ('Maintenance upload port: {0}' -f $runtimeReturn.Port)
             exit 0
         }
 
@@ -4720,7 +4728,7 @@ try {
                 -RamEnd $RamEnd `
                 -DrivePath $detectedBootloader.Summary.Drive
             Write-Stage -Percent 94 -Label 'Verifying'
-            $null = Invoke-NiusMisflashGuardAfterSamePidUpload `
+            $runtimeReturn = Invoke-NiusMisflashGuardAfterSamePidUpload `
                 -PortName $adafruitControlPort `
                 -FallbackRuntimePortName $Port `
                 -RuntimeVid $effectiveRuntimeUsbVid `
@@ -4734,7 +4742,7 @@ try {
                 -ExpectedBoardId $Uf2BoardId `
                 -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
                 -InterfaceParentPrefix $adafruitControlPortParentPrefix
-            Write-NiusUploadComplete
+            Write-NiusUploadComplete -Note ('Maintenance upload port: {0}' -f $runtimeReturn.Port)
             exit 0
         }
 

@@ -80,6 +80,7 @@ constexpr uint32_t EVENTS_EPDATA = 0x160UL;
 // CDC — was the first to expose this.
 constexpr uint32_t EPSTATUS = 0x468UL;
 constexpr uint32_t EPDATASTATUS = 0x46CUL;
+constexpr uint32_t USBADDR = 0x470UL;
 constexpr uint32_t INTENSET = 0x304UL;
 constexpr uint32_t INTENCLR = 0x308UL;
 constexpr uint32_t EVENTCAUSE = 0x400UL;
@@ -211,10 +212,10 @@ constexpr bool readyAfterUsbEvent(bool ready, bool attached, bool hasVbus,
         : ready;
 }
 
-constexpr bool ep0CompletionMayCommit(bool newerSetupPending) {
+constexpr bool ep0DataDoneMayCommit(bool newerSetupPending) {
     // A new SETUP token aborts the older control transfer. Because firmware
-    // must arm the new data/status stage after reading SETUP, any simultaneously
-    // latched EP0DATADONE or ENDEPIN0 belongs to the aborted request.
+    // must arm the new data stage after reading SETUP, a simultaneously latched
+    // EP0DATADONE belongs to the aborted request.
     return !newerSetupPending;
 }
 
@@ -254,8 +255,8 @@ static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_SUSPEND_MASK |
                                            USBD_EVENTCAUSE_RESUME_MASK));
 static_assert(readyAfterUsbEvent(false, true, true, USBD_EVENTCAUSE_READY_MASK));
 static_assert(!readyAfterUsbEvent(true, true, false, USBD_EVENTCAUSE_RESUME_MASK));
-static_assert(ep0CompletionMayCommit(false));
-static_assert(!ep0CompletionMayCommit(true));
+static_assert(ep0DataDoneMayCommit(false));
+static_assert(!ep0DataDoneMayCommit(true));
 static_assert(!configurationRequestAllowed(0U));
 static_assert(configurationRequestAllowed(1U));
 static_assert(!elapsedAtLeast(9U, 5U, 5U));
@@ -1303,16 +1304,13 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
     }
 
     const bool ep0SetupPending = reg32(USBD_BASE, EVENTS_EP0SETUP) != 0UL;
+    // USBADDR is the peripheral-owned result of the SET_ADDRESS status stage.
+    // Mirror it every service pass instead of inferring completion from an
+    // event ordering: ENDEPIN0 and the next SETUP can be co-latched, while an
+    // aborted request leaves USBADDR unchanged.
+    setAddress(static_cast<uint8_t>(reg32(USBD_BASE, USBADDR) & 0x7FUL));
     if (reg32(USBD_BASE, eventEndEpinOffset(0U)) != 0UL) {
         reg32(USBD_BASE, eventEndEpinOffset(0U)) = 0UL;
-        if (ep0CompletionMayCommit(ep0SetupPending)) {
-            completePendingAddress();
-        } else {
-            // ENDEPIN0 may be the stale status completion of an aborted
-            // SET_ADDRESS. The newer SETUP owns EP0 and must not inherit or
-            // commit the previous request's pending address.
-            pendingAddressValid_ = false;
-        }
     }
 
     if (reg32(USBD_BASE, eventEndEpinOffset(SERVICE_NOTIFICATION_EP)) != 0UL) {
@@ -1327,7 +1325,7 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         reg32(USBD_BASE, eventEndEpinOffset(USER_NOTIFICATION_EP)) = 0UL;
     }
 
-    if (ep0CompletionMayCommit(ep0SetupPending) &&
+    if (ep0DataDoneMayCommit(ep0SetupPending) &&
         reg32(USBD_BASE, EVENTS_EP0DATADONE) != 0UL) {
         reg32(USBD_BASE, EVENTS_EP0DATADONE) = 0UL;
         if (pollTraceEnabled()) {
@@ -1361,7 +1359,6 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
             // the 1200 bps touch never armed.
             if (triggerEndpointStartTask(taskStartEpoutOffset(0U))) {
                 completeControlOutTransfer();
-                completePendingAddress();
             } else {
                 // A bounded EasyDMA failure must not leave EP0 permanently
                 // owned by a stale control-OUT transfer. Abort this request and
@@ -1936,7 +1933,6 @@ void NrfUsbdDriver::resetConnectionState() {
     userDtrAssertedMillis_ = 0UL;
     lineCoding_ = {115200UL, 0U, 0U, 8U};
     userLineCoding_ = {115200UL, 0U, 0U, 8U};
-    pendingAddressValid_ = false;
     pendingControlOut_ = ControlOutTransfer::None;
     controlOutExpected_ = 0U;
     controlOutLength_ = 0U;
@@ -1950,7 +1946,6 @@ void NrfUsbdDriver::resetConnectionState() {
     serviceSaw1200Millis_ = 0UL;
     ignoredResetTouchCount_ = 0U;
     address_ = 0U;
-    pendingAddress_ = 0U;
     configuration_ = 0U;
     haltedInEndpoints_ = 0U;
     haltedOutEndpoints_ = 0U;
@@ -2310,7 +2305,6 @@ void NrfUsbdDriver::serviceSetup() {
     pendingControlOut_ = ControlOutTransfer::None;
     controlOutExpected_ = 0U;
     controlOutLength_ = 0U;
-    pendingAddressValid_ = false;
     resetEp0InXferState();
 
     const uint8_t requestType = static_cast<uint8_t>(reg32(USBD_BASE, BMREQUESTTYPE) & 0xFFUL);
@@ -2673,8 +2667,6 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
                 stallControlEndpoint();
                 return;
             }
-            pendingAddress_ = static_cast<uint8_t>(value);
-            pendingAddressValid_ = true;
             diagResetAtUsbdBeginStage(9UL);
             sendZeroLengthStatus();
             return;
@@ -3122,14 +3114,6 @@ void NrfUsbdDriver::sendZeroLengthStatus() {
 
 void NrfUsbdDriver::stallControlEndpoint() {
     reg32(USBD_BASE, TASKS_EP0STALL) = 1UL;
-}
-
-void NrfUsbdDriver::completePendingAddress() {
-    if (!pendingAddressValid_) {
-        return;
-    }
-    setAddress(pendingAddress_);
-    pendingAddressValid_ = false;
 }
 
 void NrfUsbdDriver::queueSerialStateNotification(bool userPort) {

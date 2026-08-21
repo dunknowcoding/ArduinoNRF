@@ -90,11 +90,13 @@ remain armed; transfer events stay latched and are serviced after resume. This
 prevents an interrupt storm and prevents stale active state from launching new
 EasyDMA work during bus suspend.
 
-A newer EP0 SETUP token is authoritative over co-latched data or status
-completion from the previous request. That includes the IN/status completion
-used by `SET_ADDRESS`: an aborted request cannot commit its stale address before
-the replacement SETUP is serviced. Aborted CDC line-coding payloads likewise
-cannot mutate line state or retain 1200-baud upload authority.
+A newer EP0 SETUP token is authoritative over a co-latched `EP0DATADONE` from
+the previous request, so an aborted CDC line-coding payload cannot mutate line
+state or retain 1200-baud upload authority. `ENDEPIN0` is different: nRF52840
+can latch completion of the prior EP0 IN stage and the next SETUP before one
+firmware pass services either. That normal ordering must complete a pending
+`SET_ADDRESS` before the replacement SETUP is admitted; treating co-latching
+alone as an abort leaves the software address at zero and breaks enumeration.
 
 CDC line coding and DTR/RTS are exclusively host-owned session state.
 `Serial.begin(baud)` starts the Arduino facade but does not write either
