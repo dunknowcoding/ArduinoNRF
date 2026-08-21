@@ -138,6 +138,15 @@ choices because it has no native USB upload path in this package.
   declared runtime VID/PID before upload succeeds. Exact USB serial is the fallback
   when topology is unavailable, so serial-less boards and bootloader/runtime serial
   changes remain scoped without allowing a peer board to satisfy the check.
+- The same runtime identity must remain continuously present for 300 ms by default;
+  a transient enumeration followed by an early application/watchdog failure is not
+  reported as upload success. `--runtime-stable-ms` may tune this bounded check.
+- One host-local advisory lock owns a physical topology/serial identity throughout
+  package generation, transfer, and runtime verification. A concurrent uploader
+  fails before touching that target, while the OS releases the lock after exit.
+- USB IDs, address ranges, process/runtime timeouts, DFU/touch baud rates, device
+  type, and SoftDevice requirement are finite and range-checked before transfer;
+  malformed touch input cannot silently disable the bootloader transition.
 - Ambiguous same-identity devices fail closed instead of allowing a peer board
   to satisfy target detection or post-upload verification.
 - Generic boards whose base recipe says `auto` must select an explicit

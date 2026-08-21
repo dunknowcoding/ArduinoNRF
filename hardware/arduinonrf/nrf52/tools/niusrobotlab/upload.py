@@ -16,6 +16,9 @@ out of the box on a stock Python install.
 """
 from __future__ import annotations
 import argparse
+from contextlib import contextmanager
+import hashlib
+import math
 import os
 from pathlib import Path
 import plistlib
@@ -35,7 +38,65 @@ def fail(msg: str, code: int = 2) -> "None":
 
 
 def parse_usb_id(value: str) -> int:
-    return int(value, 0)
+    parsed = int(value, 0)
+    if not 0 <= parsed <= 0xFFFF:
+        raise ValueError("USB VID/PID must fit 16 bits")
+    return parsed
+
+
+def parse_bounded_int(value: str, name: str, minimum: int, maximum: int) -> int:
+    parsed = int(value, 0)
+    if not minimum <= parsed <= maximum:
+        raise ValueError(f"{name} must be in [{minimum}, {maximum}]")
+    return parsed
+
+
+def parse_bounded_float(value: str, name: str, minimum: float, maximum: float) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or not minimum <= parsed <= maximum:
+        raise ValueError(f"{name} must be finite and in [{minimum}, {maximum}]")
+    return parsed
+
+
+class UploadBusyError(RuntimeError):
+    pass
+
+
+@contextmanager
+def exclusive_target_lock(identity: str):
+    """Hold a host-local advisory lock for one physical target."""
+    import fcntl
+
+    token = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    path = Path(tempfile.gettempdir()) / f"arduinonrf-upload-{token}.lock"
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    descriptor = os.open(path, flags, 0o600)
+    handle = os.fdopen(descriptor, "a+")
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise UploadBusyError(
+                "another upload owns the selected physical target"
+            ) from error
+        yield
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+@contextmanager
+def upload_target_lock(identity: str):
+    """Convert lock contention into a stable uploader diagnostic."""
+    try:
+        with exclusive_target_lock(identity):
+            yield
+    except UploadBusyError as error:
+        fail(str(error), code=7)
 
 
 def linux_tty_usb_identity(port: str):
@@ -165,6 +226,13 @@ def matches_target_scope(identity, serial: str, stable_id: str) -> bool:
     return False
 
 
+def advance_runtime_stability(ready: bool, now: float, ready_since, stable_s: float):
+    if not ready:
+        return None, False
+    started = now if ready_since is None else ready_since
+    return started, now - started >= stable_s
+
+
 def resolve_service_serial_port(
     port: str,
     runtime_vid: int,
@@ -262,9 +330,12 @@ def wait_for_runtime(
     serial: str,
     stable_id: str,
     timeout_s: float,
+    stable_s: float,
 ) -> bool:
     deadline = time.monotonic() + timeout_s
+    ready_since = None
     while time.monotonic() < deadline:
+        ready = False
         if sys.platform.startswith("linux"):
             candidates = []
             for tty_node in Path("/sys/class/tty").glob("*"):
@@ -274,7 +345,7 @@ def wait_for_runtime(
                         candidates.append(identity)
             service = [d for d in candidates if d[4] == 0]
             if len(service) == 1 or ((bool(serial) or bool(stable_id)) and bool(candidates)):
-                return True
+                ready = True
         elif sys.platform == "darwin":
             candidates = [
                 d for d in mac_serial_devices()
@@ -283,7 +354,12 @@ def wait_for_runtime(
             ]
             service = [d for d in candidates if d[4] == 0]
             if len(service) == 1 or ((bool(serial) or bool(stable_id)) and bool(candidates)):
-                return True
+                ready = True
+        ready_since, stable = advance_runtime_stability(
+            ready, time.monotonic(), ready_since, stable_s
+        )
+        if stable:
+            return True
         # IORegistry enumeration is substantially more expensive than sysfs.
         # Avoid spawning it four times per second while retaining responsive
         # Linux polling.
@@ -301,6 +377,37 @@ def main() -> int:
         assert not matches_target_scope(peer, "bootloader", "/sys/devices/usb1/1-2")
         assert matches_target_scope(changed_serial, "runtime", "")
         assert not matches_target_scope(changed_serial, "peer", "")
+        since, stable = advance_runtime_stability(True, 1.0, None, 0.3)
+        assert since == 1.0 and not stable
+        since, stable = advance_runtime_stability(False, 1.2, since, 0.3)
+        assert since is None and not stable
+        since, stable = advance_runtime_stability(True, 2.0, since, 0.3)
+        since, stable = advance_runtime_stability(True, 2.31, since, 0.3)
+        assert since == 2.0 and stable
+        assert parse_usb_id("0xffff") == 0xFFFF
+        assert parse_bounded_int("1200", "touch baud", 0, 4_000_000) == 1200
+        assert parse_bounded_float("0.3", "stable duration", 0.0, 5.0) == 0.3
+        for rejected in ("nan", "inf", "-1"):
+            try:
+                parse_bounded_float(rejected, "timeout", 0.1, 600.0)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid timeout accepted: " + rejected)
+        try:
+            parse_usb_id("0x10000")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("oversized USB identity accepted")
+        if sys.platform.startswith("linux") or sys.platform == "darwin":
+            lock_id = "upload-selftest-" + str(os.getpid())
+            with exclusive_target_lock(lock_id):
+                try:
+                    with exclusive_target_lock(lock_id):
+                        raise AssertionError("duplicate target lock acquired")
+                except UploadBusyError:
+                    pass
         print("upload.py selftest: PASS")
         return 0
 
@@ -315,6 +422,7 @@ def main() -> int:
     ap.add_argument("--app-start", required=True, help="required application vector address")
     ap.add_argument("--max-size", required=True, help="maximum application bytes from --app-start")
     ap.add_argument("--runtime-timeout", default="30", help="seconds to wait for identity-verified application USB")
+    ap.add_argument("--runtime-stable-ms", default="300", help="continuous milliseconds the same application USB identity must remain present")
     ap.add_argument("--sd-req", default="0xFFFE", help="adafruit-nrfutil genpkg --sd-req (SoftDevice req hash; 0xFFFE = wildcard)")
     ap.add_argument("--dev-type", default="0x0052", help="adafruit-nrfutil genpkg --dev-type (0x0052 = nRF52)")
     ap.add_argument("--baud", default="115200", help="serial DFU baud (Adafruit fork uses 115200)")
@@ -337,9 +445,24 @@ def main() -> int:
         runtime_pid = parse_usb_id(args.runtime_pid)
         app_start = int(args.app_start, 0)
         max_size = int(args.max_size, 0)
-        runtime_timeout = float(args.runtime_timeout)
-    except ValueError:
-        fail("invalid USB identity, application range, or runtime timeout", code=2)
+        if not 0 <= app_start <= 0xFFFF_FFFF or not 1 <= max_size <= 0x1_0000_0000:
+            raise ValueError("invalid application range")
+        if app_start + max_size > 0x1_0000_0000:
+            raise ValueError("application range exceeds the 32-bit address space")
+        runtime_timeout = parse_bounded_float(
+            args.runtime_timeout, "runtime timeout", 0.1, 600.0
+        )
+        runtime_stable_s = parse_bounded_float(
+            args.runtime_stable_ms, "runtime stable duration", 0.0, 5_000.0
+        ) / 1000.0
+        if runtime_stable_s >= runtime_timeout:
+            raise ValueError("runtime stable duration must be shorter than runtime timeout")
+        baud = parse_bounded_int(args.baud, "DFU baud", 1, 4_000_000)
+        touch = parse_bounded_int(args.touch, "touch baud", 0, 4_000_000)
+        dev_type = parse_bounded_int(args.dev_type, "device type", 0, 0xFFFF)
+        sd_req = parse_bounded_int(args.sd_req, "SoftDevice requirement", 0, 0xFFFF)
+    except ValueError as error:
+        fail("invalid upload contract: " + str(error), code=2)
 
     if not os.path.isfile(args.hex):
         fail("input hex not found: " + args.hex)
@@ -373,14 +496,15 @@ def main() -> int:
         )
 
     verbose_flag = ["--verbose"] if args.verbose else []
+    lock_identity = target_stable_id or ("serial:" + target_serial)
 
-    with tempfile.TemporaryDirectory(prefix="nius_dfu_") as td:
+    with upload_target_lock(lock_identity), tempfile.TemporaryDirectory(prefix="nius_dfu_") as td:
         pkg = os.path.join(td, "app.zip")
 
         genpkg = [nrfutil] + verbose_flag + [
             "dfu", "genpkg",
-            "--dev-type", args.dev_type,
-            "--sd-req", args.sd_req,
+            "--dev-type", f"0x{dev_type:04X}",
+            "--sd-req", f"0x{sd_req:04X}",
             "--application", args.hex,
             pkg,
         ]
@@ -390,6 +514,8 @@ def main() -> int:
             rc = subprocess.run(genpkg, timeout=120).returncode
         except subprocess.TimeoutExpired:
             fail("adafruit-nrfutil genpkg timed out", code=5)
+        except OSError as error:
+            fail("cannot run adafruit-nrfutil genpkg: " + str(error), code=3)
         if rc != 0:
             return rc
 
@@ -397,27 +523,27 @@ def main() -> int:
             "dfu", "serial",
             "-pkg", pkg,
             "-p", control_port,
-            "-b", str(args.baud),
+            "-b", str(baud),
             "--singlebank",
         ]
-        try:
-            if int(args.touch, 0) > 0:
-                dfu += ["-t", str(args.touch)]
-        except ValueError:
-            pass
+        if touch > 0:
+            dfu += ["-t", str(touch)]
         if args.verbose:
             sys.stderr.write("[nius-upload] + " + " ".join(dfu) + "\n")
         try:
             rc = subprocess.run(dfu, timeout=240).returncode
         except subprocess.TimeoutExpired:
             fail("adafruit serial DFU timed out", code=5)
+        except OSError as error:
+            fail("cannot run adafruit serial DFU: " + str(error), code=3)
         if rc != 0:
             return rc
         if not wait_for_runtime(
-            runtime_vid, runtime_pid, target_serial, target_stable_id, runtime_timeout
+            runtime_vid, runtime_pid, target_serial, target_stable_id,
+            runtime_timeout, runtime_stable_s
         ):
             fail(
-                "transfer completed, but the selected board did not enumerate as runtime "
+                "transfer completed, but the selected board did not remain enumerated as runtime "
                 f"{runtime_vid:04X}:{runtime_pid:04X}",
                 code=6,
             )
