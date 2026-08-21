@@ -63,6 +63,10 @@ choices because it has no native USB upload path in this package.
   Arduino CLI from issuing a second, unscoped touch before the identity-aware
   wrapper runs.
 - `Bootloader / DFU → Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use the packaged serial-DFU tool.
+- Auto-detection never treats a known application PID as a bootloader. Bootloader
+  IDs shared by more than one flash layout require scoped `INFO_UF2.TXT` evidence;
+  when MSC metadata is unavailable, select the explicit serial-DFU layout instead
+  of asking the uploader to infer an application start.
 - UF2 drives are matched to the selected serial port by stable USB identity. If two boards expose the same volume label, the wrapper refuses ambiguous matches instead of choosing the first drive.
 - For bootloaders whose USB PID differs from the application PID, the wrapper
   accepts the selected board's scoped UF2 volume as transition proof. It never

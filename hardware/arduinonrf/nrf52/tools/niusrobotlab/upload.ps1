@@ -1108,19 +1108,16 @@ function Resolve-NiusLayoutGuardUf2Summary {
 # Windows; CDC-side programming is unaffected by that. UF2 stays available as
 # an explicit menu choice for users with healthy MSC mounting.
 $script:NrfBootloaderCandidates = @(
-    @{ Vid = '239a'; Pid = '00b3'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Adafruit nice!nano v2 / clone fork (default clone layout; legacy 0x27000 remains explicit menu-only)'; VolumeLabel = 'NICENANO'; Model = 'nice!nano'; BoardId = 'nRF52840-nicenano' },
+    @{ Vid = '239a'; Pid = '00b3'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104; RequiresUf2Layout = $true; Note = 'Adafruit nice!nano v2 / clone fork (shared across multiple application layouts)'; VolumeLabel = 'NICENANO'; Model = 'nice!nano'; BoardId = 'nRF52840-nicenano' },
     @{ Vid = '239a'; Pid = '0029'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Adafruit Feather nRF52840 Express UF2 bootloader'; VolumeLabel = 'FTHR840BOOT'; Model = 'Adafruit Feather nRF52840 Express'; BoardId = 'nRF52840-Feather-revE' },
     @{ Vid = '239a'; Pid = '002a'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Adafruit Feather nRF52840 Express CDC-only bootloader identity'; VolumeLabel = 'FTHR840BOOT'; Model = 'Adafruit Feather nRF52840 Express'; BoardId = 'nRF52840-Feather-revE' },
-    @{ Vid = '239a'; Pid = '4029'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 876544;  Note = 'Adafruit user-mode CDC (nRF52840)' },
     # Seeed XIAO nRF52840 (and XIAO Sense): Adafruit-fork bootloader under Seeed's VID.
     @{ Vid = '2886'; Pid = '0044'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 (Adafruit-fork, Seeed)'; VolumeLabel = 'XIAO-BOOT'; Model = 'Seeed XIAO nRF52840'; BoardId = 'nRF52840-SeeedXiao-v1' },
-    @{ Vid = '2886'; Pid = '8044'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 (runtime/app PID)'; VolumeLabel = 'XIAO-BOOT'; Model = 'Seeed XIAO nRF52840'; BoardId = 'nRF52840-SeeedXiao-v1' },
     @{ Vid = '2886'; Pid = '0045'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 Sense'; VolumeLabel = 'XIAO-SENSE'; Model = 'Seeed XIAO nRF52840 Sense'; BoardId = 'nRF52840-SeeedXiaoSense-v1' },
-    @{ Vid = '2886'; Pid = '8045'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x27000'; MaxSize = 811008;  Note = 'Seeed XIAO nRF52840 Sense (runtime/app PID)'; VolumeLabel = 'XIAO-SENSE'; Model = 'Seeed XIAO nRF52840 Sense'; BoardId = 'nRF52840-SeeedXiaoSense-v1' },
     # 0x2886:0xF00F is shared by multiple MakerDiary boards. Auto mode may use
     # the USB identity and INFO_UF2 layout, but must not invent one board's
     # volume/model as proof for another. Explicit M.2 recipes carry exact metadata.
-    @{ Vid = '2886'; Pid = 'f00f'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'MakerDiary shared nRF52840 bootloader identity'; VolumeLabel = ''; Model = ''; BoardId = '' },
+    @{ Vid = '2886'; Pid = 'f00f'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104; RequiresUf2Layout = $true; Note = 'MakerDiary shared nRF52840 bootloader identity'; VolumeLabel = ''; Model = ''; BoardId = '' },
     # Makerdiary Pitaya Go: Adafruit-fork bootloader, same VID:PID in DFU and app.
     @{ Vid = '2886'; Pid = 'f00e'; Kind = 'adafruit-dfu'; Family = '0xADA52840'; AppStart = '0x26000'; MaxSize = 815104;  Note = 'Makerdiary Pitaya Go (Adafruit-fork)'; VolumeLabel = 'PITAYAGO'; Model = 'Makerdiary Pitaya Go'; BoardId = 'PITAYAGO' },
     # nRFMicro (joric open-hardware): Adafruit-fork bootloader under the pid.codes 1209 VID.
@@ -1859,6 +1856,12 @@ function Resolve-AutoBootloader {
                 $uf2 = $null
                 if (-not [string]::IsNullOrWhiteSpace($candidate.Family) -or $candidate.Kind -eq 'uf2') {
                     $uf2 = Get-Uf2ProbeSummary -ExpectedLabel $expectedLabel -ExpectedModel $expectedModel -ExpectedBoardId $expectedBoardId -PreferredCompositeStableId $PreferredCompositeStableId
+                }
+
+                if ($candidate.ContainsKey('RequiresUf2Layout') -and
+                    $candidate.RequiresUf2Layout -and $null -eq $uf2) {
+                    Write-NiusDetail ('[nius] auto-detect: ignoring layout-ambiguous bootloader identity {0}; INFO_UF2.TXT is required. Select an explicit serial layout when MSC is unavailable.' -f $needle) -ForegroundColor DarkGray
+                    continue
                 }
 
                 if (-not [string]::IsNullOrWhiteSpace($InterfaceParentPrefix) -and $candidate.Kind -eq 'adafruit-dfu') {
@@ -4384,29 +4387,6 @@ try {
             }
             else {
                 $resolved = Resolve-AutoBootloader -InterfaceParentPrefix $adafruitControlPortParentPrefix -PreferredCompositeStableId $adafruitControlPortCompositeStableId -Attempts 2 -DelayMs 200
-            }
-            # VID:PID 239A:00B3 is shared by several clone bootloaders whose
-            # application starts differ. Neither a PnP hit nor dfu-util listing
-            # that identity proves the flash layout. When the candidate default
-            # conflicts with the compiled layout and no INFO_UF2 evidence is
-            # mounted, enter the selected board's bootloader first and read its
-            # authoritative metadata before deciding.
-            if ($resolved.Resolved -and $UseTouch1200 -eq 'true') {
-                $initialCompiledStart = Normalize-NiusHexAddress -Value $Uf2AppStart
-                $initialResolvedStart = Normalize-NiusHexAddress -Value $resolved.AppStart
-                $initialHasUf2Metadata = -not [string]::IsNullOrWhiteSpace([string]$resolved.DriveRoot)
-                if ($resolved.Vid -eq '0x239a' -and
-                    $resolved.Pid -eq '0x00b3' -and
-                    -not $initialHasUf2Metadata -and
-                    -not [string]::IsNullOrWhiteSpace($initialCompiledStart) -and
-                    -not [string]::IsNullOrWhiteSpace($initialResolvedStart) -and
-                    $initialCompiledStart -ne $initialResolvedStart) {
-                    Write-NiusDetail ('[nius] auto-detect: ambiguous 239A:00B3 layout {0} conflicts with compiled {1}; requesting scoped bootloader metadata before deciding.' -f $initialResolvedStart, $initialCompiledStart) -ForegroundColor DarkGray
-                    $resolved = [pscustomobject]@{
-                        Resolved = $false
-                        ProbedCandidates = 'ambiguous 239A:00B3 bootloader identity; INFO_UF2.TXT required'
-                    }
-                }
             }
             if (-not $resolved.Resolved -and $UseTouch1200 -eq 'true') {
                 Stop-NiusLingeringAdafruitNrfutil -Phase touch
