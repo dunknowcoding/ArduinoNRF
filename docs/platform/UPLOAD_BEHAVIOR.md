@@ -243,6 +243,11 @@ choices because it has no native USB upload path in this package.
   exactly one maintenance interface zero. A surviving user CDC alone is not accepted
   as proof that the hands-free upload path was restored. Hosts that omit interface
   metadata fall back to the exact physical USB topology/serial identity.
+- Windows likewise requires one identity-scoped maintenance COM to remain present
+  for at least 300 ms; a composite parent or USER CDC alone is insufficient. A
+  shared bootloader/runtime VID/PID also requires the bootloader MSC interface to
+  be gone. The optional UF2-to-serial fallback is unavailable without a selected-
+  target composite identity.
 - One host-local advisory lock owns a physical topology/serial identity throughout
   package generation, transfer, and runtime verification. A concurrent uploader
   fails before touching that target, while the OS releases the lock after exit.

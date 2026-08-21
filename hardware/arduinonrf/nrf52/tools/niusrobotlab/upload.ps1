@@ -1269,6 +1269,8 @@ function Get-NiusRuntimeComNamesForIdentity {
         [string]$RuntimeVid,
         [string]$RuntimePid,
         [string]$PreferredCompositeStableId = '',
+        [string]$PreferredInterfaceParentPrefix = '',
+        [switch]$MaintenanceOnly,
         [switch]$Fresh
     )
 
@@ -1281,7 +1283,24 @@ function Get-NiusRuntimeComNamesForIdentity {
         -Vid $RuntimeVid -ProductId $RuntimePid `
         -PreferredCompositeStableId $PreferredCompositeStableId
     if ($fastSnapshot.Available) {
-        return @($fastSnapshot.Matches |
+        $matches = @($fastSnapshot.Matches)
+        $preferredParent = $PreferredInterfaceParentPrefix.Trim().ToUpperInvariant()
+        if (-not [string]::IsNullOrWhiteSpace($preferredParent)) {
+            $matches = @($matches | Where-Object {
+                    (Get-UsbInterfaceParentInstancePrefix -PnpInstanceId ([string]$_.PNPDeviceID)) -eq $preferredParent
+                })
+        }
+        if ($MaintenanceOnly) {
+            $withInterfaceNumbers = @($matches | Where-Object {
+                    ([string]$_.PNPDeviceID).ToUpperInvariant() -match '&MI_[0-9A-F]{2}\\'
+                })
+            if ($withInterfaceNumbers.Count -gt 0) {
+                $matches = @($withInterfaceNumbers | Where-Object {
+                        ([string]$_.PNPDeviceID).ToUpperInvariant() -like '*&MI_00\*'
+                    })
+            }
+        }
+        return @($matches |
                 ForEach-Object { ([string]$_.DeviceID).Trim().ToUpperInvariant() } |
                 Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
                 Sort-Object -Unique)
@@ -1293,15 +1312,33 @@ function Get-NiusRuntimeComNamesForIdentity {
     $prefix =
         ('USB\VID_{0}&PID_{1}' -f $vid, $normalizedPid).ToUpperInvariant()
     $preferredStable = $PreferredCompositeStableId.Trim().ToUpperInvariant()
-    return @(
+    $preferredParent = $PreferredInterfaceParentPrefix.Trim().ToUpperInvariant()
+    $matches = @(
         Get-SerialPortInventory -Fresh:$Fresh |
             Where-Object {
                 $pnpId = ([string]$_.PNPDeviceID).Trim().ToUpperInvariant()
                 $identityMatches = $pnpId.StartsWith($prefix)
                 if (-not $identityMatches) { return $false }
+                if (-not [string]::IsNullOrWhiteSpace($preferredParent) -and
+                    (Get-UsbInterfaceParentInstancePrefix -PnpInstanceId $pnpId) -ne $preferredParent) {
+                    return $false
+                }
                 if ([string]::IsNullOrWhiteSpace($preferredStable)) { return $true }
                 return (Get-UsbInterfaceParentCompositeStableId -PnpInstanceId $pnpId) -eq $preferredStable
-            } |
+            }
+    )
+    if ($MaintenanceOnly) {
+        $withInterfaceNumbers = @($matches | Where-Object {
+                ([string]$_.PNPDeviceID).ToUpperInvariant() -match '&MI_[0-9A-F]{2}\\'
+            })
+        if ($withInterfaceNumbers.Count -gt 0) {
+            $matches = @($withInterfaceNumbers | Where-Object {
+                    ([string]$_.PNPDeviceID).ToUpperInvariant() -like '*&MI_00\*'
+                })
+        }
+    }
+    return @(
+        $matches |
             ForEach-Object { ([string]$_.DeviceID).Trim().ToUpperInvariant() } |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
             Sort-Object -Unique
@@ -1322,11 +1359,23 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         [string]$ExpectedModel = '',
         [string]$ExpectedBoardId = '',
         [string]$PreferredCompositeStableId = '',
+        [string]$InterfaceParentPrefix = '',
         [int]$TimeoutMs = 12000
     )
 
+    if ($TimeoutMs -lt 1000 -or $TimeoutMs -gt 120000) {
+        throw ('Invalid post-upload runtime verification timeout: {0} ms.' -f $TimeoutMs)
+    }
     Write-NiusTiming 'post-upload runtime verification start'
     $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    $stableCandidate = ''
+    $stableSince = $null
+    $requiredStableMs = 300
+    $sameUsbIdentity =
+        -not [string]::IsNullOrWhiteSpace($BootloaderVid) -and
+        -not [string]::IsNullOrWhiteSpace($BootloaderPid) -and
+        $BootloaderVid.Trim().ToUpperInvariant() -eq $RuntimeVid.Trim().ToUpperInvariant() -and
+        $BootloaderPid.Trim().ToUpperInvariant() -eq $RuntimePid.Trim().ToUpperInvariant()
     $before = @{}
     foreach ($name in @($RuntimePortsBefore)) {
         if (-not [string]::IsNullOrWhiteSpace($name)) {
@@ -1342,69 +1391,64 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
             }
         }
 
-        # Check deterministic ports first. A fresh PnP inventory can be slow
-        # when Windows is retiring the composite bootloader interfaces, and it
-        # must not delay success when the selected runtime COM has returned.
-        $fastRuntimeSnapshot = Get-NiusFastUsbSerialRegistrySnapshot `
-            -Vid $RuntimeVid -ProductId $RuntimePid `
-            -PreferredCompositeStableId $PreferredCompositeStableId
+        # Only the maintenance CDC can prove that the next upload remains
+        # reachable. A USER CDC or a composite parent without a live COM is not
+        # application-return evidence. Do not open the fresh port: usbser.sys
+        # may still be retiring the bootloader node.
+        $visibleMaintenancePorts = @(Get-NiusRuntimeComNamesForIdentity `
+                -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid `
+                -PreferredCompositeStableId $PreferredCompositeStableId `
+                -PreferredInterfaceParentPrefix $InterfaceParentPrefix `
+                -MaintenanceOnly -Fresh)
+        $verifiedCandidates = New-Object 'System.Collections.Generic.List[string]'
         foreach ($candidate in $knownCandidates) {
-            # A bootloader CDC can retain the same COM number briefly after a
-            # successful transfer. Require the runtime VID/PID before accepting
-            # this deterministic name. Do not open the fresh application COM:
-            # usbser.sys can block that probe while retiring the bootloader node
-            # and then delay the user's first Serial Monitor connection.
-            $runtimeIdentityMatches = $false
-            if ($fastRuntimeSnapshot.Available) {
-                $runtimeIdentityMatches = @($fastRuntimeSnapshot.Matches | Where-Object {
-                        ([string]$_.DeviceID).Trim().ToUpperInvariant() -eq $candidate
-                    }).Count -gt 0
+            if ($visibleMaintenancePorts -contains $candidate -and
+                -not $verifiedCandidates.Contains($candidate)) {
+                $verifiedCandidates.Add($candidate)
             }
-            else {
-                $runtimeIdentityMatches =
-                    -not [string]::IsNullOrWhiteSpace($RuntimeVid) -and
-                    -not [string]::IsNullOrWhiteSpace($RuntimePid) -and
-                    (Test-SerialPortMatchesUsbIdentity `
-                        -PortName $candidate `
-                        -Vid $RuntimeVid `
-                        -ProductId $RuntimePid)
-                $stableIdMatches = [string]::IsNullOrWhiteSpace($PreferredCompositeStableId) -or
-                    ((Get-SerialPortUsbParentCompositeStableId -PortName $candidate -Fresh) -eq $PreferredCompositeStableId.Trim().ToUpperInvariant())
-                $runtimeIdentityMatches = $runtimeIdentityMatches -and $stableIdMatches
+        }
+        foreach ($name in $visibleMaintenancePorts) {
+            $normalized = $name.Trim().ToUpperInvariant()
+            if (-not $before.ContainsKey($normalized) -and
+                -not $knownCandidates.Contains($normalized) -and
+                -not $verifiedCandidates.Contains($normalized)) {
+                $verifiedCandidates.Add($normalized)
             }
-            if ($runtimeIdentityMatches) {
-                Write-NiusTiming ('post-upload runtime verified: {0}' -f $candidate)
+        }
+
+        if ($verifiedCandidates.Count -eq 1) {
+            $candidate = $verifiedCandidates[0]
+            $bootloaderExited = $true
+            if ($sameUsbIdentity) {
+                $sameIdentitySnapshot = Get-AdafruitRuntimeSnapshot `
+                    -BootloaderVid $BootloaderVid -BootloaderPid $BootloaderPid `
+                    -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid `
+                    -InterfaceParentPrefix $InterfaceParentPrefix `
+                    -PreferredCompositeStableId $PreferredCompositeStableId
+                $bootloaderExited = $sameIdentitySnapshot.StorageInterfaceCount -eq 0
+            }
+            if (-not $bootloaderExited) {
+                $stableCandidate = ''
+                $stableSince = $null
+            }
+            elseif ($stableCandidate -ne $candidate) {
+                $stableCandidate = $candidate
+                $stableSince = Get-Date
+            }
+            elseif (((Get-Date) - $stableSince).TotalMilliseconds -ge $requiredStableMs) {
+                Write-NiusTiming ('post-upload maintenance runtime verified: {0}' -f $candidate)
                 return [pscustomobject]@{
                     Success = $true
-                    Summary = ('post-upload runtime COM {0} has the expected identity' -f $candidate)
+                    Summary = ('post-upload maintenance COM {0} retained the expected identity for at least {1} ms' -f $candidate, $requiredStableMs)
                 }
             }
         }
-
-        $remappedCandidates = New-Object 'System.Collections.Generic.List[string]'
-        foreach ($name in @(Get-NiusRuntimeComNamesForIdentity `
-                    -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid `
-                    -PreferredCompositeStableId $PreferredCompositeStableId -Fresh)) {
-            $normalized = $name.Trim().ToUpperInvariant()
-            # A runtime port that did not exist before this upload belongs to
-            # the just-rebooted target even when its clone bootloader drops the
-            # USB serial string and Windows assigns a different COM number.
-            if (-not $before.ContainsKey($normalized) -and
-                -not $knownCandidates.Contains($normalized) -and
-                -not $remappedCandidates.Contains($normalized)) {
-                $remappedCandidates.Add($normalized)
-            }
+        else {
+            $stableCandidate = ''
+            $stableSince = $null
         }
 
-        foreach ($candidate in $remappedCandidates) {
-            Write-NiusTiming ('post-upload remapped runtime verified: {0}' -f $candidate)
-            return [pscustomobject]@{
-                Success = $true
-                Summary = ('post-upload runtime COM {0} has the expected identity' -f $candidate)
-            }
-        }
-
-        Start-Sleep -Milliseconds 400
+        Start-Sleep -Milliseconds 150
     }
 
     Write-NiusDetail '[nius] misflash guard: USB serial did not return after upload; attempting bootloader recovery...' -ForegroundColor Yellow
@@ -1523,11 +1567,13 @@ function Get-AdafruitRuntimeSnapshot {
     $runtimePresent = $false
     $runtimeSummary = 'runtime=untracked'
     if (-not [string]::IsNullOrWhiteSpace($RuntimeVid) -and -not [string]::IsNullOrWhiteSpace($RuntimePid)) {
-        $runtimeVidLetters = $RuntimeVid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
-        $runtimePidLetters = $RuntimePid.Replace('0x', '').Replace('0X', '').Trim().ToUpperInvariant()
-        $runtimeMatches = @(Get-PnpVidPidMatches -VidLetters $runtimeVidLetters -PidLetters $runtimePidLetters -InterfaceParentPrefix $InterfaceParentPrefix -PreferredCompositeStableId $PreferredCompositeStableId)
-        $runtimePresent = $runtimeMatches.Count -gt 0
-        $runtimeSummary = ('runtime_matches={0}; runtime_nodes={1}' -f $runtimeMatches.Count, (Format-PnpMatchSummary -Matches $runtimeMatches))
+        $runtimeMaintenancePorts = @(Get-NiusRuntimeComNamesForIdentity `
+                -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid `
+                -PreferredCompositeStableId $PreferredCompositeStableId `
+                -PreferredInterfaceParentPrefix $InterfaceParentPrefix `
+                -MaintenanceOnly -Fresh)
+        $runtimePresent = $runtimeMaintenancePorts.Count -eq 1
+        $runtimeSummary = ('runtime_maintenance_ports={0}; names={1}' -f $runtimeMaintenancePorts.Count, ($runtimeMaintenancePorts -join ','))
     }
 
     return [pscustomobject]@{
@@ -1634,6 +1680,11 @@ function Invoke-Uf2SerialDfuFallback {
     if ($env:NIUS_DISABLE_UF2_SERIAL_FALLBACK -eq '1') {
         return $false
     }
+    if ([string]::IsNullOrWhiteSpace($PreferredCompositeStableId) -and
+        [string]::IsNullOrWhiteSpace($InterfaceParentPrefix)) {
+        Write-NiusDetail '[nius] UF2 serial fallback refused: no selected-target composite identity is available.' -ForegroundColor DarkYellow
+        return $false
+    }
 
     $portResolution = Resolve-AdafruitBootloaderControlPort `
         -SelectedPort $SelectedPort `
@@ -1679,14 +1730,19 @@ function Wait-ForAdafruitRuntimeTransition {
         [string]$RuntimePid = '',
         [string]$InterfaceParentPrefix = '',
         [string]$PreferredCompositeStableId = '',
-        # Poll every 150 ms (was 500); Attempts scaled to keep the ~120 s timeout.
-        # This also shrinks the 2-stable-detection confirm from ~1 s to ~300 ms, so
-        # the post-flash "rebooted into new firmware" step finishes sooner.
-        [int]$Attempts = 800,
+        # A completed transfer normally re-enumerates in well under this bounded
+        # 12 s window. The stable interval is measured by time, not poll count.
+        [int]$Attempts = 80,
         [int]$DelayMs = 150
     )
 
-    $stableRuntimeDetections = 0
+    if ($Attempts -lt 1 -or $Attempts -gt 800 -or $DelayMs -lt 50 -or $DelayMs -gt 1000) {
+        throw ('Invalid runtime-transition polling policy: attempts={0}, delay_ms={1}.' -f $Attempts, $DelayMs)
+    }
+    $stableRuntimeSince = $null
+    $sameUsbIdentity =
+        $BootloaderVid.Trim().ToUpperInvariant() -eq $RuntimeVid.Trim().ToUpperInvariant() -and
+        $BootloaderPid.Trim().ToUpperInvariant() -eq $RuntimePid.Trim().ToUpperInvariant()
     $lastSnapshot = $null
     for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
         $lastSnapshot = Get-AdafruitRuntimeSnapshot -BootloaderVid $BootloaderVid -BootloaderPid $BootloaderPid -RuntimeVid $RuntimeVid -RuntimePid $RuntimePid -InterfaceParentPrefix $InterfaceParentPrefix -PreferredCompositeStableId $PreferredCompositeStableId
@@ -1695,16 +1751,28 @@ function Wait-ForAdafruitRuntimeTransition {
         $runtimeSatisfied = -not [string]::IsNullOrWhiteSpace($RuntimeVid) -and
             -not [string]::IsNullOrWhiteSpace($RuntimePid) -and
             $lastSnapshot.RuntimePresent
-        if (-not $lastSnapshot.BootloaderPresent -and $runtimeSatisfied) {
-            $stableRuntimeDetections += 1
-            if ($stableRuntimeDetections -ge 2) {
+        # With a shared VID/PID, the runtime composite itself necessarily keeps
+        # BootloaderPresent true. In that case, disappearance of the bootloader
+        # MSC interface plus one exact maintenance COM is the observable state
+        # boundary. Distinct identities still require the whole bootloader node
+        # to disappear.
+        $bootloaderExited = if ($sameUsbIdentity) {
+            $lastSnapshot.StorageInterfaceCount -eq 0
+        } else {
+            -not $lastSnapshot.BootloaderPresent
+        }
+        if ($bootloaderExited -and $runtimeSatisfied) {
+            if ($null -eq $stableRuntimeSince) {
+                $stableRuntimeSince = Get-Date
+            }
+            elseif (((Get-Date) - $stableRuntimeSince).TotalMilliseconds -ge 300) {
                 return [pscustomobject]@{
                     Success = $true
                     Summary = $lastSnapshot.Summary
                 }
             }
         } else {
-            $stableRuntimeDetections = 0
+            $stableRuntimeSince = $null
         }
 
         Start-Sleep -Milliseconds $DelayMs
@@ -4139,7 +4207,8 @@ try {
     $runtimePortsBeforeUpload = @(
         Get-NiusRuntimeComNamesForIdentity `
             -RuntimeVid $effectiveRuntimeUsbVid `
-            -RuntimePid $effectiveRuntimeUsbPid
+            -RuntimePid $effectiveRuntimeUsbPid `
+            -MaintenanceOnly
     )
     $adafruitControlPort = $Port
     $controlPortAlreadyBootloader = $false
@@ -4617,7 +4686,8 @@ try {
                 -ExpectedLabel $Uf2VolumeLabel `
                 -ExpectedModel $Uf2Model `
                 -ExpectedBoardId $Uf2BoardId `
-                -PreferredCompositeStableId $adafruitControlPortCompositeStableId
+                -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
+                -InterfaceParentPrefix $adafruitControlPortParentPrefix
             Write-NiusUploadComplete
             exit 0
         }
@@ -4715,7 +4785,8 @@ try {
                 -ExpectedLabel $Uf2VolumeLabel `
                 -ExpectedModel $Uf2Model `
                 -ExpectedBoardId $Uf2BoardId `
-                -PreferredCompositeStableId $adafruitControlPortCompositeStableId
+                -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
+                -InterfaceParentPrefix $adafruitControlPortParentPrefix
             Write-NiusUploadComplete
             exit 0
         }

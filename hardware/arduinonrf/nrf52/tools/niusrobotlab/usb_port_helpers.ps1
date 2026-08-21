@@ -95,7 +95,11 @@ function Get-NiusFastUsbSerialRegistrySnapshot {
                         $matches.Add([pscustomobject]@{
                                 DeviceID = $portName
                                 PNPDeviceID = ('USB\{0}\{1}' -f $interfaceFamily, $instanceName).ToUpperInvariant()
-                                InterfaceParentPrefix = ('USB\{0}\{1}' -f $compositeFamily, $parentToStable[$parentPrefix]).ToUpperInvariant()
+                                # This is the shared instance prefix embedded in
+                                # every MI_xx child (for example 8&...&), not the
+                                # composite device instance path. Callers compare
+                                # it with Get-UsbInterfaceParentInstancePrefix.
+                                InterfaceParentPrefix = $parentPrefix
                                 CompositeStableId = $parentToStable[$parentPrefix]
                             })
                     }
