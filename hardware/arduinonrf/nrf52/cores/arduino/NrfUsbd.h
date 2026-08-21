@@ -243,7 +243,6 @@ private:
     volatile uint32_t detachCause_ = 0;
     volatile uint32_t detachRequestedMillis_ = 0;
     volatile bool pendingAddressValid_ = false;
-    volatile bool serviceSawNonResetBaud_ = false;
     volatile bool serviceTouchPending_ = false;
     volatile bool stubHalted_ = false;
     volatile uint32_t haltTouchTicks_ = 0;

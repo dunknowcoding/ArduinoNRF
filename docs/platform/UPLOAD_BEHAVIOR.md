@@ -130,9 +130,9 @@ choices because it has no native USB upload path in this package.
   layouts makes Windows retain the wrong per-interface driver binding.
 - After serial DFU, the upload wrapper accepts the selected runtime interface
   when it returns with the expected runtime VID/PID and physical-device
-  identity. Windows
-  may assign a different number when the bootloader and application expose
-  different composite interfaces; that remap is not an upload failure.
+  identity. Windows may assign a different number when the bootloader and
+  application expose different composite interfaces; that remap is not an
+  upload failure.
 - Serial DFU performs exactly one identity-bound mutating transfer per upload
   invocation. A timeout, cable loss, protocol failure, or interrupted write is
   terminal and keeps its original error; the wrapper never infers that a
@@ -258,6 +258,13 @@ choices because it has no native USB upload path in this package.
 - with two boards simultaneously mounted as `NICENANO`, the selected board maps to its own volume by stable USB identity
 - selecting a stale COM after the board re-enumerates is rejected before any upload can target another board
 - **a second upload from user mode works** — the 1200 bps touch triggers `NVIC_SystemReset()` into the bootloader, the selected transport streams the image, and the board re-boots into user mode.
+- The maintenance CDC accepts a DTR falling edge that follows a valid 1200-bps
+  request even if the host has already restored its normal baud. Once that
+  explicit edge starts the bounded confirmation window, a baud replay cannot
+  cancel it. USB reset/disconnect clears the recent-1200 evidence so a later
+  session cannot inherit upload authority.
+- Malformed CDC framing fields are stalled before either CDC line-coding state
+  or the upload gesture state changes.
 
 ### What previously failed (historical)
 
@@ -289,4 +296,5 @@ the touch runs and the board reboots normally. Verified 3× back-to-back plus
 ### What still needs validation
 
 - Boards beyond the user's ProMicro clone that share the firmware path
-- Linux/macOS UF2 parity; those platforms still use the Python/Adafruit serial-DFU recipe
+- Linux/macOS physical serial-DFU and UF2 parity; the Python wrapper has
+  identity-scoped host tests but no target-backed parity result in this revision

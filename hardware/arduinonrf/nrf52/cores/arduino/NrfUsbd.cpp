@@ -248,6 +248,20 @@ static_assert(!explicitTouchGesture(false, false, true, true));
 static_assert(!explicitTouchGesture(true, false, false, true));
 static_assert(!explicitTouchGesture(true, false, true, false));
 
+constexpr bool validCdcLineCoding(uint8_t stopBits,
+                                  uint8_t parity,
+                                  uint8_t dataBits) {
+    const bool validDataBits = dataBits == 5U || dataBits == 6U ||
+        dataBits == 7U || dataBits == 8U || dataBits == 16U;
+    return stopBits <= 2U && parity <= 4U && validDataBits;
+}
+
+static_assert(validCdcLineCoding(0U, 0U, 8U));
+static_assert(validCdcLineCoding(2U, 4U, 16U));
+static_assert(!validCdcLineCoding(3U, 0U, 8U));
+static_assert(!validCdcLineCoding(0U, 5U, 8U));
+static_assert(!validCdcLineCoding(0U, 0U, 9U));
+
 inline bool servicePortEnabled() {
     return nrfUsbServicePortEnabled();
 }
@@ -1414,7 +1428,7 @@ void NrfUsbdDriver::serviceTouchTimer() {
     }
 
     if (!configured_ || (dtr_ && !inConfirmWindow) ||
-        lineCoding_.baudRate != 1200UL) {
+        (!windowStarted && lineCoding_.baudRate != 1200UL)) {
         serviceTouchPending_ = false;
         serviceTouchResetMillis_ = 0UL;
     } else if (!resetArmed) {
@@ -1786,6 +1800,8 @@ void NrfUsbdDriver::resetConnectionState() {
     userDtr_ = false;
     userRts_ = false;
     userDtrAssertedMillis_ = 0UL;
+    lineCoding_ = {115200UL, 0U, 0U, 8U};
+    userLineCoding_ = {115200UL, 0U, 0U, 8U};
     pendingAddressValid_ = false;
     pendingControlOut_ = ControlOutTransfer::None;
     controlOutExpected_ = 0U;
@@ -1794,9 +1810,9 @@ void NrfUsbdDriver::resetConnectionState() {
     detachCause_ = 0UL;
     detachRequestedMillis_ = 0UL;
     resetEp0InXferState();
-    serviceSawNonResetBaud_ = false;
     serviceTouchPending_ = false;
     serviceTouchResetMillis_ = 0UL;
+    serviceSaw1200Millis_ = 0UL;
     ignoredResetTouchCount_ = 0U;
     address_ = 0U;
     pendingAddress_ = 0U;
@@ -2198,16 +2214,23 @@ void NrfUsbdDriver::completeControlOutTransfer() {
     switch (pendingControlOut_) {
         case ControlOutTransfer::ServiceLineCoding:
             if (controlOutLength_ == 7U) {
-                lineCoding_.baudRate =
+                const uint8_t stopBits = controlOutBuffer_[4];
+                const uint8_t parity = controlOutBuffer_[5];
+                const uint8_t dataBits = controlOutBuffer_[6];
+                if (!validCdcLineCoding(stopBits, parity, dataBits)) {
+                    pendingControlOut_ = ControlOutTransfer::None;
+                    controlOutExpected_ = 0U;
+                    controlOutLength_ = 0U;
+                    stallControlEndpoint();
+                    return;
+                }
+                const uint32_t baudRate =
                     static_cast<uint32_t>(controlOutBuffer_[0]) |
                     (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
                     (static_cast<uint32_t>(controlOutBuffer_[2]) << 16U) |
                     (static_cast<uint32_t>(controlOutBuffer_[3]) << 24U);
-                lineCoding_.stopBits = controlOutBuffer_[4];
-                lineCoding_.parity = controlOutBuffer_[5];
-                lineCoding_.dataBits = controlOutBuffer_[6];
+                lineCoding_ = {baudRate, stopBits, parity, dataBits};
                 if (lineCoding_.baudRate != 1200UL) {
-                    serviceSawNonResetBaud_ = true;
                     // Don't let the host's post-touch 115200 re-open cancel a
                     // touch that is already counting down its confirm window.
                     const bool inConfirmWindow = serviceTouchResetMillis_ != 0UL &&
@@ -2231,14 +2254,22 @@ void NrfUsbdDriver::completeControlOutTransfer() {
             break;
         case ControlOutTransfer::UserLineCoding:
             if (controlOutLength_ == 7U) {
-                userLineCoding_.baudRate =
+                const uint8_t stopBits = controlOutBuffer_[4];
+                const uint8_t parity = controlOutBuffer_[5];
+                const uint8_t dataBits = controlOutBuffer_[6];
+                if (!validCdcLineCoding(stopBits, parity, dataBits)) {
+                    pendingControlOut_ = ControlOutTransfer::None;
+                    controlOutExpected_ = 0U;
+                    controlOutLength_ = 0U;
+                    stallControlEndpoint();
+                    return;
+                }
+                const uint32_t baudRate =
                     static_cast<uint32_t>(controlOutBuffer_[0]) |
                     (static_cast<uint32_t>(controlOutBuffer_[1]) << 8U) |
                     (static_cast<uint32_t>(controlOutBuffer_[2]) << 16U) |
                     (static_cast<uint32_t>(controlOutBuffer_[3]) << 24U);
-                userLineCoding_.stopBits = controlOutBuffer_[4];
-                userLineCoding_.parity = controlOutBuffer_[5];
-                userLineCoding_.dataBits = controlOutBuffer_[6];
+                userLineCoding_ = {baudRate, stopBits, parity, dataBits};
             }
             sendZeroLengthStatus();
             break;
@@ -2513,6 +2544,21 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             }
             configuration_ = static_cast<uint8_t>(value);
             configured_ = configuration_ != 0U;
+            // SET_CONFIGURATION establishes a new function session even when
+            // the host repeats value 1. Do not carry a previous session's DTR,
+            // line coding, or recent-1200 evidence into an upload decision.
+            dtr_ = false;
+            rts_ = false;
+            dtrAssertedMillis_ = 0U;
+            userDtr_ = false;
+            userRts_ = false;
+            userDtrAssertedMillis_ = 0U;
+            lineCoding_ = {115200UL, 0U, 0U, 8U};
+            userLineCoding_ = {115200UL, 0U, 0U, 8U};
+            serviceSaw1200Millis_ = 0UL;
+            serviceTouchPending_ = false;
+            serviceTouchResetMillis_ = 0U;
+            ignoredResetTouchCount_ = 0U;
             if (configured_) {
                 // SET_CONFIGURATION establishes a fresh endpoint state even
                 // when the host selects configuration 1 repeatedly.
@@ -2542,14 +2588,6 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
                 userDataInFlightLength_ = 0U;
                 userNotificationInFlight_ = false;
                 userNotificationPending_ = false;
-                dtr_ = false;
-                rts_ = false;
-                dtrAssertedMillis_ = 0U;
-                userDtr_ = false;
-                userRts_ = false;
-                userDtrAssertedMillis_ = 0U;
-                serviceTouchPending_ = false;
-                serviceTouchResetMillis_ = 0U;
                 haltedInEndpoints_ = 0U;
                 haltedOutEndpoints_ = 0U;
                 reg32(USBD_BASE, EPINEN) = endpointMask(0U);
@@ -2734,9 +2772,6 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                     }
                     dtr = nextDtr;
                     rts = (value & 0x0002U) != 0U;
-                    if (!userCdc && dtr && lineCoding_.baudRate != 1200UL) {
-                        serviceSawNonResetBaud_ = true;
-                    }
                     updateSerialState(userCdc);
                     const bool resetArmed = configuredMillis_ != 0UL &&
                         (millis() - configuredMillis_) >= USBD_1200_RESET_ARM_MS;
