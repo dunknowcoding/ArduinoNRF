@@ -34,6 +34,8 @@ uint8_t g_interruptChannels[64] = {
 uint8_t g_gpiotePins[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 constexpr uint32_t SYSTICK_BASE = 0xE000E010UL;
+constexpr uint32_t SCB_SHPR3 = 0xE000ED20UL;
+constexpr uint8_t SYSTICK_PRIORITY_LOWEST = 0xE0U;
 constexpr uint32_t POWER_BASE = 0x40000000UL;
 constexpr uint32_t POWER_SYSTEMOFF = 0x500UL;
 constexpr uint32_t NVIC_ISER_BASE = 0xE000E100UL;
@@ -892,6 +894,13 @@ void init(void) {
     SysTickRegisters &timer = systick();
     timer.LOAD = systickReload();
     timer.VAL = 0;
+    // Byte 3 of SHPR3 is SysTick priority. Keep it below USBD (logical 6)
+    // because the tick observes VBUS and may retire/restart the controller; it
+    // must never preempt an in-flight USBD handler. This also matches the GDB
+    // stub's BASEPRI contract for stepping application code without entering
+    // SysTick.
+    *reinterpret_cast<volatile uint8_t *>(SCB_SHPR3 + 3UL) =
+        SYSTICK_PRIORITY_LOWEST;
     timer.CTRL = 0x07UL;
     nrfGdbStub().init();
 }

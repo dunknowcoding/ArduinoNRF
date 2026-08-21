@@ -56,7 +56,6 @@ promicro_nrf52840.build.usb_product="ProMicro nRF52840"
 promicro_nrf52840.build.base_flags=-DARDUINO_NRF52_PROMICRO -DNRF_BOARD_HAS_NATIVE_USB=1 -DNRF_BOARD_HAS_BATTERY=1 -DNRF_BOARD_HAS_WIFI=0 -DNRF_BOARD_HAS_IMU=0 -DNRF_BOARD_HAS_NFC=0
 promicro_nrf52840.build.system_flags=-DNRF_SYSTEM_HAS_SWD=1 -DNRF_SYSTEM_DEBUG_PADS_ONLY=1
 promicro_nrf52840.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
-promicro_nrf52840.build.usb_vbus_flags=-DNRF_SYSTEM_USB_ASSUME_VBUS=1
 promicro_nrf52840.build.upload_mode_flags=-DNRF_SYSTEM_USB_UPLOAD_PREFERRED=1
 promicro_nrf52840.build.bootloader_fallback_flags=-DNRF_SYSTEM_BOOTLOADER_DBL_RESET_FALLBACK=0
 # Upload transport supports both UF2 mass storage and Adafruit serial DFU for
@@ -74,7 +73,7 @@ promicro_nrf52840.build.storage_flags=-DNRF_SYSTEM_STORAGE_BACKEND=2 -DNRF_STORA
 promicro_nrf52840.build.storage_reserved_bytes=16384
 promicro_nrf52840.build.usbdesc_flags=
 promicro_nrf52840.build.pwm_clock_flags=
-promicro_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.usb_vbus_flags} {build.upload_mode_flags} {build.bootloader_fallback_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags} {build.usbdesc_flags} {build.pwm_clock_flags}
+promicro_nrf52840.build.extra_flags={build.base_flags} {build.system_flags} {build.usb_backend_flags} {build.storage_flags} {build.usb_cdc_flags} {build.upload_mode_flags} {build.bootloader_fallback_flags} {build.bootloader_flags} {build.flash_flags} {build.ram_flags} {build.profile_flags} {build.debug_flags} {build.usbdesc_flags} {build.pwm_clock_flags}
 promicro_nrf52840.menu.usbcdc.enabled=Enabled (Serial Monitor)
 promicro_nrf52840.menu.usbcdc.enabled.build.usb_cdc_flags=-DNRF_SYSTEM_HAS_USB_CDC=1 -DNRF_SYSTEM_DEFAULT_SERIAL_USB=1
 promicro_nrf52840.menu.usbcdc.disabled=Disabled (no Serial Monitor)

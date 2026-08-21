@@ -53,9 +53,10 @@ constexpr uint32_t DFSR_BKPT = 0x00000002UL;      // BKPT or FPB instruction mat
 constexpr uint32_t SHPR3 = 0xE000ED20UL;
 // nRF52840 implements 3 NVIC priority bits, so priorities live in the top 3
 // bits: 0x00,0x20,...,0xE0. BASEPRI=0x20 masks every interrupt of priority
-// >=0x20 (SysTick/RTC1/...) while leaving priority-0 handlers -- the pinned
-// DebugMon -- able to preempt and complete the step. (USBD is prio 0 but stays
-// NVIC-masked across the halt.)
+// >=0x20 (SysTick/RTC1/USBD/...) while leaving the pinned priority-0 DebugMon
+// able to preempt and complete the step. USBD normally runs at logical priority
+// 6 and also stays NVIC-masked across the halt; the stub pumps its service path
+// explicitly while stopped.
 constexpr uint32_t STEP_BASEPRI = 0x20UL;
 
 inline void setBasepri(uint32_t value) {

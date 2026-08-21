@@ -480,18 +480,6 @@ inline bool vbusDetected() {
     return (reg32(POWER_BASE, POWER_USBREGSTATUS) & POWER_USBREGSTATUS_VBUSDETECT) != 0UL;
 }
 
-inline bool usbVbusAssumedPresent() {
-#if defined(NRF_SYSTEM_USB_ASSUME_VBUS) && (NRF_SYSTEM_USB_ASSUME_VBUS == 1)
-    return true;
-#else
-    return false;
-#endif
-}
-
-inline bool effectiveVbusDetected() {
-    return vbusDetected() || usbVbusAssumedPresent();
-}
-
 inline bool hfclkRunning() {
     return (reg32(CLOCK_BASE, CLOCK_HFCLKSTAT) & CLOCK_HFCLKSTAT_STATE) != 0UL;
 }
@@ -731,7 +719,7 @@ void NrfUsbdDriver::serviceStartup() {
         // VBUS is a hard precondition for ENABLE on nRF52840. Retain the start
         // request while disconnected; SysTick will notice insertion even if a
         // sketch never calls yield().
-        if (!effectiveVbusDetected()) {
+        if (!vbusDetected()) {
             break;
         }
         startupInProgress_ = true;
@@ -754,7 +742,7 @@ void NrfUsbdDriver::serviceStartup() {
         break;
 
     case StartupPhase::HostHandoff:
-        if (!effectiveVbusDetected()) {
+        if (!vbusDetected()) {
             startupInProgress_ = false;
             startupPhase_ = StartupPhase::Idle;
             break;
@@ -769,7 +757,7 @@ void NrfUsbdDriver::serviceStartup() {
         break;
 
     case StartupPhase::Hfclk:
-        if (!effectiveVbusDetected()) {
+        if (!vbusDetected()) {
             requestStartupAbort(false);
             break;
         }
@@ -821,7 +809,7 @@ void NrfUsbdDriver::serviceStartup() {
                 usbErrata187Second();
                 startupErrataOpen_ = false;
             }
-            if (!effectiveVbusDetected()) {
+            if (!vbusDetected()) {
                 requestStartupAbort(false);
                 break;
             }
@@ -833,7 +821,7 @@ void NrfUsbdDriver::serviceStartup() {
         break;
 
     case StartupPhase::RetryBackoff:
-        if (!effectiveVbusDetected()) {
+        if (!vbusDetected()) {
             requestStartupAbort(false);
             break;
         }
@@ -858,12 +846,12 @@ void NrfUsbdDriver::serviceStartup() {
             startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
             startupPhase_ = StartupPhase::OutputReady;
         } else if (deadlineReached(now, startupDeadlineMillis_)) {
-            requestStartupAbort(effectiveVbusDetected());
+            requestStartupAbort(vbusDetected());
         }
         break;
 
     case StartupPhase::OutputReady:
-        if (!effectiveVbusDetected()) {
+        if (!vbusDetected()) {
             requestStartupAbort(false);
             break;
         }
@@ -977,7 +965,7 @@ void NrfUsbdDriver::attach() {
     resetConnectionState();
     clearEvents();
     started_ = true;
-    enablePullup(effectiveVbusDetected());
+    enablePullup(vbusDetected());
 }
 
 void NrfUsbdDriver::detach() {
@@ -1017,7 +1005,7 @@ void NrfUsbdDriver::poll() {
     // no-op and the stub pumps the same service path explicitly.
     UsbdIrqLock lock;
 
-    const bool hasVbus = effectiveVbusDetected();
+    const bool hasVbus = vbusDetected();
     enablePullup(attached_ && hasVbus);
     processBusState(hasVbus);
 
@@ -1055,7 +1043,7 @@ void NrfUsbdDriver::irqHandler() {
         ++g_usbdPollTrace.irqCalls;
     }
 
-    processBusState(effectiveVbusDetected());
+    processBusState(vbusDetected());
     const bool controlPlaneIdle =
         ep0InXferPhase_ == Ep0InXferPhase::Idle &&
         pendingControlOut_ == ControlOutTransfer::None;
@@ -1397,7 +1385,7 @@ bool NrfUsbdDriver::ready() const {
 
 bool NrfUsbdDriver::connected() const {
     return enabled_ && attached_ && ready_ && configured_ && !suspended_ &&
-        effectiveVbusDetected() && dtr_ && dtrAssertedMillis_ != 0UL &&
+        vbusDetected() && dtr_ && dtrAssertedMillis_ != 0UL &&
         (millis() - dtrAssertedMillis_) >= USBD_CDC_OPEN_SETTLE_MS;
 }
 
@@ -1462,6 +1450,16 @@ void NrfUsbdDriver::serviceTick() {
         serviceStartup();
         return;
     }
+    // The nRF POWER block owns the VBUS edge, but claiming POWER_CLOCK IRQ
+    // would collide with radio/clock stacks. SysTick is explicitly lower
+    // priority than USBD, so this 1 kHz observation cannot preempt the USB ISR
+    // and safely retires stale endpoint/controller state without depending on
+    // foreground yield(). The pending logical start request then follows the
+    // normal startup state machine when VBUS returns.
+    if (!vbusDetected()) {
+        processBusState(false);
+        return;
+    }
     if (stubHalted_) {
         return;
     }
@@ -1471,7 +1469,7 @@ void NrfUsbdDriver::serviceTick() {
 
 bool NrfUsbdDriver::userConnected() const {
     return enabled_ && attached_ && ready_ && configured_ && !suspended_ &&
-        effectiveVbusDetected() && userPortEnabled() && userDtr_ &&
+        vbusDetected() && userPortEnabled() && userDtr_ &&
         userDtrAssertedMillis_ != 0UL &&
         (millis() - userDtrAssertedMillis_) >= USBD_CDC_OPEN_SETTLE_MS;
 }
@@ -1538,7 +1536,7 @@ int NrfUsbdDriver::read() {
 
 size_t NrfUsbdDriver::write(uint8_t value) {
     UsbdIrqLock lock;
-    processBusState(effectiveVbusDetected());
+    processBusState(vbusDetected());
     if (!ringPushTx(value)) {
         return 0U;
     }
@@ -1566,7 +1564,7 @@ void NrfUsbdDriver::pumpRx() {
     // Recover any IN acknowledgement whose aggregate interrupt arrived before
     // EPDATASTATUS latched. Serial.available()/read() are foreground progress
     // points too, so a busy sketch cannot strand the following TX packet.
-    processBusState(effectiveVbusDetected());
+    processBusState(vbusDetected());
 
     drainServiceDataOut();
 }
@@ -1645,10 +1643,10 @@ void NrfUsbdDriver::flush() {
             if ((txPending() == 0U && !dataInFlight_) || !enabled_) {
                 break;
             }
-            if (!configured_ || suspended_ || !effectiveVbusDetected()) {
+            if (!configured_ || suspended_ || !vbusDetected()) {
                 break;
             }
-            processBusState(effectiveVbusDetected());
+            processBusState(vbusDetected());
             serviceDataIn(false);
         }
         return;
@@ -1656,9 +1654,9 @@ void NrfUsbdDriver::flush() {
 
     const uint32_t start = millis();
     while ((txPending() != 0U || dataInFlight_) && enabled_) {
-        processBusState(effectiveVbusDetected());
+        processBusState(vbusDetected());
         serviceDataIn(false);
-        if (!configured_ || suspended_ || !effectiveVbusDetected()) {
+        if (!configured_ || suspended_ || !vbusDetected()) {
             break;
         }
         if ((millis() - start) >= 50UL) {
@@ -1708,7 +1706,7 @@ int NrfUsbdDriver::userRead() {
 
 size_t NrfUsbdDriver::userWrite(uint8_t value) {
     UsbdIrqLock lock;
-    processBusState(effectiveVbusDetected());
+    processBusState(vbusDetected());
     if (!userPortEnabled() || !userRingPushTx(value)) {
         return 0U;
     }
@@ -1725,7 +1723,7 @@ size_t NrfUsbdDriver::userWrite(const uint8_t *data, size_t length) {
     // SPSC ring: the foreground is the sole producer, the ISR drains (consumer),
     // so userRingPushTx() is safe lock-free here (same as the per-byte path).
     UsbdIrqLock lock;
-    processBusState(effectiveVbusDetected());
+    processBusState(vbusDetected());
     size_t written = 0U;
     while (written < length && userRingPushTx(data[written])) {
         ++written;
@@ -1744,9 +1742,9 @@ void NrfUsbdDriver::userFlush() {
     UsbdIrqLock lock;
     const uint32_t start = millis();
     while ((userTxPending() != 0U || userDataInFlight_) && enabled_) {
-        processBusState(effectiveVbusDetected());
+        processBusState(vbusDetected());
         serviceDataIn(true);
-        if (!configured_ || suspended_ || !effectiveVbusDetected()) {
+        if (!configured_ || suspended_ || !vbusDetected()) {
             break;
         }
         if ((millis() - start) >= 50UL) {
@@ -1770,7 +1768,7 @@ void NrfUsbdDriver::setUserLineState(bool dtr, bool rts) {
 }
 
 NrfUsbdStatus NrfUsbdDriver::status() const {
-    return {enabled_, started_, attached_, effectiveVbusDetected(), ready_, configured_, suspended_, cdcActive_, address_, configuration_, eventCause_};
+    return {enabled_, started_, attached_, vbusDetected(), ready_, configured_, suspended_, cdcActive_, address_, configuration_, eventCause_};
 }
 
 void NrfUsbdDriver::resetConnectionState() {

@@ -26,7 +26,11 @@ D+. Startup is a bounded, nonblocking state machine advanced from both SysTick
 and foreground `yield()`/`poll()`. A cable removed during the sequence leaves
 the request pending; a later insertion restarts it even when application code
 never yields. TaichiUSB does not claim PendSV or POWER/CLOCK IRQ ownership to
-obtain that guarantee.
+obtain that guarantee. SysTick runs below the USBD IRQ, observes VBUS at 1 kHz,
+and retires a disconnected controller without preempting an active USB handler.
+The pull-up and controller lifecycle use the nRF POWER block's real
+`USBREGSTATUS.VBUSDETECT`; board profiles cannot substitute an assumed VBUS
+level, so battery-only execution cannot expose a stale USB session.
 
 The stack makes one bounded, fully bracketed retry when the controller does not
 acknowledge `READY`. If the second attempt, HFCLK, regulator, or disable readback
