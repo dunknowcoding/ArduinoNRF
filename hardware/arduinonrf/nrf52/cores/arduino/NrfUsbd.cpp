@@ -205,6 +205,7 @@ constexpr uint8_t USBD_IGNORE_INITIAL_1200_RESET_COUNT = static_cast<uint8_t>(NR
 constexpr uint8_t USBD_IGNORE_INITIAL_1200_RESET_COUNT = 0U;
 #endif
 constexpr uint32_t USBD_TOUCH_RESET_CONFIRM_MS = 40UL;
+constexpr uint32_t USBD_DFU_DETACH_RESET_DELAY_MS = 20UL;
 // usbser may assert DTR before its first bulk-IN read is posted. A short
 // post-DTR guard prevents the application's first bytes from being committed
 // to the endpoint FIFO before Windows is ready to consume them.
@@ -958,17 +959,7 @@ void NrfUsbdDriver::poll() {
     }
 
     serviceTouchTimer();
-
-    if (detachRequestMagic_ == USBD_DETACH_REQUEST_MAGIC) {
-        const uint32_t cause = detachCause_;
-        detachRequestMagic_ = 0UL;
-        detachCause_ = 0UL;
-        diagResetAtUsbdBeginStage(22UL);
-        if (cause != 0UL) {
-            markResetCause(cause);
-            requestBootloaderReset();
-        }
-    }
+    serviceDetachTimer();
     diagResetAtUsbdBeginStage(23UL);
 }
 
@@ -994,15 +985,7 @@ void NrfUsbdDriver::irqHandler() {
         }
     }
     serviceTouchTimer();
-    if (detachRequestMagic_ == USBD_DETACH_REQUEST_MAGIC) {
-        const uint32_t cause = detachCause_;
-        detachRequestMagic_ = 0UL;
-        detachCause_ = 0UL;
-        if (cause != 0UL) {
-            markResetCause(cause);
-            requestBootloaderReset();
-        }
-    }
+    serviceDetachTimer();
 }
 
 // Number of consecutive halted-pump iterations the host must hold the service
@@ -1368,11 +1351,28 @@ void NrfUsbdDriver::serviceTouchTimer() {
     }
 }
 
+void NrfUsbdDriver::serviceDetachTimer() {
+    if (detachRequestMagic_ != USBD_DETACH_REQUEST_MAGIC ||
+        (millis() - detachRequestedMillis_) < USBD_DFU_DETACH_RESET_DELAY_MS) {
+        return;
+    }
+    const uint32_t cause = detachCause_;
+    detachRequestMagic_ = 0UL;
+    detachCause_ = 0UL;
+    detachRequestedMillis_ = 0UL;
+    diagResetAtUsbdBeginStage(22UL);
+    if (cause != 0UL) {
+        markResetCause(cause);
+        requestBootloaderReset();
+    }
+}
+
 void NrfUsbdDriver::serviceTick() {
     if (!enabled_ || stubHalted_) {
         return;
     }
     serviceTouchTimer();
+    serviceDetachTimer();
 }
 
 bool NrfUsbdDriver::userConnected() const {
@@ -1698,6 +1698,7 @@ void NrfUsbdDriver::resetConnectionState() {
     controlOutLength_ = 0U;
     detachRequestMagic_ = 0UL;
     detachCause_ = 0UL;
+    detachRequestedMillis_ = 0UL;
     resetEp0InXferState();
     serviceSawNonResetBaud_ = false;
     serviceTouchPending_ = false;
@@ -2696,6 +2697,7 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
                     return;
                 }
                 detachCause_ = USBD_DIAG_CAUSE_DFU_DETACH;
+                detachRequestedMillis_ = millis();
                 detachRequestMagic_ = USBD_DETACH_REQUEST_MAGIC;
                 sendZeroLengthStatus();
                 return;

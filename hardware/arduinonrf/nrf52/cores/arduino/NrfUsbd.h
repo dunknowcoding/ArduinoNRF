@@ -183,6 +183,7 @@ private:
     void queueSerialStateNotification(bool userPort);
     void updateSerialState(bool userPort);
     void serviceTouchTimer();
+    void serviceDetachTimer();
     volatile bool enabled_ = false;
     volatile bool started_ = false;
     volatile bool attached_ = false;
@@ -219,6 +220,7 @@ private:
 
     volatile uint32_t detachRequestMagic_ = 0;
     volatile uint32_t detachCause_ = 0;
+    volatile uint32_t detachRequestedMillis_ = 0;
     volatile bool pendingAddressValid_ = false;
     volatile bool serviceSawNonResetBaud_ = false;
     volatile bool serviceTouchPending_ = false;
