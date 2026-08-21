@@ -95,14 +95,13 @@ choices because it has no native USB upload path in this package.
 - **Layout guard** (`layout` failure): compares the IDE `Bootloader / DFU` app
   start (`0x1000` / `0x26000` / `0x27000`) against `INFO_UF2.TXT` on the
   selected board's UF2 drive (matched by stable USB identity, not drive letter).
-  Disable with `NIUS_DISABLE_LAYOUT_GUARD=1` (not recommended).
+  This check is mandatory.
 - **Misflash guard** (`misflash` failure): after serial DFU or direct UF2, waits
   for the selected board to return in application mode. The fast path checks
   the expected VID/PID and preserved physical-device identity without opening
   the newly enumerated application COM. If USB never comes back
   (typical when app start was wrong), the wrapper attempts 1200 bps touch / UF2
-  recovery and fails with an IDE-visible message. Disable with
-  `NIUS_DISABLE_MISFLASH_GUARD=1`.
+  recovery and fails with an IDE-visible message. This check is mandatory.
   A reused COM number is not sufficient evidence: the endpoint must match the
   board recipe's runtime VID/PID. This prevents the departing bootloader CDC
   from being mistaken for a successfully started application.
@@ -169,11 +168,17 @@ choices because it has no native USB upload path in this package.
   Verbose stdout and stderr are drained concurrently so a full pipe cannot freeze an
   otherwise completed OpenOCD, J-Link, package-generation, or conversion process.
 - OpenOCD and J-Link have finite 120-second process deadlines; local image-preflight
-  and UF2-conversion helpers have a finite 60-second deadline. Advanced diagnostic
-  sessions may override these with `NIUS_OPENOCD_PROCESS_TIMEOUT_MS`,
-  `NIUS_JLINK_PROCESS_TIMEOUT_MS`, or `NIUS_LOCAL_TOOL_PROCESS_TIMEOUT_MS` (`0`
-  disables that one deadline). Timeout cleanup remains limited to the child tree
-  launched by the current upload.
+  and UF2-conversion helpers have a finite 60-second deadline. Serial DFU has a
+  240-second process deadline and a 30-second no-progress deadline. Advanced
+  sessions may tune these within finite ranges: serial DFU process 10-600 seconds,
+  serial DFU idle 1-120 seconds, OpenOCD/J-Link 1-600 seconds, and local helpers
+  1-300 seconds. Zero, negative, malformed, and out-of-range values are ignored;
+  no setting disables a deadline. Timeout cleanup remains limited to the exact
+  child tree launched by the current upload.
+- Windows always takes both a selected-target upload lock and a host-wide DFU
+  serialization lock before any target-visible action. Their wait intervals may
+  be tuned only within 0-10 seconds and 0-600 seconds respectively; lock creation
+  or acquisition failure is terminal before USB is touched.
 - Generated serial-DFU ZIP and UF2 files are unique, invocation-owned temporary
   artifacts and are removed on both success and failure. The wrapper never reuses a
   package left by an earlier incomplete upload.

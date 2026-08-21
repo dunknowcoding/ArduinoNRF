@@ -1233,10 +1233,6 @@ function Invoke-NiusPreUploadLayoutGuard {
         [string]$PortName = ''
     )
 
-    if ($env:NIUS_DISABLE_LAYOUT_GUARD -eq '1') {
-        return
-    }
-
     $waitMs = $Uf2ProbeWaitMs
     if ($RequireUf2Evidence -and $waitMs -lt 8000) {
         $waitMs = 8000
@@ -1397,10 +1393,6 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
     )
 
     Write-NiusTiming 'post-upload runtime verification start'
-    if ($env:NIUS_DISABLE_MISFLASH_GUARD -eq '1') {
-        return [pscustomobject]@{ Success = $true; Summary = 'misflash guard disabled' }
-    }
-
     $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
     $before = @{}
     foreach ($name in @($RuntimePortsBefore)) {
@@ -2319,13 +2311,9 @@ function Invoke-CommandChecked {
         $override = $env:NIUS_ADAFRUIT_DFU_PROCESS_TIMEOUT_MS
         if (-not [string]::IsNullOrWhiteSpace($override)) {
             $parsedTimeout = -1
-            if ([int]::TryParse($override, [ref]$parsedTimeout)) {
-                if ($parsedTimeout -eq 0) {
-                    $configuredTimeoutMs = 0
-                }
-                elseif ($parsedTimeout -gt 0) {
-                    $configuredTimeoutMs = $parsedTimeout
-                }
+            if ([int]::TryParse($override, [ref]$parsedTimeout) -and
+                $parsedTimeout -ge 10000 -and $parsedTimeout -le 600000) {
+                $configuredTimeoutMs = $parsedTimeout
             }
         }
         if ($configuredTimeoutMs -gt 0) {
@@ -2340,13 +2328,9 @@ function Invoke-CommandChecked {
             $idleOverride = $env:NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS
             if (-not [string]::IsNullOrWhiteSpace($idleOverride)) {
                 $parsedIdle = -1
-                if ([int]::TryParse($idleOverride, [ref]$parsedIdle)) {
-                    if ($parsedIdle -eq 0) {
-                        $idleMs = 0
-                    }
-                    elseif ($parsedIdle -gt 0) {
-                        $idleMs = $parsedIdle
-                    }
+                if ([int]::TryParse($idleOverride, [ref]$parsedIdle) -and
+                    $parsedIdle -ge 1000 -and $parsedIdle -le 120000) {
+                    $idleMs = $parsedIdle
                 }
             }
         }
@@ -2355,19 +2339,14 @@ function Invoke-CommandChecked {
         # SEGGER J-Link Commander has been observed to keep its process alive
         # after a failed nRF52 flash transaction while Arduino IDE stays at the
         # last progress line. Treat that as a failed upload instead of letting a
-        # bootloader/app write appear to hang forever. Set to 0 only for manual
-        # lab debugging where an operator is watching JLink.exe directly.
+        # bootloader/app write appear to hang forever.
         $configuredTimeoutMs = 120000
         $override = $env:NIUS_JLINK_PROCESS_TIMEOUT_MS
         if (-not [string]::IsNullOrWhiteSpace($override)) {
             $parsedTimeout = -1
-            if ([int]::TryParse($override, [ref]$parsedTimeout)) {
-                if ($parsedTimeout -eq 0) {
-                    $configuredTimeoutMs = 0
-                }
-                elseif ($parsedTimeout -gt 0) {
-                    $configuredTimeoutMs = $parsedTimeout
-                }
+            if ([int]::TryParse($override, [ref]$parsedTimeout) -and
+                $parsedTimeout -ge 1000 -and $parsedTimeout -le 600000) {
+                $configuredTimeoutMs = $parsedTimeout
             }
         }
         if ($configuredTimeoutMs -gt 0) {
@@ -2379,13 +2358,9 @@ function Invoke-CommandChecked {
         $override = $env:NIUS_OPENOCD_PROCESS_TIMEOUT_MS
         if (-not [string]::IsNullOrWhiteSpace($override)) {
             $parsedTimeout = -1
-            if ([int]::TryParse($override, [ref]$parsedTimeout)) {
-                if ($parsedTimeout -eq 0) {
-                    $configuredTimeoutMs = 0
-                }
-                elseif ($parsedTimeout -gt 0) {
-                    $configuredTimeoutMs = $parsedTimeout
-                }
+            if ([int]::TryParse($override, [ref]$parsedTimeout) -and
+                $parsedTimeout -ge 1000 -and $parsedTimeout -le 600000) {
+                $configuredTimeoutMs = $parsedTimeout
             }
         }
         if ($configuredTimeoutMs -gt 0) {
@@ -2396,13 +2371,9 @@ function Invoke-CommandChecked {
         $configuredTimeoutMs = 60000
         if (-not [string]::IsNullOrWhiteSpace($env:NIUS_LOCAL_TOOL_PROCESS_TIMEOUT_MS)) {
             $parsedTimeout = -1
-            if ([int]::TryParse($env:NIUS_LOCAL_TOOL_PROCESS_TIMEOUT_MS, [ref]$parsedTimeout)) {
-                if ($parsedTimeout -eq 0) {
-                    $configuredTimeoutMs = 0
-                }
-                elseif ($parsedTimeout -gt 0) {
-                    $configuredTimeoutMs = $parsedTimeout
-                }
+            if ([int]::TryParse($env:NIUS_LOCAL_TOOL_PROCESS_TIMEOUT_MS, [ref]$parsedTimeout) -and
+                $parsedTimeout -ge 1000 -and $parsedTimeout -le 300000) {
+                $configuredTimeoutMs = $parsedTimeout
             }
         }
         if ($configuredTimeoutMs -gt 0) {
@@ -4148,55 +4119,52 @@ try {
     # duplicate fails fast BEFORE any touch/port access, so it cannot
     # disturb the in-flight transfer. The OS releases the mutex when the owning
     # process exits (covers crashes / killed nrfutil); a later acquirer that
-    # sees the abandoned state simply takes ownership. Disable with
-    # NIUS_DISABLE_UPLOAD_LOCK=1; tune the contention wait via
+    # sees the abandoned state simply takes ownership. Tune the contention wait via
     # NIUS_UPLOAD_LOCK_WAIT_MS (default 600 ms: instant when free, brief enough
     # to fail fast on a real concurrent upload).
     $script:NiusUploadMutex = $null
     $script:NiusUploadMutexHeld = $false
-    if ($env:NIUS_DISABLE_UPLOAD_LOCK -ne '1') {
-        $portKey = 'default'
-        if ($Port -match '^(?i)COM\d+$') {
-            $portKey = $Port.Trim().ToUpperInvariant()
-        }
-        elseif (-not [string]::IsNullOrWhiteSpace($Board)) {
-            $portKey = ($Board.Trim() -replace '[^A-Za-z0-9_]', '_')
-        }
-        $mutexName = 'Global\NiusUpload_' + $portKey
-        $lockWaitMs = 600
-        $o = $env:NIUS_UPLOAD_LOCK_WAIT_MS
-        if (-not [string]::IsNullOrWhiteSpace($o)) {
-            $p = -1
-            if ([int]::TryParse($o, [ref]$p) -and $p -ge 0) { $lockWaitMs = $p }
-        }
+    $portKey = 'default'
+    if ($Port -match '^(?i)COM\d+$') {
+        $portKey = $Port.Trim().ToUpperInvariant()
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($Board)) {
+        $portKey = ($Board.Trim() -replace '[^A-Za-z0-9_]', '_')
+    }
+    $mutexName = 'Global\NiusUpload_' + $portKey
+    $lockWaitMs = 600
+    $o = $env:NIUS_UPLOAD_LOCK_WAIT_MS
+    if (-not [string]::IsNullOrWhiteSpace($o)) {
+        $p = -1
+        if ([int]::TryParse($o, [ref]$p) -and $p -ge 0 -and $p -le 10000) { $lockWaitMs = $p }
+    }
+    try {
+        $script:NiusUploadMutex = New-Object System.Threading.Mutex($false, $mutexName)
+    }
+    catch {
         try {
+            $mutexName = 'Local\NiusUpload_' + $portKey
             $script:NiusUploadMutex = New-Object System.Threading.Mutex($false, $mutexName)
         }
         catch {
-            try {
-                $mutexName = 'Local\NiusUpload_' + $portKey
-                $script:NiusUploadMutex = New-Object System.Threading.Mutex($false, $mutexName)
-            }
-            catch {
-                Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output ('Could not create the upload lock for {0}; no USB action was attempted.' -f $portKey) -Exe $toolPath)
-            }
+            Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output ('Could not create the upload lock for {0}; no USB action was attempted.' -f $portKey) -Exe $toolPath)
         }
-        if ($script:NiusUploadMutex) {
-            try {
-                $script:NiusUploadMutexHeld = $script:NiusUploadMutex.WaitOne($lockWaitMs)
-            }
-            catch [System.Threading.AbandonedMutexException] {
-                # Previous owner exited without releasing (crash / kill). The
-                # wait still grants us ownership; proceed.
-                $script:NiusUploadMutexHeld = $true
-            }
-            if (-not $script:NiusUploadMutexHeld) {
-                Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output (@(
-                            ('Another upload is already in progress on {0}; ignoring this duplicate request.' -f $portKey),
-                            'Wait for the current upload to finish (the board will reboot into the new firmware), then upload again.',
-                            'ZH: This port already has an upload in progress; the duplicate click was ignored. Wait for it to finish, then retry.'
-                        ) -join ' ') -Exe $toolPath)
-            }
+    }
+    if ($script:NiusUploadMutex) {
+        try {
+            $script:NiusUploadMutexHeld = $script:NiusUploadMutex.WaitOne($lockWaitMs)
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            # Previous owner exited without releasing (crash / kill). The
+            # wait still grants us ownership; proceed.
+            $script:NiusUploadMutexHeld = $true
+        }
+        if (-not $script:NiusUploadMutexHeld) {
+            Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output (@(
+                        ('Another upload is already in progress on {0}; ignoring this duplicate request.' -f $portKey),
+                        'Wait for the current upload to finish (the board will reboot into the new firmware), then upload again.',
+                        'ZH: This port already has an upload in progress; the duplicate click was ignored. Wait for it to finish, then retry.'
+                    ) -join ' ') -Exe $toolPath)
         }
     }
     # --------------------------------------------------------------------------
@@ -4210,46 +4178,43 @@ try {
     # This host-wide mutex serializes the whole USB-sensitive upload across
     # boards: a second board's upload WAITS for the first to finish instead of
     # racing it. Orphan cleanup is PID-scoped and never terminates a process
-    # whose parent is still alive. Disable the upload lock with
-    # NIUS_DISABLE_UPLOAD_LOCK=1; tune the wait via
+    # whose parent is still alive. Tune the wait via
     # NIUS_UPLOAD_HOST_LOCK_WAIT_MS (default 300000 = 5 min, long enough to queue
     # behind a real other-board upload; on timeout the new request fails closed
     # before touching USB).
     $script:NiusHostUploadMutex = $null
     $script:NiusHostUploadMutexHeld = $false
-    if ($env:NIUS_DISABLE_UPLOAD_LOCK -ne '1') {
-        $hostWaitMs = 300000
-        $hw = $env:NIUS_UPLOAD_HOST_LOCK_WAIT_MS
-        if (-not [string]::IsNullOrWhiteSpace($hw)) {
-            $hp = -1
-            if ([int]::TryParse($hw, [ref]$hp) -and $hp -ge 0) { $hostWaitMs = $hp }
-        }
+    $hostWaitMs = 300000
+    $hw = $env:NIUS_UPLOAD_HOST_LOCK_WAIT_MS
+    if (-not [string]::IsNullOrWhiteSpace($hw)) {
+        $hp = -1
+        if ([int]::TryParse($hw, [ref]$hp) -and $hp -ge 0 -and $hp -le 600000) { $hostWaitMs = $hp }
+    }
+    try {
+        $script:NiusHostUploadMutex = New-Object System.Threading.Mutex($false, 'Global\NiusUpload_HostDfu')
+    }
+    catch {
         try {
-            $script:NiusHostUploadMutex = New-Object System.Threading.Mutex($false, 'Global\NiusUpload_HostDfu')
+            $script:NiusHostUploadMutex = New-Object System.Threading.Mutex($false, 'Local\NiusUpload_HostDfu')
         }
         catch {
-            try {
-                $script:NiusHostUploadMutex = New-Object System.Threading.Mutex($false, 'Local\NiusUpload_HostDfu')
-            }
-            catch {
-                Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output 'Could not create the host DFU lock; no USB action was attempted.' -Exe $toolPath)
-            }
+            Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output 'Could not create the host DFU lock; no USB action was attempted.' -Exe $toolPath)
         }
-        if ($script:NiusHostUploadMutex) {
-            $waitStart = Get-Date
-            try {
-                $script:NiusHostUploadMutexHeld = $script:NiusHostUploadMutex.WaitOne($hostWaitMs)
-            }
-            catch [System.Threading.AbandonedMutexException] {
-                # Previous owner exited without releasing (crash / kill); we own it.
-                $script:NiusHostUploadMutexHeld = $true
-            }
-            if (-not $script:NiusHostUploadMutexHeld) {
-                Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output 'Another board upload still owns the host DFU lock. This upload was cancelled before touching USB.' -Exe $toolPath)
-            }
-            elseif (((Get-Date) - $waitStart).TotalMilliseconds -ge 250) {
-                Write-NiusDetail '[nius] waited for another board''s upload to finish (host-wide DFU serialization).' -ForegroundColor DarkGray
-            }
+    }
+    if ($script:NiusHostUploadMutex) {
+        $waitStart = Get-Date
+        try {
+            $script:NiusHostUploadMutexHeld = $script:NiusHostUploadMutex.WaitOne($hostWaitMs)
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            # Previous owner exited without releasing (crash / kill); we own it.
+            $script:NiusHostUploadMutexHeld = $true
+        }
+        if (-not $script:NiusHostUploadMutexHeld) {
+            Throw-NiusUploadFailure (New-UploadFailure -Kind 'generic' -ExitCode 1 -Output 'Another board upload still owns the host DFU lock. This upload was cancelled before touching USB.' -Exe $toolPath)
+        }
+        elseif (((Get-Date) - $waitStart).TotalMilliseconds -ge 250) {
+            Write-NiusDetail '[nius] waited for another board''s upload to finish (host-wide DFU serialization).' -ForegroundColor DarkGray
         }
     }
     # --------------------------------------------------------------------------
