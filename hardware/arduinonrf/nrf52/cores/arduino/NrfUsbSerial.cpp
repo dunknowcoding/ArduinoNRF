@@ -9,10 +9,6 @@ NrfUsbSerialBackend &nrfUsbSerialBackend() {
     return backend;
 }
 
-unsigned long NrfUsbSerialBackend::normalizedBaud(unsigned long baudRate) {
-    return baudRate == 0UL ? 115200UL : baudRate;
-}
-
 void NrfUsbSerialBackend::begin(unsigned long baudRate) {
     (void)baudRate;
     if (nrfUsbRuntimeEnabled()) {
@@ -52,17 +48,6 @@ size_t NrfUsbSerialBackend::write(const uint8_t *data, size_t length) {
 
 bool NrfUsbSerialBackend::connected() const {
     return nrfUsbdDriver().userConnected();
-}
-
-void NrfUsbSerialBackend::setLineCoding(unsigned long baudRate) {
-    baudRate = normalizedBaud(baudRate);
-    NrfUsbLineCoding lineCoding = nrfUsbdDriver().userLineCoding();
-    lineCoding.baudRate = static_cast<uint32_t>(baudRate);
-    nrfUsbdDriver().setUserLineCoding(lineCoding);
-}
-
-void NrfUsbSerialBackend::setLineState(bool dtr, bool rts) {
-    nrfUsbdDriver().setUserLineState(dtr, rts);
 }
 
 bool NrfUsbSerialBackend::dtr() const {

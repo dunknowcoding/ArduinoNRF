@@ -1904,20 +1904,6 @@ void NrfUsbdDriver::userFlush() {
     }
 }
 
-void NrfUsbdDriver::setUserLineCoding(const NrfUsbLineCoding &lineCoding) {
-    userLineCoding_ = lineCoding;
-}
-
-void NrfUsbdDriver::setUserLineState(bool dtr, bool rts) {
-    if (dtr && !userDtr_) {
-        userDtrAssertedMillis_ = millis();
-    } else if (!dtr) {
-        userDtrAssertedMillis_ = 0UL;
-    }
-    userDtr_ = dtr;
-    userRts_ = rts;
-}
-
 NrfUsbdStatus NrfUsbdDriver::status() const {
     return {enabled_, started_, attached_, vbusDetected(), ready_, configured_, suspended_, cdcActive_, address_, configuration_, eventCause_};
 }
