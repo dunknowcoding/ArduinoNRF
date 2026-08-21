@@ -226,6 +226,18 @@ def matches_target_scope(identity, serial: str, stable_id: str) -> bool:
     return False
 
 
+def same_captured_target(
+    expected_serial: str,
+    expected_stable_id: str,
+    current_serial: str,
+    current_stable_id: str,
+) -> bool:
+    """Compare a target after lock acquisition using the strongest captured key."""
+    if expected_stable_id:
+        return current_stable_id == expected_stable_id
+    return bool(expected_serial) and current_serial == expected_serial
+
+
 def advance_runtime_stability(ready: bool, now: float, ready_since, stable_s: float):
     if not ready:
         return None, False
@@ -389,6 +401,16 @@ def main() -> int:
         assert not matches_target_scope(peer, "bootloader", "/sys/devices/usb1/1-2")
         assert matches_target_scope(changed_serial, "runtime", "")
         assert not matches_target_scope(changed_serial, "peer", "")
+        assert same_captured_target(
+            "bootloader", "/sys/devices/usb1/1-2",
+            "runtime", "/sys/devices/usb1/1-2",
+        )
+        assert not same_captured_target(
+            "bootloader", "/sys/devices/usb1/1-2",
+            "bootloader", "/sys/devices/usb1/1-3",
+        )
+        assert same_captured_target("runtime", "", "runtime", "")
+        assert not same_captured_target("runtime", "", "peer", "")
         assert runtime_endpoint_ready([changed_serial])
         assert runtime_endpoint_ready([
             (0x239A, 0x0001, "runtime", "/dev/ttyACM1", None, "scope")
@@ -522,6 +544,30 @@ def main() -> int:
     lock_identity = target_stable_id or ("serial:" + target_serial)
 
     with upload_target_lock(lock_identity), tempfile.TemporaryDirectory(prefix="nius_dfu_") as td:
+        # Identity discovery happens before the lock only to derive its stable key.
+        # Re-prove the selected endpoint after acquiring ownership so a detach,
+        # renumber, or peer replacement in that window cannot redirect the transfer.
+        current_serial, current_stable_id = capture_target_identity(
+            control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
+        )
+        if not same_captured_target(
+            target_serial, target_stable_id, current_serial, current_stable_id
+        ):
+            fail(
+                "selected physical target changed before the upload lock was acquired; "
+                "no touch or transfer was attempted",
+                code=4,
+            )
+        locked_control_port = resolve_service_serial_port(
+            control_port, runtime_vid, runtime_pid, target_serial, target_stable_id
+        )
+        if locked_control_port != control_port:
+            sys.stderr.write(
+                f"[nius-upload] maintenance endpoint changed before transfer; "
+                f"using same-device SERVICE CDC {locked_control_port}\n"
+            )
+            control_port = locked_control_port
+
         pkg = os.path.join(td, "app.zip")
 
         genpkg = [nrfutil] + verbose_flag + [

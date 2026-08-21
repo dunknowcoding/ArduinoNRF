@@ -148,6 +148,9 @@ choices because it has no native USB upload path in this package.
 - One host-local advisory lock owns a physical topology/serial identity throughout
   package generation, transfer, and runtime verification. A concurrent uploader
   fails before touching that target, while the OS releases the lock after exit.
+- Linux and macOS re-prove the selected physical identity after acquiring that lock
+  and re-resolve its maintenance endpoint before any touch or transfer. A detach,
+  tty renumber, or peer replacement in the discovery-to-lock window fails closed.
 - USB IDs, address ranges, process/runtime timeouts, DFU/touch baud rates, device
   type, and SoftDevice requirement are finite and range-checked before transfer;
   malformed touch input cannot silently disable the bootloader transition.
