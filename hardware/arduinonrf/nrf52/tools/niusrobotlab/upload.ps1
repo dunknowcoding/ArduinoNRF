@@ -834,10 +834,7 @@ function Resolve-NiusLayoutGuardUf2Summary {
         [string]$ExpectedLabel = '',
         [string]$ExpectedModel = '',
         [string]$ExpectedBoardId = '',
-        [string]$PreferredCompositeStableId = '',
-        [int]$WaitMs = 0,
-        [string]$PortName = '',
-        [switch]$AllowRetouch
+        [string]$PreferredCompositeStableId = ''
     )
 
     function Get-LayoutGuardCandidate {
@@ -854,46 +851,7 @@ function Resolve-NiusLayoutGuardUf2Summary {
         return $summary
     }
 
-    $deadline = if ($WaitMs -gt 0) { (Get-Date).AddMilliseconds($WaitMs) } else { Get-Date }
-    do {
-        $summary = Get-LayoutGuardCandidate
-        if ($summary) {
-            return $summary
-        }
-        if ((Get-Date) -ge $deadline) {
-            break
-        }
-        Start-Sleep -Milliseconds 400
-    } while ($true)
-
-    if (-not $AllowRetouch -or [string]::IsNullOrWhiteSpace($PortName)) {
-        return $null
-    }
-
-    $portState = Get-SerialPortUsableState -PortName $PortName
-    if (-not $portState.Openable) {
-        return $null
-    }
-
-    Write-NiusDetail ('[nius] layout guard: waiting for scoped UF2 on {0} after extra 1200 bps touch...' -f $PortName) -ForegroundColor DarkGray
-    $touch = Touch-SerialPort1200 -PortName $PortName
-    if (-not $touch.Triggered) {
-        return $null
-    }
-
-    $retouchDeadline = (Get-Date).AddMilliseconds([Math]::Max($WaitMs, 8000))
-    while ((Get-Date) -lt $retouchDeadline) {
-        $summary = Get-LayoutGuardCandidate
-        if ($summary) {
-            return $summary
-        }
-        # The fast registry snapshot is identity-scoped and normally completes
-        # in well under one poll interval; 150 ms keeps enumeration responsive
-        # without busy-spinning while the application USB composite returns.
-        Start-Sleep -Milliseconds 150
-    }
-
-    return $null
+    return Get-LayoutGuardCandidate
 }
 
     function Resolve-PythonLaunch {
@@ -1224,43 +1182,21 @@ function Invoke-NiusPreUploadLayoutGuard {
         [string]$ExpectedLabel = '',
         [string]$ExpectedModel = '',
         [string]$ExpectedBoardId = '',
-        [string]$PreferredCompositeStableId = '',
-        [switch]$RequireUf2Evidence,
-        [int]$Uf2ProbeWaitMs = 0,
-        [string]$PortName = ''
+        [string]$PreferredCompositeStableId = ''
     )
-
-    $waitMs = $Uf2ProbeWaitMs
-    if ($RequireUf2Evidence -and $waitMs -lt 8000) {
-        $waitMs = 8000
-    }
 
     $uf2Summary = Resolve-NiusLayoutGuardUf2Summary `
         -ExpectedLabel $ExpectedLabel `
         -ExpectedModel $ExpectedModel `
         -ExpectedBoardId $ExpectedBoardId `
-        -PreferredCompositeStableId $PreferredCompositeStableId `
-        -WaitMs $waitMs `
-        -PortName $PortName `
-        -AllowRetouch:$RequireUf2Evidence
+        -PreferredCompositeStableId $PreferredCompositeStableId
 
     if ($uf2Summary) {
         Assert-Uf2BuildLayoutMatchesBootloader -Uf2Summary $uf2Summary -ExpectedAppStart $ExpectedAppStart -Context $Context
         return
     }
 
-    if (-not $RequireUf2Evidence) {
-        return
-    }
-
-    $expected = Normalize-NiusHexAddress -Value $ExpectedAppStart
-    Throw-NiusUploadFailure (New-UploadFailure -Kind 'layout' -ExitCode 1 -Output (@(
-                'Serial DFU upload requires a UF2 volume on the selected board to verify bootloader layout before transfer.',
-                ('This sketch was compiled for app start {0}.' -f $(if ([string]::IsNullOrWhiteSpace($expected)) { $ExpectedAppStart } else { $expected })),
-                'Double-tap RESET on the selected board to expose the UF2 drive, then upload again; no firmware was written.',
-                'If the UF2 drive never appears during serial DFU on Windows, use an explicit UF2 mass-storage Bootloader / DFU menu entry instead.',
-                'ZH: Serial DFU cannot verify layout without INFO_UF2.TXT on the selected board. Enter UF2 first, fix the Bootloader / DFU menu if needed, then upload again.'
-            ) -join [Environment]::NewLine) -Exe $toolPath)
+    return
 }
 
 function Invoke-NiusRecoverBoardToBootloader {
@@ -1729,8 +1665,7 @@ function Invoke-Uf2SerialDfuFallback {
         -ExpectedLabel $ExpectedLabel `
         -ExpectedModel $ExpectedModel `
         -ExpectedBoardId $ExpectedBoardId `
-        -PreferredCompositeStableId $PreferredCompositeStableId `
-        -PortName $fallbackPort
+        -PreferredCompositeStableId $PreferredCompositeStableId
     $initialSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq
     Invoke-AdafruitDfuDeploy -HexPath $HexPath -Port $fallbackPort -SdReq $initialSdReq
     return $true
@@ -2946,7 +2881,7 @@ function Get-FailureHints {
                 'Re-select the Bootloader / DFU option whose app start matches the mounted bootloader, then compile and upload again.',
                 'For a UF2 drive that reports `SoftDevice: not found`, use a no-SoftDevice / MBR only (0x1000) option.',
                 'The board was left in UF2/DFU; no firmware was written when this guard fired before transfer.',
-                'Serial DFU now requires a scoped UF2 volume with INFO_UF2.TXT on the selected board before transfer; double-tap RESET if the drive is missing.'
+                'Explicit serial DFU uses the selected recipe''s exact layout; scoped INFO_UF2.TXT remains authoritative when that volume is present.'
             )
         }
         'misflash' {
