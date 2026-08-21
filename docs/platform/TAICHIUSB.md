@@ -77,6 +77,12 @@ host ACK is observed in `EPDATASTATUS`. This prevents control/data overlap,
 premature buffer reuse, and packet loss under simultaneous upload, logging, and
 debug traffic.
 
+Suspend/resume state is applied before EP0 or data-endpoint events from the same
+interrupt snapshot. While suspended, only USB reset and USB-event wake sources
+remain armed; transfer events stay latched and are serviced after resume. This
+prevents an interrupt storm and prevents stale active state from launching new
+EasyDMA work during bus suspend.
+
 Pluggable modules are admitted transactionally. Registration first rejects an
 endpoint/interface allocation beyond the nRF52840 controller limits. During
 descriptor construction, each module must write exactly the byte and interface

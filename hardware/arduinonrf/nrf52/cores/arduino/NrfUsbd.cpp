@@ -153,6 +153,22 @@ constexpr uint32_t USBD_INT_EP0SETUP_MASK = (1UL << 23);
 // stub is simply the first feature to receive bulk OUT on the service CDC
 // (uploads only use EP0 control), so the latent off-by-one finally bit.
 constexpr uint32_t USBD_INT_EPDATA_MASK = (1UL << 24);
+constexpr uint32_t USBD_ACTIVE_INTERRUPT_MASK =
+    USBD_INT_USBRESET_MASK |
+    USBD_INT_STARTED_MASK |
+    USBD_INT_ENDEPIN0_MASK |
+    USBD_INT_ENDEPIN1_MASK |
+    USBD_INT_ENDEPIN2_MASK |
+    USBD_INT_ENDEPIN3_MASK |
+    USBD_INT_ENDEPIN4_MASK |
+    USBD_INT_EP0DATADONE_MASK |
+    USBD_INT_ENDEPOUT2_MASK |
+    USBD_INT_ENDEPOUT4_MASK |
+    USBD_INT_USBEVENT_MASK |
+    USBD_INT_EP0SETUP_MASK |
+    USBD_INT_EPDATA_MASK;
+constexpr uint32_t USBD_SUSPEND_INTERRUPT_MASK =
+    USBD_INT_USBRESET_MASK | USBD_INT_USBEVENT_MASK;
 constexpr uint32_t EPDATASTATUS_OUT_BASE_BIT = 17U;
 constexpr uint32_t USBD_EVENTCAUSE_SUSPEND_MASK = (1UL << 8);
 constexpr uint32_t USBD_EVENTCAUSE_RESUME_MASK = (1UL << 9);
@@ -178,6 +194,29 @@ constexpr size_t DATA_EP_MAX_PACKET = 64U;
 constexpr uint16_t CDC_SERIAL_STATE_DCD = 0x0001U;
 constexpr uint16_t CDC_SERIAL_STATE_DSR = 0x0002U;
 constexpr uint8_t USB_MAX_ENDPOINTS = 8U;
+
+constexpr bool suspendedAfterUsbEvent(bool suspended, uint32_t cause) {
+    // RESUME wins if delayed servicing observes both accumulated edges: bus
+    // activity is present again and keeping the data plane suspended would
+    // otherwise require another edge that the peripheral may not generate.
+    return (cause & USBD_EVENTCAUSE_RESUME_MASK) != 0UL
+        ? false
+        : ((cause & USBD_EVENTCAUSE_SUSPEND_MASK) != 0UL ? true : suspended);
+}
+
+constexpr bool readyAfterUsbEvent(bool ready, bool attached, bool hasVbus,
+                                  uint32_t cause) {
+    return (cause & (USBD_EVENTCAUSE_READY_MASK | USBD_EVENTCAUSE_RESUME_MASK)) != 0UL
+        ? (attached && hasVbus)
+        : ready;
+}
+
+static_assert(suspendedAfterUsbEvent(false, USBD_EVENTCAUSE_SUSPEND_MASK));
+static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_RESUME_MASK));
+static_assert(!suspendedAfterUsbEvent(true, USBD_EVENTCAUSE_SUSPEND_MASK |
+                                           USBD_EVENTCAUSE_RESUME_MASK));
+static_assert(readyAfterUsbEvent(false, true, true, USBD_EVENTCAUSE_READY_MASK));
+static_assert(!readyAfterUsbEvent(true, true, false, USBD_EVENTCAUSE_RESUME_MASK));
 constexpr uint32_t USBD_TRACE_MAGIC = 0x55444254UL;
 constexpr uint32_t USBD_DTOGGLE_VALUE_POS = 8UL;
 constexpr uint32_t USBD_DTOGGLE_NOP = 0UL;
@@ -1163,9 +1202,41 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         return;
     }
 
+    const bool wasSuspended = suspended_;
     if (reg32(USBD_BASE, EVENTS_USBRESET) != 0UL) {
         reg32(USBD_BASE, EVENTS_USBRESET) = 0UL;
         resetConnectionState();
+    }
+
+    // Apply suspend/resume before servicing EP0 or endpoint events from the
+    // same interrupt snapshot. Handling this at the end of the pass let a
+    // latched SUSPEND edge leave the old active state visible while transfer
+    // completion code considered launching more work.
+    if (reg32(USBD_BASE, EVENTS_USBEVENT) != 0UL) {
+        reg32(USBD_BASE, EVENTS_USBEVENT) = 0UL;
+        eventCause_ = reg32(USBD_BASE, EVENTCAUSE);
+        if (pollTraceEnabled()) {
+            ++g_usbdPollTrace.usbEventEvents;
+            g_usbdPollTrace.lastEventCause = eventCause_;
+        }
+        ready_ = readyAfterUsbEvent(ready_, attached_, hasVbus, eventCause_);
+        suspended_ = suspendedAfterUsbEvent(suspended_, eventCause_);
+        reg32(USBD_BASE, EVENTCAUSE) = eventCause_;
+    }
+
+    if (suspended_ != wasSuspended) {
+        if (suspended_) {
+            // Keep only wake/reset sources armed. Endpoint events stay latched
+            // and are serviced after RESUME, so the IRQ cannot spin while the
+            // bus is inactive and no EasyDMA work starts from stale active state.
+            reg32(USBD_BASE, INTENCLR) =
+                USBD_ACTIVE_INTERRUPT_MASK & ~USBD_SUSPEND_INTERRUPT_MASK;
+        } else {
+            reg32(USBD_BASE, INTENSET) = USBD_ACTIVE_INTERRUPT_MASK;
+        }
+    }
+    if (suspended_) {
+        return;
     }
 
     if (reg32(USBD_BASE, EVENTS_STARTED) != 0UL) {
@@ -1382,25 +1453,6 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
         }
     }
 
-    if (reg32(USBD_BASE, EVENTS_USBEVENT) != 0UL) {
-        reg32(USBD_BASE, EVENTS_USBEVENT) = 0UL;
-        eventCause_ = reg32(USBD_BASE, EVENTCAUSE);
-        if (pollTraceEnabled()) {
-            ++g_usbdPollTrace.usbEventEvents;
-            g_usbdPollTrace.lastEventCause = eventCause_;
-        }
-        if ((eventCause_ & USBD_EVENTCAUSE_READY_MASK) != 0UL) {
-            ready_ = attached_ && hasVbus;
-        }
-        if ((eventCause_ & USBD_EVENTCAUSE_SUSPEND_MASK) != 0UL) {
-            suspended_ = true;
-        }
-        if ((eventCause_ & USBD_EVENTCAUSE_RESUME_MASK) != 0UL) {
-            suspended_ = false;
-            ready_ = attached_ && hasVbus;
-        }
-        reg32(USBD_BASE, EVENTCAUSE) = eventCause_;
-    }
 }
 
 bool NrfUsbdDriver::enabled() const {
@@ -1979,21 +2031,7 @@ void NrfUsbdDriver::clearEvents() {
 }
 
 void NrfUsbdDriver::enableInterrupts() {
-    const uint32_t interruptMask =
-        USBD_INT_USBRESET_MASK |
-        USBD_INT_STARTED_MASK |
-        USBD_INT_ENDEPIN0_MASK |
-        USBD_INT_ENDEPIN1_MASK |
-        USBD_INT_ENDEPIN2_MASK |
-        USBD_INT_ENDEPIN3_MASK |
-        USBD_INT_ENDEPIN4_MASK |
-        USBD_INT_EP0DATADONE_MASK |
-        USBD_INT_ENDEPOUT2_MASK |
-        USBD_INT_ENDEPOUT4_MASK |
-        USBD_INT_USBEVENT_MASK |
-        USBD_INT_EP0SETUP_MASK |
-        USBD_INT_EPDATA_MASK;
-    reg32(USBD_BASE, INTENSET) = interruptMask;
+    reg32(USBD_BASE, INTENSET) = USBD_ACTIVE_INTERRUPT_MASK;
     // Run USB at a low preemption priority (6 of 0..7) so genuinely
     // time-critical ISRs -- the BLE radio/timer chain in particular -- always
     // win the arbitration. USB enumeration tolerates the small added latency,
