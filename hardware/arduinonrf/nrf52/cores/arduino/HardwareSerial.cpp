@@ -114,16 +114,11 @@ void HardwareSerial::begin(unsigned long baudRate) {
     if (!usbBacked_) {
         configureUart();
     } else {
-        unsigned long actualBaudRate = baudRate;
-        if (actualBaudRate == 0UL) {
-            actualBaudRate = 115200UL;
-        }
-        nrfUsbSerialBackend().begin(actualBaudRate);
-        if (nrfSerialUsbUsesServicePortOnly()) {
-            NrfUsbLineCoding lc = nrfUsbdDriver().lineCoding();
-            lc.baudRate = static_cast<uint32_t>(actualBaudRate);
-            nrfUsbdDriver().setLineCoding(lc);
-        }
+        // USB CDC line coding belongs to host control transfers. In a
+        // service-only build, copying Serial.begin(1200) into the maintenance
+        // interface could prime a later ordinary DTR edge as an upload touch.
+        // Keep the Arduino baud argument as local compatibility metadata only.
+        nrfUsbSerialBackend().begin(baudRate);
         enabled_ = true;
     }
 }

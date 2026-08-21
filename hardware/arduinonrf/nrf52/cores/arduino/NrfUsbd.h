@@ -92,8 +92,6 @@ public:
     size_t serviceTxQueued() const;
     size_t userTxQueued() const;
     void injectRx(const uint8_t *data, size_t length);
-    void setLineCoding(const NrfUsbLineCoding &lineCoding);
-    void setLineState(bool dtr, bool rts);
     void setUserLineCoding(const NrfUsbLineCoding &lineCoding);
     void setUserLineState(bool dtr, bool rts);
     NrfUsbdStatus status() const;

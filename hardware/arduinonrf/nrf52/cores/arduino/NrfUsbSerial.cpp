@@ -14,14 +14,9 @@ unsigned long NrfUsbSerialBackend::normalizedBaud(unsigned long baudRate) {
 }
 
 void NrfUsbSerialBackend::begin(unsigned long baudRate) {
-    baudRate = normalizedBaud(baudRate);
+    (void)baudRate;
     if (nrfUsbRuntimeEnabled()) {
         nrfUsbdDriver().begin();
-    }
-    if (nrfUsbUserPortEnabled()) {
-        NrfUsbLineCoding lineCoding = nrfUsbdDriver().userLineCoding();
-        lineCoding.baudRate = static_cast<uint32_t>(baudRate);
-        nrfUsbdDriver().setUserLineCoding(lineCoding);
     }
 }
 

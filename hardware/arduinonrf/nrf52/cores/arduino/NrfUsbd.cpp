@@ -1804,20 +1804,6 @@ void NrfUsbdDriver::injectRx(const uint8_t *data, size_t length) {
     }
 }
 
-void NrfUsbdDriver::setLineCoding(const NrfUsbLineCoding &lineCoding) {
-    lineCoding_ = lineCoding;
-}
-
-void NrfUsbdDriver::setLineState(bool dtr, bool rts) {
-    if (dtr && !dtr_) {
-        dtrAssertedMillis_ = millis();
-    } else if (!dtr) {
-        dtrAssertedMillis_ = 0UL;
-    }
-    dtr_ = dtr;
-    rts_ = rts;
-}
-
 int NrfUsbdDriver::userAvailable() const {
     return static_cast<int>(ringPending(userRxHead_, userRxTail_));
 }

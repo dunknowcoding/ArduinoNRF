@@ -96,6 +96,12 @@ used by `SET_ADDRESS`: an aborted request cannot commit its stale address before
 the replacement SETUP is serviced. Aborted CDC line-coding payloads likewise
 cannot mutate line state or retain 1200-baud upload authority.
 
+CDC line coding and DTR/RTS are host-owned session state. `Serial.begin(baud)`
+starts the Arduino facade but does not write either maintenance or user CDC line
+coding. In particular, application code cannot prime the maintenance interface
+at 1200 baud; only a validated host `SET_LINE_CODING` followed by the admitted
+DTR transition can request bootloader entry.
+
 Pluggable modules are admitted transactionally. Registration first rejects an
 endpoint/interface allocation beyond the nRF52840 controller limits. During
 descriptor construction, each module must write exactly the byte and interface
