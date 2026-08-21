@@ -72,7 +72,7 @@ choices because it has no native USB upload path in this package.
   safely relocate an already-linked image.
 - Before any Windows USB discovery or touch, the uploader independently validates every
   Intel HEX record checksum and length, rejects overlaps or records after EOF,
-  and requires the actual vector table, Thumb reset entry, initial stack pointer,
+  and requires the actual vector table, Thumb reset entry, exact target stack pointer,
   start address, and highest programmed byte to fit the selected target's exact
   flash and SRAM limits. The same validated image is used for serial DFU, UF2,
   OpenOCD, and J-Link application upload; recipe metadata alone is not accepted

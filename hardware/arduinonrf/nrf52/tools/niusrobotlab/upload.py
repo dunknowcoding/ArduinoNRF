@@ -528,6 +528,19 @@ def main() -> int:
             pass
         else:
             raise AssertionError("nRF52840 stack ceiling accepted for an nRF52833 target")
+        wrong_stack_top = (
+            (0x2000_1000).to_bytes(4, "little")
+            + (0x0000_1009).to_bytes(4, "little")
+            + b"\x00"
+        )
+        try:
+            validate_application_layout(
+                [(0x1000, wrong_stack_top)], 0x1000, 0x1000, 0x2004_0000
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("non-contract initial stack pointer accepted")
         if os.name == "posix":
             lock_id = "upload-selftest-" + str(os.getpid())
             with exclusive_target_lock(lock_id):

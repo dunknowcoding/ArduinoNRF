@@ -178,10 +178,10 @@ def validate_application_layout(
 
     vector = _bytes_at(segments, app_start, 8)
     stack_pointer, reset_vector = struct.unpack("<II", vector)
-    if not 0x2000_0000 < stack_pointer <= ram_end or stack_pointer & 0x7:
+    if stack_pointer != ram_end or stack_pointer & 0x7:
         raise ValueError(
-            f"Initial stack pointer 0x{stack_pointer:08X} exceeds the selected "
-            f"target SRAM ending at 0x{ram_end:08X}"
+            f"Initial stack pointer 0x{stack_pointer:08X} does not match the "
+            f"selected target stack ceiling 0x{ram_end:08X}"
         )
     if reset_vector & 1 == 0:
         raise ValueError(
