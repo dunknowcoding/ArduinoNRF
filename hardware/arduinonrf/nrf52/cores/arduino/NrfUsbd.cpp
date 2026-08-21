@@ -111,6 +111,8 @@ constexpr uint32_t NVIC_ISER_BASE = 0xE000E100UL;
 constexpr uint32_t NVIC_ICER_BASE = 0xE000E180UL;
 constexpr uint32_t CLOCK_TASKS_HFCLKSTART = 0x000UL;
 constexpr uint32_t CLOCK_EVENTS_HFCLKSTARTED = 0x100UL;
+constexpr uint32_t CLOCK_HFCLKSTAT = 0x40CUL;
+constexpr uint32_t CLOCK_HFCLKSTAT_STATE = (1UL << 16);
 constexpr uint32_t AIRCR = 0xE000ED0CUL;
 constexpr uint32_t AIRCR_RESET_KEY = 0x05FA0000UL;
 constexpr uint32_t AIRCR_SYSRESETREQ = 0x4UL;
@@ -210,6 +212,13 @@ constexpr uint32_t USBD_DFU_DETACH_RESET_DELAY_MS = 20UL;
 // post-DTR guard prevents the application's first bytes from being committed
 // to the endpoint FIFO before Windows is ready to consume them.
 constexpr uint32_t USBD_CDC_OPEN_SETTLE_MS = 10UL;
+// Controller startup is advanced in small, nonblocking steps from either the
+// foreground poll path or SysTick. This lets USB recover after a cable is
+// inserted while a sketch is busy-looping, without taking ownership of
+// PendSV/POWER_CLOCK or blocking an interrupt for the old 400 ms handoff.
+constexpr uint32_t USBD_HOST_HANDOFF_MS = 400UL;
+constexpr uint32_t USBD_STARTUP_STAGE_TIMEOUT_MS = 100UL;
+constexpr uint32_t USBD_STARTUP_RETRY_BACKOFF_MS = 10UL;
 
 static_assert(USBD_INT_ENDEPOUT2_MASK == (1UL << 14),
               "nRF52840 ENDEPOUT2 interrupt position drifted");
@@ -321,6 +330,27 @@ public:
 
 private:
     const bool reenable_;
+};
+
+// Short core-state critical sections must also exclude SysTick because USB
+// startup is deliberately advanced there. Preserve the caller's PRIMASK so an
+// end()/detach() issued from an already-masked context never enables IRQs.
+class CoreInterruptLock {
+public:
+    CoreInterruptLock() {
+        asm volatile("mrs %0, primask" : "=r"(primask_) :: "memory");
+        asm volatile("cpsid i" ::: "memory");
+    }
+    ~CoreInterruptLock() {
+        if ((primask_ & 1UL) == 0UL) {
+            asm volatile("cpsie i" ::: "memory");
+        }
+    }
+    CoreInterruptLock(const CoreInterruptLock &) = delete;
+    CoreInterruptLock &operator=(const CoreInterruptLock &) = delete;
+
+private:
+    uint32_t primask_ = 0UL;
 };
 
 inline uint32_t taskStartEpinOffset(uint8_t endpoint) {
@@ -448,6 +478,14 @@ inline bool effectiveVbusDetected() {
     return vbusDetected() || usbVbusAssumedPresent();
 }
 
+inline bool hfclkRunning() {
+    return (reg32(CLOCK_BASE, CLOCK_HFCLKSTAT) & CLOCK_HFCLKSTAT_STATE) != 0UL;
+}
+
+inline bool deadlineReached(uint32_t now, uint32_t deadline) {
+    return static_cast<int32_t>(now - deadline) >= 0;
+}
+
 // nRF52840 POWER->USBREGSTATUS bit 1 = OUTPUTRDY (USB regulator stable).
 // VBUSDETECT must be asserted before USBD->ENABLE. ENABLE then starts the
 // dedicated regulator; OUTPUTRDY and controller READY must both be observed
@@ -512,34 +550,6 @@ inline void usbErrata171Second() {
         *reinterpret_cast<volatile uint32_t *>(0x4006EC14UL) = 0x00000000UL;
     }
 }
-
-// Spin up to ~100 ms (at 64 MHz, ~6 M cycles) waiting for a one-shot USB
-// power-state event. Used for both VBUS detection and OUTPUTRDY readiness;
-// the actual hardware transitions are sub-millisecond, but we want headroom
-// for any ramp-up / debouncing inside the regulator. Returns true on
-// observed transition, false on timeout.
-constexpr uint32_t USBD_POWER_WAIT_SPINS = 6000000UL;
-template <typename Pred>
-inline bool spinUntil(Pred pred) {
-    for (uint32_t spin = 0; spin < USBD_POWER_WAIT_SPINS; ++spin) {
-        if (pred()) {
-            return true;
-        }
-    }
-    return false;
-}
-
-inline bool ensureHfclk() {
-    reg32(CLOCK_BASE, CLOCK_EVENTS_HFCLKSTARTED) = 0UL;
-    reg32(CLOCK_BASE, CLOCK_TASKS_HFCLKSTART) = 1UL;
-    for (uint32_t spin = 0; spin < 200000UL; ++spin) {
-        if (reg32(CLOCK_BASE, CLOCK_EVENTS_HFCLKSTARTED) != 0UL) {
-            return true;
-        }
-    }
-    return false;
-}
-
 
 constexpr uint32_t USBD_BOOTLOADER_RESET_DISCONNECT_SPINS = 640000UL;
 
@@ -678,193 +688,247 @@ void NrfUsbdDriver::begin() {
         return;
     }
     startRequested_ = true;
-    if (enabled_ || startupInProgress_ || startupFaulted_) {
-        return;
-    }
-    // The nRF52840 product specification requires VBUS before ENABLE. Prove the
-    // selected board's VBUS contract (physical detect, or an explicit board
-    // profile assertion). Keep the request pending when that proof is absent;
-    // yield()-driven poll() retries after cable insertion instead of publishing
-    // a controller that never became READY.
-    if (!effectiveVbusDetected()) {
-        return;
-    }
-    startupInProgress_ = true;
+    serviceStartup();
+}
 
-    // A SoftDevice/UF2 bootloader may jump directly to the application while
-    // leaving USBD and its pullup enabled. Waiting before detaching keeps the
-    // bootloader identity electrically present, so Windows can carry the old
-    // control/bulk session into the application and expose a COM port whose
-    // transfers never complete. Detach first, then honor the physically tested
-    // 400 ms host handoff guard. A hardware-clean reset still needs this quiet
-    // interval because Windows may be retiring the preceding bootloader node.
+void NrfUsbdDriver::requestStartupAbort(bool terminal) {
     reg32(USBD_BASE, USBPULLUP) = 0UL;
     reg32(USBD_BASE, ENABLE) = 0UL;
-    // ENABLE readback remains Enabled until hardware has actually released the
-    // inherited session. The disconnect dwell starts only after that ownership
-    // boundary; otherwise a delayed disable can race the new enable.
-    if (!spinUntil([]() { return reg32(USBD_BASE, ENABLE) == 0UL; })) {
-        startupFaulted_ = true;
-        startupInProgress_ = false;
-        return;
-    }
-    delay(400);
-    if (!effectiveVbusDetected()) {
-        startupInProgress_ = false;
+    startupAbortTerminal_ = terminal;
+    startupDeadlineMillis_ = millis() + USBD_STARTUP_STAGE_TIMEOUT_MS;
+    startupPhase_ = StartupPhase::AbortDisable;
+}
+
+void NrfUsbdDriver::serviceStartup() {
+    const bool aborting = startupPhase_ == StartupPhase::AbortDisable;
+    if (enabled_ || startupFaulted_ || startupServicing_ ||
+        (!aborting && (!startRequested_ || !nrfUsbRuntimeEnabled()))) {
         return;
     }
 
-    diagResetAtUsbdBeginStage(1UL);
-    if (!ensureHfclk()) {
-        startupFaulted_ = true;
-        startupInProgress_ = false;
-        return;
-    }
-    if (!initDescriptors()) {
-        // Descriptor construction happens while USBD is still disabled. Keep
-        // the pull-up disconnected rather than exposing a truncated composite
-        // configuration that can poison the host's descriptor cache.
-        startupFaulted_ = true;
-        startupInProgress_ = false;
-        return;
-    }
-    diagResetAtUsbdBeginStage(2UL);
+    // serviceStartup() may be entered from foreground poll() and preempted by
+    // SysTick. The byte-sized guard makes the interrupt-side call a no-op until
+    // the foreground step has committed its next phase.
+    startupServicing_ = true;
+    const uint32_t now = millis();
 
-    // Enabling USBD starts the dedicated USB regulator. OUTPUTRDY must
-    // therefore be proved after ENABLE, along with controller READY, and
-    // before connecting the D+ pull-up.
-    diagResetAtUsbdBeginStage(3UL);
-
-    // Errata 187+171 wrap the ENABLE handshake (Nordic's nrfx_usbd applies
-    // both, in this nesting order: 187 outer, 171 inner). Both target the
-    // same trim block but at different flag offsets — 187 at 0x4006ED14
-    // with 0x3, 171 at 0x4006EC14 with 0xC0. The conditional reads of
-    // 0x4006EC00 keep them safe to call after the bootloader's nrfx_usbd
-    // has already primed the trim register.
-    usbErrata187First();
-    usbErrata171First();
-
-    // Abort an unacknowledged enable without ever publishing software READY.
-    // The hidden-register errata brackets may be closed only after ENABLE
-    // reads back Disabled. If readback itself fails, retain their ownership and
-    // make the driver terminal until chip reset; guessing at another enable
-    // would compound an already-unknown peripheral state.
-    auto abortEnable = [this](bool errataOpen, bool terminal) {
+    switch (startupPhase_) {
+    case StartupPhase::Idle:
+        // VBUS is a hard precondition for ENABLE on nRF52840. Retain the start
+        // request while disconnected; SysTick will notice insertion even if a
+        // sketch never calls yield().
+        if (!effectiveVbusDetected()) {
+            break;
+        }
+        startupInProgress_ = true;
+        startupErrataOpen_ = false;
         reg32(USBD_BASE, USBPULLUP) = 0UL;
         reg32(USBD_BASE, ENABLE) = 0UL;
-        const bool disabled = spinUntil([]() {
-            return reg32(USBD_BASE, ENABLE) == 0UL;
-        });
-        if (disabled && errataOpen) {
+        startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
+        startupPhase_ = StartupPhase::DisableInherited;
+        break;
+
+    case StartupPhase::DisableInherited:
+        // A bootloader can hand the peripheral over while its pull-up is still
+        // live. Prove ENABLE=0 before starting the host-disconnect dwell.
+        if (reg32(USBD_BASE, ENABLE) == 0UL) {
+            startupDeadlineMillis_ = now + USBD_HOST_HANDOFF_MS;
+            startupPhase_ = StartupPhase::HostHandoff;
+        } else if (deadlineReached(now, startupDeadlineMillis_)) {
+            requestStartupAbort(true);
+        }
+        break;
+
+    case StartupPhase::HostHandoff:
+        if (!effectiveVbusDetected()) {
+            startupInProgress_ = false;
+            startupPhase_ = StartupPhase::Idle;
+            break;
+        }
+        if (deadlineReached(now, startupDeadlineMillis_)) {
+            diagResetAtUsbdBeginStage(1UL);
+            reg32(CLOCK_BASE, CLOCK_EVENTS_HFCLKSTARTED) = 0UL;
+            reg32(CLOCK_BASE, CLOCK_TASKS_HFCLKSTART) = 1UL;
+            startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
+            startupPhase_ = StartupPhase::Hfclk;
+        }
+        break;
+
+    case StartupPhase::Hfclk:
+        if (!effectiveVbusDetected()) {
+            requestStartupAbort(false);
+            break;
+        }
+        if (reg32(CLOCK_BASE, CLOCK_EVENTS_HFCLKSTARTED) != 0UL || hfclkRunning()) {
+            if (!initDescriptors()) {
+                // Never expose a truncated composite configuration to the host.
+                requestStartupAbort(true);
+                break;
+            }
+            diagResetAtUsbdBeginStage(2UL);
+            diagResetAtUsbdBeginStage(3UL);
+            usbErrata187First();
+            usbErrata171First();
+            startupErrataOpen_ = true;
+            clearEvents();
+            reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
+            diagResetAtUsbdBeginStage(4UL);
+            startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
+            startupPhase_ = StartupPhase::Ready;
+        } else if (deadlineReached(now, startupDeadlineMillis_)) {
+            requestStartupAbort(true);
+        }
+        break;
+
+    case StartupPhase::Ready:
+        if ((reg32(USBD_BASE, EVENTCAUSE) & USBD_EVENTCAUSE_READY_MASK) != 0UL) {
+            reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_READY_MASK;
+            diagResetAtUsbdBeginStage(5UL);
             usbErrata171Second();
             usbErrata187Second();
+            startupErrataOpen_ = false;
+            startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
+            startupPhase_ = StartupPhase::OutputReady;
+        } else if (deadlineReached(now, startupDeadlineMillis_)) {
+            // One bounded, fully bracketed retry covers a bootloader handoff
+            // that left the controller between states. No retry is attempted
+            // after any endpoint or flash mutation.
+            reg32(USBD_BASE, USBPULLUP) = 0UL;
+            reg32(USBD_BASE, ENABLE) = 0UL;
+            startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
+            startupPhase_ = StartupPhase::RetryDisable;
         }
-        if (disabled) {
-            clearEvents();
+        break;
+
+    case StartupPhase::RetryDisable:
+        if (reg32(USBD_BASE, ENABLE) == 0UL) {
+            if (startupErrataOpen_) {
+                usbErrata171Second();
+                usbErrata187Second();
+                startupErrataOpen_ = false;
+            }
+            if (!effectiveVbusDetected()) {
+                requestStartupAbort(false);
+                break;
+            }
+            startupDeadlineMillis_ = now + USBD_STARTUP_RETRY_BACKOFF_MS;
+            startupPhase_ = StartupPhase::RetryBackoff;
+        } else if (deadlineReached(now, startupDeadlineMillis_)) {
+            requestStartupAbort(true);
         }
-        disableInterrupts();
-        enabled_ = false;
-        started_ = false;
-        ready_ = false;
-        configured_ = false;
-        suspended_ = false;
-        cdcActive_ = false;
-        startupFaulted_ = terminal;
-        startupInProgress_ = false;
-        resetConnectionState();
-    };
+        break;
 
-    clearEvents();
-    reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
-    diagResetAtUsbdBeginStage(4UL);
-
-    // Wait for the USBEVENT::READY event (EVENTCAUSE bit 11). This flag
-    // signals that the USBD peripheral's internal state machine has fully
-    // initialized after ENABLE=1 and that endpoint configuration writes
-    // are now safe.
-    auto waitUsbReadyEvent = []() -> bool {
-        return spinUntil([]() {
-            return (reg32(USBD_BASE, EVENTCAUSE) & USBD_EVENTCAUSE_READY_MASK) != 0UL;
-        });
-    };
-
-    bool readyObserved = waitUsbReadyEvent();
-    if (!readyObserved) {
-        // Serial DFU -> app transitions occasionally leave USBD between states;
-        // make one bounded, fully bracketed retry. Confirm Disabled before
-        // closing the first Errata 171/187 transaction, then open a fresh
-        // transaction for the second ENABLE. Do not repeatedly reset the
-        // controller or advertise a USB identity when either handshake fails.
-        reg32(USBD_BASE, USBPULLUP) = 0UL;
-        reg32(USBD_BASE, ENABLE) = 0UL;
-        if (!spinUntil([]() { return reg32(USBD_BASE, ENABLE) == 0UL; })) {
-            abortEnable(true, true);
-            return;
-        }
-        usbErrata171Second();
-        usbErrata187Second();
+    case StartupPhase::RetryBackoff:
         if (!effectiveVbusDetected()) {
-            abortEnable(false, false);
-            return;
+            requestStartupAbort(false);
+            break;
         }
-        for (volatile uint32_t n = 0UL; n < 640000UL; ++n) {
-            (void)n;
+        if (deadlineReached(now, startupDeadlineMillis_)) {
+            usbErrata187First();
+            usbErrata171First();
+            startupErrataOpen_ = true;
+            clearEvents();
+            reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
+            startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
+            startupPhase_ = StartupPhase::RetryReady;
         }
-        usbErrata187First();
-        usbErrata171First();
-        clearEvents();
-        reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
-        readyObserved = waitUsbReadyEvent();
+        break;
+
+    case StartupPhase::RetryReady:
+        if ((reg32(USBD_BASE, EVENTCAUSE) & USBD_EVENTCAUSE_READY_MASK) != 0UL) {
+            reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_READY_MASK;
+            diagResetAtUsbdBeginStage(5UL);
+            usbErrata171Second();
+            usbErrata187Second();
+            startupErrataOpen_ = false;
+            startupDeadlineMillis_ = now + USBD_STARTUP_STAGE_TIMEOUT_MS;
+            startupPhase_ = StartupPhase::OutputReady;
+        } else if (deadlineReached(now, startupDeadlineMillis_)) {
+            requestStartupAbort(effectiveVbusDetected());
+        }
+        break;
+
+    case StartupPhase::OutputReady:
+        if (!effectiveVbusDetected()) {
+            requestStartupAbort(false);
+            break;
+        }
+        if (usbPwrRdy()) {
+            enabled_ = true;
+            started_ = true;
+            attached_ = true;
+            resetConnectionState();
+            ready_ = true;
+            enableInterrupts();
+            enablePullup(true);
+            configStartMillis_ = now;
+            startupInProgress_ = false;
+            startupPhase_ = StartupPhase::Idle;
+            diagResetAtUsbdBeginStage(6UL);
+        } else if (deadlineReached(now, startupDeadlineMillis_)) {
+            requestStartupAbort(true);
+        }
+        break;
+
+    case StartupPhase::AbortDisable:
+        if (reg32(USBD_BASE, ENABLE) == 0UL) {
+            if (startupErrataOpen_) {
+                usbErrata171Second();
+                usbErrata187Second();
+                startupErrataOpen_ = false;
+            }
+            clearEvents();
+            disableInterrupts();
+            enabled_ = false;
+            started_ = false;
+            ready_ = false;
+            configured_ = false;
+            suspended_ = false;
+            cdcActive_ = false;
+            resetConnectionState();
+            startupFaulted_ = startupAbortTerminal_;
+            startupInProgress_ = false;
+            startupPhase_ = startupFaulted_ ? StartupPhase::Faulted : StartupPhase::Idle;
+        } else if (deadlineReached(now, startupDeadlineMillis_)) {
+            // Do not close errata brackets while ENABLE ownership is unknown.
+            // A chip reset is the only safe recovery boundary.
+            startupFaulted_ = true;
+            startupInProgress_ = false;
+            startupPhase_ = StartupPhase::Faulted;
+        }
+        break;
+
+    case StartupPhase::Faulted:
+        break;
     }
-    if (!readyObserved) {
-        abortEnable(true, effectiveVbusDetected());
-        return;
-    }
-    reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_READY_MASK;
-    diagResetAtUsbdBeginStage(5UL);
 
-    // Reverse-order wrap exit: 171 inner end, then 187 outer end.
-    usbErrata171Second();
-    usbErrata187Second();
-
-    // Re-check OUTPUTRDY after ENABLE. Bootloader hand-off can leave the
-    // regulator transition in flight; this keeps the first pullup / EP
-    // activity from racing the analog block.
-    if (!spinUntil([]() { return usbPwrRdy(); })) {
-        abortEnable(false, effectiveVbusDetected());
-        return;
-    }
-
-    enabled_ = true;
-    started_ = true;
-    attached_ = true;
-    resetConnectionState();
-    // The USBD peripheral completed its post-ENABLE READY handshake above, so it
-    // is ready for endpoint activity regardless of bus state. Set it here (and
-    // only clear it in end()), because the one-shot EVENTCAUSE.READY event was
-    // already consumed during the ENABLE handshake and won't fire again.
-    ready_ = true;
-    // Enable the USBD interrupt only now that all device state is initialized,
-    // and immediately before engaging the pullup that makes the host begin
-    // enumeration. From here on, enumeration is serviced in the ISR and is
-    // therefore immune to whatever the user sketch's loop() does.
-    enableInterrupts();
-    enablePullup(attached_ && effectiveVbusDetected());
-    configStartMillis_ = millis();
-    startupInProgress_ = false;
-
-    diagResetAtUsbdBeginStage(6UL);
+    startupServicing_ = false;
 }
 
 void NrfUsbdDriver::end() {
+    CoreInterruptLock lock;
     enablePullup(false);
     disableInterrupts();
     reg32(USBD_BASE, ENABLE) = 0UL;
+    const bool startupNeedsAbort = startupInProgress_ || startupErrataOpen_ ||
+        (startupPhase_ != StartupPhase::Idle && startupPhase_ != StartupPhase::Faulted);
     enabled_ = false;
     started_ = false;
     attached_ = false;
     startRequested_ = false;
-    startupInProgress_ = false;
+    if (startupNeedsAbort) {
+        // Finish the disable acknowledgement and close any open errata brackets
+        // from SysTick. Silently discarding that ownership state can poison the
+        // next begin() after Serial.end()/detach() races startup.
+        startupAbortTerminal_ = false;
+        startupDeadlineMillis_ = millis() + USBD_STARTUP_STAGE_TIMEOUT_MS;
+        startupPhase_ = StartupPhase::AbortDisable;
+    } else {
+        startupInProgress_ = false;
+        startupAbortTerminal_ = false;
+        startupPhase_ = startupFaulted_ ? StartupPhase::Faulted : StartupPhase::Idle;
+        startupDeadlineMillis_ = 0UL;
+    }
     ready_ = false;
     resetConnectionState();
     pendingControlOut_ = ControlOutTransfer::None;
@@ -903,9 +967,14 @@ void NrfUsbdDriver::attach() {
 }
 
 void NrfUsbdDriver::detach() {
+    CoreInterruptLock lock;
     startRequested_ = false;
     if (!enabled_) {
         attached_ = false;
+        if (startupInProgress_ || startupErrataOpen_ ||
+            (startupPhase_ != StartupPhase::Idle && startupPhase_ != StartupPhase::Faulted)) {
+            requestStartupAbort(false);
+        }
         return;
     }
 
@@ -1051,6 +1120,10 @@ void NrfUsbdDriver::processBusState(bool hasVbus) {
             started_ = false;
             ready_ = false;
             startupInProgress_ = false;
+            startupErrataOpen_ = false;
+            startupAbortTerminal_ = false;
+            startupPhase_ = StartupPhase::Idle;
+            startupDeadlineMillis_ = 0UL;
             resetConnectionState();
         }
         return;
@@ -1368,7 +1441,14 @@ void NrfUsbdDriver::serviceDetachTimer() {
 }
 
 void NrfUsbdDriver::serviceTick() {
-    if (!enabled_ || stubHalted_) {
+    // USB startup/restart must not depend on loop()/yield(). Advance exactly one
+    // bounded state-machine step per tick so cable insertion recovers even
+    // while application code continuously occupies the foreground.
+    if (!enabled_) {
+        serviceStartup();
+        return;
+    }
+    if (stubHalted_) {
         return;
     }
     serviceTouchTimer();

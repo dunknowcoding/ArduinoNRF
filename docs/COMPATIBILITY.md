@@ -30,11 +30,21 @@ sudo usermod -a -G dialout $USER     # then log out / log back in
 # 3. Use Arduino IDE or arduino-cli normally; upload + debug just work.
 ```
 
-The Linux/macOS path follows the **same proven Adafruit cross-platform method** (a single `adafruit-nrfutil` recipe, IDE-driven 1200-bps touch), so it's expected to work — but the verification cycle for this revision ran on Windows only. If you exercise it on Linux/macOS, please open an issue with the result.
+The Linux/macOS path performs one wrapper-owned 1200-bps/DTR gesture, resolves
+the resulting bootloader endpoint by stable USB serial/topology and maintenance
+interface, and then invokes `adafruit-nrfutil` without its own touch step. That
+host logic is locally tested; physical Linux/macOS parity remains unverified in
+this revision.
 
 ### Why the Windows path is a separate, larger script
 
-`upload.ps1` exists because Windows' `usbser.sys` has clone-board quirks (same-PID app/bootloader ambiguity, stale handles after touch, queued writes replayed on next open). It also owns the Windows UF2 path so it can match a mounted drive back to the selected upload COM instead of trusting a shared volume label. On Linux/macOS the kernel CDC ACM driver is well-behaved, so the simple `adafruit-nrfutil --touch 1200 dfu serial` flow that Adafruit uses is sufficient and that's what `upload.py` does. The PowerShell features specific to Windows (concurrency mutex, bridge-yield IPC, stable-ID UF2 matching, fast-path PnP cache) are not currently replicated in the Python path.
+`upload.ps1` exists because Windows' `usbser.sys` has clone-board quirks
+(same-PID app/bootloader ambiguity, stale handles after touch, queued writes
+replayed on next open). It also owns the Windows UF2 path so it can match a
+mounted drive back to the selected upload COM instead of trusting a shared
+volume label. `upload.py` now applies the same fail-closed identity principle on
+Linux/macOS, using the platform's USB topology inventory; Windows-only bridge
+IPC and PnP-cache optimizations remain in PowerShell.
 
 ## 🧩 Real-board compatibility matrix
 

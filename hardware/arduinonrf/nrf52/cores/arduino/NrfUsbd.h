@@ -127,6 +127,20 @@ public:
     void pumpRx();
 
 private:
+    enum class StartupPhase : uint8_t {
+        Idle,
+        DisableInherited,
+        HostHandoff,
+        Hfclk,
+        Ready,
+        RetryDisable,
+        RetryBackoff,
+        RetryReady,
+        OutputReady,
+        AbortDisable,
+        Faulted,
+    };
+
     enum class ControlOutTransfer : uint8_t {
         None,
         ServiceLineCoding,
@@ -184,6 +198,8 @@ private:
     void updateSerialState(bool userPort);
     void serviceTouchTimer();
     void serviceDetachTimer();
+    void serviceStartup();
+    void requestStartupAbort(bool terminal);
     volatile bool enabled_ = false;
     volatile bool started_ = false;
     volatile bool attached_ = false;
@@ -195,6 +211,11 @@ private:
     // can make a host-visible node that never completes control transfers.
     // A chip reset is the next safe peripheral-ownership boundary.
     volatile bool startupFaulted_ = false;
+    volatile bool startupServicing_ = false;
+    volatile bool startupErrataOpen_ = false;
+    volatile bool startupAbortTerminal_ = false;
+    volatile StartupPhase startupPhase_ = StartupPhase::Idle;
+    volatile uint32_t startupDeadlineMillis_ = 0UL;
     volatile bool configured_ = false;
     volatile bool suspended_ = false;
     volatile bool dtr_ = false;

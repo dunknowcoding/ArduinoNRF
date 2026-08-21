@@ -8,8 +8,9 @@
 // handshake, VBUS/OUTPUTRDY sequencing, suspend/resume, and the 1200-bps-touch
 // upload handoff). It is NOT TinyUSB and shares no code with it: enumeration is
 // serviced from the USBD ISR so it keeps running no matter what the user
-// sketch's setup()/loop() does, and the same routines are re-entrant from the
-// foreground poll() path used by yield().
+// sketch's setup()/loop() does. Controller startup/restart is a nonblocking
+// state machine advanced by SysTick as well as foreground yield()/poll(), so a
+// busy sketch cannot prevent VBUS insertion from restoring enumeration.
 //
 // The implementation lives in NrfUsbd.{h,cpp} (device core), NrfUsbSerial.cpp
 // (user CDC), and NrfServiceSerial.cpp (maintenance/upload CDC). This header is
