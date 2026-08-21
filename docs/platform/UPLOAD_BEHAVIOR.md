@@ -82,9 +82,11 @@ choices because it has no native USB upload path in this package.
   bound and returns no candidates on provider failure; it never falls into the
   unbounded `Get-PnpDevice` walk. The UF2 evidence observed during touch is
   reused instead of rediscovering the same volume before transfer.
-- A temporarily absent Windows interface-parent property is not cached as a
-  negative identity. The bounded resolver retries it after composite
-  enumeration progresses; only a nonempty proved parent mapping is cached.
+- Windows interface-parent attribution joins the MI child's embedded parent
+  prefix to the composite instance's `Enum\USB` `ParentIdPrefix`; it does not
+  call the unbounded PnP property provider. A temporarily absent mapping is not
+  cached as a negative identity, so later bounded discovery can observe the
+  completed composite; only a nonempty unique mapping is cached.
 - When a UF2 volume is visible, `upload.ps1` reads `INFO_UF2.TXT` and uses the
   `SoftDevice` field to infer the mounted layout (`0x1000`, `0x26000`, or
   `0x27000`). If that layout conflicts with the app start used by the selected

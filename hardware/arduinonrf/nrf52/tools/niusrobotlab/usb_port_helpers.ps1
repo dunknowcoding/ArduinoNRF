@@ -270,11 +270,11 @@ function Get-UsbInterfaceParentDeviceInstanceId {
         return $null
     }
 
-    # Get-PnpDeviceProperty is ~2.3 s PER call on a host with many USB devices,
-    # and this parent lookup is hit once per interface on every enumeration pass
-    # (multiple boards x several poll loops = tens of calls = the bulk of a slow
-    # upload). The InstanceId -> parent mapping is immutable for a given device
-    # instance, so memoize it: the first lookup pays the cost, the rest are free.
+    # Resolve the composite parent from Enum\USB itself. The MI child instance
+    # embeds a parent prefix, and the matching composite instance publishes the
+    # same prefix as ParentIdPrefix. This exact registry join avoids the
+    # multi-second, unbounded Get-PnpDeviceProperty provider call while retaining
+    # stable-id attribution across sibling interfaces.
     $key = $PnpInstanceId.Trim().ToUpperInvariant()
     # StrictMode-safe: reading an unset $script: var throws, so probe with Test-Path first.
     if (-not (Test-Path 'variable:script:NiusUsbParentCache')) { $script:NiusUsbParentCache = @{} }
@@ -283,13 +283,51 @@ function Get-UsbInterfaceParentDeviceInstanceId {
     }
 
     $result = $null
+    $usbRoot = $null
+    $familyRoot = $null
     try {
-        $parent = Get-PnpDeviceProperty -InstanceId $PnpInstanceId -KeyName 'DEVPKEY_Device_Parent' -ErrorAction Stop | Select-Object -First 1
-        if ($parent -and $parent.PSObject.Properties['Data']) {
-            $result = [string]$parent.Data
+        if ($key -notmatch '^USB\\(?<family>VID_[0-9A-F]{4}&PID_[0-9A-F]{4})&MI_[0-9A-F]{2}\\') {
+            return $null
+        }
+        $family = $matches['family'].ToUpperInvariant()
+        $parentPrefix = Get-UsbInterfaceParentInstancePrefix -PnpInstanceId $key
+        if ([string]::IsNullOrWhiteSpace($parentPrefix)) {
+            return $null
+        }
+        $parentPrefix = $parentPrefix.TrimEnd('&').ToUpperInvariant()
+
+        $usbRoot = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Enum\USB')
+        if ($null -eq $usbRoot) { return $null }
+        $familyRoot = $usbRoot.OpenSubKey($family)
+        if ($null -eq $familyRoot) { return $null }
+
+        $matchedStable = $null
+        foreach ($stableName in $familyRoot.GetSubKeyNames()) {
+            $instance = $null
+            try {
+                $instance = $familyRoot.OpenSubKey($stableName)
+                if ($null -eq $instance) { continue }
+                $candidatePrefix = ([string]$instance.GetValue('ParentIdPrefix', '')).Trim().ToUpperInvariant()
+                if ($candidatePrefix -ne $parentPrefix) { continue }
+                if ($null -ne $matchedStable) {
+                    # Duplicate parent-prefix attribution is not a usable identity.
+                    return $null
+                }
+                $matchedStable = $stableName.Trim().ToUpperInvariant()
+            }
+            finally {
+                if ($null -ne $instance) { $instance.Dispose() }
+            }
+        }
+        if (-not [string]::IsNullOrWhiteSpace($matchedStable)) {
+            $result = 'USB\{0}\{1}' -f $family, $matchedStable
         }
     }
     catch {
+    }
+    finally {
+        if ($null -ne $familyRoot) { $familyRoot.Dispose() }
+        if ($null -ne $usbRoot) { $usbRoot.Dispose() }
     }
 
     # A missing parent during composite enumeration is transient. Caching null
