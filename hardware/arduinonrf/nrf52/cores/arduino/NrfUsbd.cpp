@@ -436,10 +436,10 @@ inline bool effectiveVbusDetected() {
 }
 
 // nRF52840 POWER->USBREGSTATUS bit 1 = OUTPUTRDY (USB regulator stable).
-// Both VBUSDETECT and OUTPUTRDY must be asserted before USBD->ENABLE will
-// behave correctly; the bootloader's hand-off via SYSRESETREQ does not
-// reset POWER, but a full chip reset (e.g. after WDT_RESET or after the
-// adafruit-nrfutil DFU "DETACH" command power-cycles internal blocks) does.
+// VBUSDETECT must be asserted before USBD->ENABLE. ENABLE then starts the
+// dedicated regulator; OUTPUTRDY and controller READY must both be observed
+// before the pull-up can be connected. A bootloader hand-off may inherit any
+// intermediate state, so neither acknowledgement is inferred from it.
 constexpr uint32_t POWER_USBREGSTATUS_OUTPUTRDY = (1UL << 1);
 
 inline bool usbPwrRdy() {
@@ -516,14 +516,15 @@ inline bool spinUntil(Pred pred) {
     return false;
 }
 
-inline void ensureHfclk() {
+inline bool ensureHfclk() {
     reg32(CLOCK_BASE, CLOCK_EVENTS_HFCLKSTARTED) = 0UL;
     reg32(CLOCK_BASE, CLOCK_TASKS_HFCLKSTART) = 1UL;
     for (uint32_t spin = 0; spin < 200000UL; ++spin) {
         if (reg32(CLOCK_BASE, CLOCK_EVENTS_HFCLKSTARTED) != 0UL) {
-            break;
+            return true;
         }
     }
+    return false;
 }
 
 
@@ -660,9 +661,22 @@ void nrfUsbdClearPollTrace() {
 }
 
 void NrfUsbdDriver::begin() {
-    if (!nrfUsbRuntimeEnabled() || enabled_) {
+    if (!nrfUsbRuntimeEnabled()) {
         return;
     }
+    startRequested_ = true;
+    if (enabled_ || startupInProgress_ || startupFaulted_) {
+        return;
+    }
+    // The nRF52840 product specification requires VBUS before ENABLE. Prove the
+    // selected board's VBUS contract (physical detect, or an explicit board
+    // profile assertion). Keep the request pending when that proof is absent;
+    // yield()-driven poll() retries after cable insertion instead of publishing
+    // a controller that never became READY.
+    if (!effectiveVbusDetected()) {
+        return;
+    }
+    startupInProgress_ = true;
 
     // A SoftDevice/UF2 bootloader may jump directly to the application while
     // leaving USBD and its pullup enabled. Waiting before detaching keeps the
@@ -673,28 +687,32 @@ void NrfUsbdDriver::begin() {
     // interval because Windows may be retiring the preceding bootloader node.
     reg32(USBD_BASE, USBPULLUP) = 0UL;
     reg32(USBD_BASE, ENABLE) = 0UL;
+    // ENABLE readback remains Enabled until hardware has actually released the
+    // inherited session. The disconnect dwell starts only after that ownership
+    // boundary; otherwise a delayed disable can race the new enable.
+    if (!spinUntil([]() { return reg32(USBD_BASE, ENABLE) == 0UL; })) {
+        startupFaulted_ = true;
+        startupInProgress_ = false;
+        return;
+    }
     delay(400);
+    if (!effectiveVbusDetected()) {
+        startupInProgress_ = false;
+        return;
+    }
 
     diagResetAtUsbdBeginStage(1UL);
-    ensureHfclk();
+    if (!ensureHfclk()) {
+        startupFaulted_ = true;
+        startupInProgress_ = false;
+        return;
+    }
     initDescriptors();
     diagResetAtUsbdBeginStage(2UL);
 
-    // Wait for VBUS detection. After a chip-reset hand-off from the
-    // bootloader the regulator state may take a moment to come back; we
-    // give it ~100 ms before giving up. If VBUS is genuinely absent (the
-    // user is running off battery), we still proceed with USBD bring-up so
-    // that the board enumerates the moment a cable is connected — the
-    // pullup will be engaged later by poll() when vbusDetected() flips.
-    const bool vbusPresentAtBoot = spinUntil([]() { return effectiveVbusDetected(); });
-
-    // POWER->USBREGSTATUS.OUTPUTRDY must be asserted before ENABLE=1 for the
-    // analog USB front-end to come up reliably. This is especially important
-    // on bootloader -> application hand-off where VBUS is already present but
-    // the regulator can lag the reset by a short window.
-    if (vbusPresentAtBoot) {
-        spinUntil([]() { return usbPwrRdy(); });
-    }
+    // Enabling USBD starts the dedicated USB regulator. OUTPUTRDY must
+    // therefore be proved after ENABLE, along with controller READY, and
+    // before connecting the D+ pull-up.
     diagResetAtUsbdBeginStage(3UL);
 
     // Errata 187+171 wrap the ENABLE handshake (Nordic's nrfx_usbd applies
@@ -705,6 +723,36 @@ void NrfUsbdDriver::begin() {
     // has already primed the trim register.
     usbErrata187First();
     usbErrata171First();
+
+    // Abort an unacknowledged enable without ever publishing software READY.
+    // The hidden-register errata brackets may be closed only after ENABLE
+    // reads back Disabled. If readback itself fails, retain their ownership and
+    // make the driver terminal until chip reset; guessing at another enable
+    // would compound an already-unknown peripheral state.
+    auto abortEnable = [this](bool errataOpen, bool terminal) {
+        reg32(USBD_BASE, USBPULLUP) = 0UL;
+        reg32(USBD_BASE, ENABLE) = 0UL;
+        const bool disabled = spinUntil([]() {
+            return reg32(USBD_BASE, ENABLE) == 0UL;
+        });
+        if (disabled && errataOpen) {
+            usbErrata171Second();
+            usbErrata187Second();
+        }
+        if (disabled) {
+            clearEvents();
+        }
+        disableInterrupts();
+        enabled_ = false;
+        started_ = false;
+        ready_ = false;
+        configured_ = false;
+        suspended_ = false;
+        cdcActive_ = false;
+        startupFaulted_ = terminal;
+        startupInProgress_ = false;
+        resetConnectionState();
+    };
 
     clearEvents();
     reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
@@ -723,18 +771,35 @@ void NrfUsbdDriver::begin() {
     bool readyObserved = waitUsbReadyEvent();
     if (!readyObserved) {
         // Serial DFU -> app transitions occasionally leave USBD between states;
-        // a single pullup-disable/re-ENABLE cycle recovers READY without
-        // touching errata trim registers again.
+        // make one bounded, fully bracketed retry. Confirm Disabled before
+        // closing the first Errata 171/187 transaction, then open a fresh
+        // transaction for the second ENABLE. Do not repeatedly reset the
+        // controller or advertise a USB identity when either handshake fails.
         reg32(USBD_BASE, USBPULLUP) = 0UL;
         reg32(USBD_BASE, ENABLE) = 0UL;
+        if (!spinUntil([]() { return reg32(USBD_BASE, ENABLE) == 0UL; })) {
+            abortEnable(true, true);
+            return;
+        }
+        usbErrata171Second();
+        usbErrata187Second();
+        if (!effectiveVbusDetected()) {
+            abortEnable(false, false);
+            return;
+        }
         for (volatile uint32_t n = 0UL; n < 640000UL; ++n) {
             (void)n;
         }
+        usbErrata187First();
+        usbErrata171First();
         clearEvents();
         reg32(USBD_BASE, ENABLE) = USBD_ENABLE_VALUE;
         readyObserved = waitUsbReadyEvent();
     }
-    (void)readyObserved;
+    if (!readyObserved) {
+        abortEnable(true, effectiveVbusDetected());
+        return;
+    }
     reg32(USBD_BASE, EVENTCAUSE) = USBD_EVENTCAUSE_READY_MASK;
     diagResetAtUsbdBeginStage(5UL);
 
@@ -745,7 +810,10 @@ void NrfUsbdDriver::begin() {
     // Re-check OUTPUTRDY after ENABLE. Bootloader hand-off can leave the
     // regulator transition in flight; this keeps the first pullup / EP
     // activity from racing the analog block.
-    spinUntil([]() { return usbPwrRdy(); });
+    if (!spinUntil([]() { return usbPwrRdy(); })) {
+        abortEnable(false, effectiveVbusDetected());
+        return;
+    }
 
     enabled_ = true;
     started_ = true;
@@ -763,6 +831,7 @@ void NrfUsbdDriver::begin() {
     enableInterrupts();
     enablePullup(attached_ && effectiveVbusDetected());
     configStartMillis_ = millis();
+    startupInProgress_ = false;
 
     diagResetAtUsbdBeginStage(6UL);
 }
@@ -774,6 +843,8 @@ void NrfUsbdDriver::end() {
     enabled_ = false;
     started_ = false;
     attached_ = false;
+    startRequested_ = false;
+    startupInProgress_ = false;
     ready_ = false;
     resetConnectionState();
     pendingControlOut_ = ControlOutTransfer::None;
@@ -798,6 +869,7 @@ void NrfUsbdDriver::attach() {
     if (!nrfUsbRuntimeEnabled()) {
         return;
     }
+    startRequested_ = true;
     if (!enabled_) {
         begin();
         return;
@@ -811,6 +883,7 @@ void NrfUsbdDriver::attach() {
 }
 
 void NrfUsbdDriver::detach() {
+    startRequested_ = false;
     if (!enabled_) {
         attached_ = false;
         return;
@@ -824,6 +897,9 @@ void NrfUsbdDriver::detach() {
 
 void NrfUsbdDriver::poll() {
     if (!enabled_) {
+        if (startRequested_) {
+            begin();
+        }
         return;
     }
 

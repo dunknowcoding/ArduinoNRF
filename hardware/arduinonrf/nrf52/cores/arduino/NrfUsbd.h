@@ -180,6 +180,13 @@ private:
     volatile bool started_ = false;
     volatile bool attached_ = false;
     volatile bool ready_ = false;
+    volatile bool startRequested_ = false;
+    volatile bool startupInProgress_ = false;
+    // A failed ENABLE/READY ownership transition is terminal for this object.
+    // Re-entering the same half-initialized controller from attach()/begin()
+    // can make a host-visible node that never completes control transfers.
+    // A chip reset is the next safe peripheral-ownership boundary.
+    volatile bool startupFaulted_ = false;
     volatile bool configured_ = false;
     volatile bool suspended_ = false;
     volatile bool dtr_ = false;

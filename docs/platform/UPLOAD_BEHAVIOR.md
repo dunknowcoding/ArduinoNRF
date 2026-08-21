@@ -72,10 +72,11 @@ choices because it has no native USB upload path in this package.
   safely relocate an already-linked image.
 - Before any Windows USB discovery or touch, the uploader independently validates every
   Intel HEX record checksum and length, rejects overlaps or records after EOF,
-  and requires the actual vector table, reset entry, start address, and highest
-  programmed byte to fit the selected application range. The same validated
-  image is used for serial DFU and UF2; recipe metadata alone is not accepted as
-  proof that the compiled image is safe to transfer.
+  and requires the actual vector table, Thumb reset entry, initial stack pointer,
+  start address, and highest programmed byte to fit the selected target's exact
+  flash and SRAM limits. The same validated image is used for serial DFU, UF2,
+  OpenOCD, and J-Link application upload; recipe metadata alone is not accepted
+  as proof that the compiled image is safe to transfer.
 - **Layout guard** (`layout` failure): compares the IDE `Bootloader / DFU` app
   start (`0x1000` / `0x26000` / `0x27000`) against `INFO_UF2.TXT` on the
   selected board's UF2 drive (matched by stable USB identity, not drive letter).
@@ -137,7 +138,14 @@ choices because it has no native USB upload path in this package.
   silently invoking an incompatible protocol; use an explicit supported layout
   or SWD until those distinct transports have their own verified wrappers.
 - The script validates the actual Intel HEX framing, vector table, link address,
-  and maximum application range before resolving or touching a USB device.
+  target-specific SRAM ceiling, and maximum application range before resolving
+  or touching a USB device.
+- A distinct bootloader VID/PID that is already selected is not sent another
+  1200-bps reset. Same-identity runtime/bootloader layouts retain the guarded
+  touch because endpoint identity alone cannot prove their current role.
+- OpenOCD application upload uses the same preflight contract, a finite
+  invocation-owned process group, and protocol `verify` before reporting
+  success.
 - On a dual-CDC runtime, a selected user endpoint is remapped to interface zero
   only when Linux sysfs or the macOS IOUSB registry proves it is a sibling on
   the same USB composite. Ambiguous mappings fail closed.

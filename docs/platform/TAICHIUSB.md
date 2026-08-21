@@ -16,6 +16,22 @@ single-cable USB GDB stub.
   handshake, `VBUS`/`OUTPUTRDY` sequencing, bootloader→app hand-off recovery, and
   the dual-CDC (user + maintenance) composite device.
 
+## Startup and enumeration contract
+
+TaichiUSB follows the nRF52840 power-up order: prove the selected board's VBUS
+contract, disconnect and confirm the previous controller is disabled, hold the
+host detach interval, enable the controller inside fresh Errata 187/171 brackets,
+observe both controller `READY` and regulator `OUTPUTRDY`, and only then connect
+D+. A cable removed during that sequence leaves startup pending for a later
+`yield()`/`poll()` retry when the board exposes physical VBUS detection.
+
+The stack makes one bounded, fully bracketed retry when the controller does not
+acknowledge `READY`. If the second attempt, HFCLK, regulator, or disable readback
+still fails while VBUS remains present, the driver stays detached until chip
+reset. It never reports `ready()` or exposes a pull-up merely because a wait
+expired. Once this startup contract completes, EP0 and CDC enumeration progress
+in the USBD interrupt and do not depend on the sketch loop.
+
 ## Source layout
 
 | File | Role |
