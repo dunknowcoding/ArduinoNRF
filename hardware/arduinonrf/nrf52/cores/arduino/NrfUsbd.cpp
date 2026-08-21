@@ -699,6 +699,7 @@ void NrfUsbdDriver::begin() {
     if (!nrfUsbRuntimeEnabled()) {
         return;
     }
+    CoreInterruptLock lock;
     startRequested_ = true;
     serviceStartup();
 }
@@ -965,9 +966,18 @@ void NrfUsbdDriver::attach() {
     if (!nrfUsbRuntimeEnabled()) {
         return;
     }
+    CoreInterruptLock lock;
     startRequested_ = true;
     if (!enabled_) {
-        begin();
+        serviceStartup();
+        return;
+    }
+
+    // A live attach is idempotent. Resetting configuration or endpoint state
+    // here leaves the pull-up asserted, so the host has no disconnect event
+    // with which to rebuild the state that the device just discarded.
+    if (attached_) {
+        enablePullup(vbusDetected());
         return;
     }
 

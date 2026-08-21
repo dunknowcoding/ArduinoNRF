@@ -39,6 +39,10 @@ reset. It never reports `ready()` or exposes a pull-up merely because a wait
 expired. Once this startup contract completes, EP0 and CDC enumeration progress
 in the USBD interrupt and do not depend on the sketch loop.
 
+`begin()` and an already-live `attach()` are idempotent and serialized against
+the SysTick startup service. Repeating either call cannot silently clear an
+active USB configuration while the pull-up remains visible to the host.
+
 ## Source layout
 
 | File | Role |
