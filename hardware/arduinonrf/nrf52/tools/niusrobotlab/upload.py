@@ -59,13 +59,39 @@ def parse_bounded_float(value: str, name: str, minimum: float, maximum: float) -
     return parsed
 
 
+def terminate_owned_process_group(process: subprocess.Popen) -> None:
+    """Boundedly terminate one owned POSIX process group without masking failure."""
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except BaseException:
+        pass
+    try:
+        process.wait(timeout=1.0)
+    except BaseException:
+        pass
+    # The direct child may exit on SIGTERM while a grandchild that inherited
+    # the tty ignores it. Kill the still-owned group unconditionally; ESRCH
+    # means the whole group already ended.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except BaseException:
+        pass
+    try:
+        process.wait(timeout=1.0)
+    except BaseException:
+        # A process stuck in an uninterruptible kernel wait must not turn user
+        # cancellation into an unbounded cleanup wait or replace its exception.
+        pass
+
+
 def run_owned_command(argv, timeout_s: float) -> int:
-    """Run one uploader child and contain its complete process group on timeout.
+    """Run one uploader child and contain its complete process group on failure.
 
     The Linux/macOS uploader must never leave a converter or transport helper
     holding the selected tty after its bounded parent command has failed.  A new
-    session gives this invocation an exact ownership boundary; timeout cleanup
-    signals only that group and preserves the original TimeoutExpired failure.
+    session gives this invocation an exact ownership boundary. Timeout, user
+    cancellation, and unexpected wait failures all clean only that group and
+    preserve the original exception.
     """
     if os.name != "posix":
         # This file is not the Windows upload route.  Keeping the direct fallback
@@ -76,23 +102,8 @@ def run_owned_command(argv, timeout_s: float) -> int:
     process = subprocess.Popen(argv, start_new_session=True, close_fds=True)
     try:
         return process.wait(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=1.0)
-        except subprocess.TimeoutExpired:
-            pass
-        # The direct child may exit on SIGTERM while a grandchild that inherited
-        # the tty ignores it.  Kill the still-owned group unconditionally; ESRCH
-        # means the whole group already ended.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.wait()
+    except BaseException:
+        terminate_owned_process_group(process)
         raise
 
 
@@ -936,6 +947,24 @@ def main() -> int:
                 pass
             else:
                 raise AssertionError("owned command timeout was not enforced")
+            previous_handler = signal.getsignal(signal.SIGALRM)
+
+            def interrupt_wait(_signum, _frame):
+                raise KeyboardInterrupt
+
+            signal.signal(signal.SIGALRM, interrupt_wait)
+            signal.setitimer(signal.ITIMER_REAL, 0.05)
+            try:
+                run_owned_command(
+                    [sys.executable, "-c", "import time; time.sleep(10)"], 10.0
+                )
+            except KeyboardInterrupt:
+                pass
+            else:
+                raise AssertionError("owned command cancellation was not propagated")
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0.0)
+                signal.signal(signal.SIGALRM, previous_handler)
         print("upload.py selftest: PASS")
         return 0
 

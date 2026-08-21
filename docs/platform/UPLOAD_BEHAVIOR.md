@@ -231,7 +231,10 @@ choices because it has no native USB upload path in this package.
   touch because endpoint identity alone cannot prove their current role.
 - OpenOCD application upload uses the same preflight contract, a finite
   invocation-owned process group, and protocol `verify` before reporting
-  success.
+  success. Package generation and serial DFU use that same ownership boundary;
+  timeout, `Ctrl+C`, or an unexpected wait failure boundedly terminates and reaps
+  only the invocation's complete process group before preserving the original
+  failure.
 - On a dual-CDC runtime, a selected user endpoint is remapped to interface zero
   only when Linux sysfs or the macOS IOUSB registry proves it is a sibling on
   the same USB composite. Ambiguous mappings fail closed.
