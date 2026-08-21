@@ -1635,8 +1635,7 @@ void NrfUsbdDriver::serviceTick() {
 bool NrfUsbdDriver::userConnected() const {
     return enabled_ && attached_ && ready_ && configured_ && !suspended_ &&
         vbusDetected() && userPortEnabled() && userDtr_ &&
-        userDtrAssertedMillis_ != 0UL &&
-        (millis() - userDtrAssertedMillis_) >= USBD_CDC_OPEN_SETTLE_MS;
+        elapsedAtLeast(millis(), userDtrAssertedMillis_, USBD_CDC_OPEN_SETTLE_MS);
 }
 
 bool NrfUsbdDriver::configured() const {
@@ -2237,8 +2236,8 @@ void NrfUsbdDriver::serviceDataIn(bool userPort) {
         userPort ? userDataInFlightLength_ : dataInFlightLength_;
     const bool dtr = userPort ? userDtr_ : dtr_;
     const uint32_t dtrAssertedMillis = userPort ? userDtrAssertedMillis_ : dtrAssertedMillis_;
-    if (!dtr || dtrAssertedMillis == 0UL ||
-        (millis() - dtrAssertedMillis) < USBD_CDC_OPEN_SETTLE_MS) {
+    if (!dtr ||
+        !elapsedAtLeast(millis(), dtrAssertedMillis, USBD_CDC_OPEN_SETTLE_MS)) {
         return;
     }
     if (!configured_ || dataInFlight || (userPort ? userTxPending() : txPending()) == 0U) {

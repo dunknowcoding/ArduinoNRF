@@ -103,10 +103,11 @@ setter that could counterfeit either state. In particular, application code cann
 at 1200 baud; only a validated host `SET_LINE_CODING` followed by the admitted
 DTR transition can request bootloader entry.
 
-CDC-open, configuration-age, recent-1200, and touch-confirm timers do not use a
-zero timestamp as an ownership sentinel. Their accompanying session/validity
-state remains authoritative, so the normal `millis()` wrap boundary cannot make
-a live CDC session appear unopened or suppress an otherwise valid upload touch.
+CDC-open, transmit-settle, configuration-age, recent-1200, and touch-confirm
+timers do not use a zero timestamp as an ownership sentinel. Their accompanying
+session/validity state remains authoritative, so the normal `millis()` wrap
+boundary cannot make either CDC session appear unopened, block its transmit
+path, or suppress an otherwise valid upload touch.
 
 Pluggable modules are admitted transactionally. Registration first rejects an
 endpoint/interface allocation beyond the nRF52840 controller limits. During
