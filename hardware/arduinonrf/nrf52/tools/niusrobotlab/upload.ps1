@@ -371,15 +371,56 @@ function Format-ExitCode {
     return [string]$Code
 }
 
+function ConvertTo-WindowsCommandLineArgument {
+    param(
+        [AllowEmptyString()]
+        [string]$Argument = ''
+    )
+
+    # ProcessStartInfo.Arguments is one Windows command-line string rather than
+    # an argv array. Follow the CommandLineToArgvW/CRT escaping rules so paths
+    # ending in a backslash and arguments containing quotes cannot merge with
+    # the next uploader option.
+    if ($Argument.Length -eq 0) {
+        return '""'
+    }
+    if ($Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+
+    $escaped = New-Object System.Text.StringBuilder
+    [void]$escaped.Append('"')
+    $backslashes = 0
+    foreach ($character in $Argument.ToCharArray()) {
+        if ($character -eq '\') {
+            $backslashes += 1
+            continue
+        }
+        if ($character -eq '"') {
+            [void]$escaped.Append(('\' * (($backslashes * 2) + 1)))
+            [void]$escaped.Append('"')
+            $backslashes = 0
+            continue
+        }
+        if ($backslashes -gt 0) {
+            [void]$escaped.Append(('\' * $backslashes))
+            $backslashes = 0
+        }
+        [void]$escaped.Append($character)
+    }
+    if ($backslashes -gt 0) {
+        # Backslashes before the closing quote must be doubled.
+        [void]$escaped.Append(('\' * ($backslashes * 2)))
+    }
+    [void]$escaped.Append('"')
+    return $escaped.ToString()
+}
+
 function ConvertTo-ProcessArguments {
     param([string[]]$Arguments)
 
     return (($Arguments | ForEach-Object {
-        if ($_ -match '[\s"]') {
-            '"{0}"' -f ($_.Replace('"', '\"'))
-        } else {
-            $_
-        }
+        ConvertTo-WindowsCommandLineArgument -Argument $_
     }) -join ' ')
 }
 
@@ -1793,18 +1834,26 @@ function Invoke-Uf2Deploy {
         [string]$DrivePath
     )
 
-    Write-NiusTiming 'UF2 conversion start'
-    $uf2Path = New-Uf2Artifact `
-        -HexPath $HexPath `
-        -FamilyId $FamilyId `
-        -AppStart $AppStart `
-        -MaxSize $MaxSize `
-        -RamEnd $RamEnd
-    Write-NiusTiming 'UF2 conversion done'
-    $destination = Join-Path $DrivePath ([System.IO.Path]::GetFileName($uf2Path))
-    Write-NiusTiming 'UF2 copy start'
-    Copy-Item -LiteralPath $uf2Path -Destination $destination -Force
-    Write-NiusTiming 'UF2 copy returned'
+    $uf2Path = $null
+    try {
+        Write-NiusTiming 'UF2 conversion start'
+        $uf2Path = New-Uf2Artifact `
+            -HexPath $HexPath `
+            -FamilyId $FamilyId `
+            -AppStart $AppStart `
+            -MaxSize $MaxSize `
+            -RamEnd $RamEnd
+        Write-NiusTiming 'UF2 conversion done'
+        $destination = Join-Path $DrivePath ([System.IO.Path]::GetFileName($uf2Path))
+        Write-NiusTiming 'UF2 copy start'
+        Copy-Item -LiteralPath $uf2Path -Destination $destination -Force
+        Write-NiusTiming 'UF2 copy returned'
+    }
+    finally {
+        if (-not [string]::IsNullOrWhiteSpace($uf2Path) -and [System.IO.File]::Exists($uf2Path)) {
+            try { [System.IO.File]::Delete($uf2Path) } catch { }
+        }
+    }
 }
 
 function Test-NiusResolvedPathUnderConda {
@@ -2046,54 +2095,64 @@ function Invoke-AdafruitDfuDeploy {
 
     Stop-NiusLingeringAdafruitNrfutil -Phase dfu
 
-    $zipPath = [System.IO.Path]::ChangeExtension($HexPath, '.zip')
-
-    $resolvedSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq -DevType $DevType
-
-    $genpkgArgs = @('dfu', 'genpkg', '--dev-type', $DevType)
-    if (-not [string]::IsNullOrWhiteSpace($resolvedSdReq)) {
-        $genpkgArgs += @('--sd-req', $resolvedSdReq)
-    }
-    $genpkgArgs += @('--application', $HexPath, $zipPath)
-
-    Write-NiusTiming 'deploy-enter (genpkg start)'
-    if ($script:NiusVerbose) { Write-Stage -Percent 55 -Label 'Generating Adafruit DFU package (genpkg)' }
-    Invoke-CommandChecked -Exe $tool -Arguments $genpkgArgs -FailureKind 'adafruit-genpkg' -ProgressPercent 60 -ProgressLabel 'genpkg synthesizing DFU package'
-
-    if (-not (Test-Path -LiteralPath $zipPath)) {
-        throw ('adafruit-nrfutil genpkg did not produce expected output: {0}' -f $zipPath)
-    }
-    Write-NiusTiming 'genpkg-done'
+    # Package generation is invocation-owned. Do not overwrite or leave a ZIP
+    # beside the build HEX: a later upload must never consume a stale package.
+    $zipPath = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ('arduinonrf-dfu-{0}.zip' -f ([Guid]::NewGuid().ToString('n')))
 
     try {
-        $serialReadyMs = 12000
-        if (-not [string]::IsNullOrWhiteSpace($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS)) {
-            $sr = -1
-            if ([int]::TryParse($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS, [ref]$sr) -and $sr -gt 0) {
-                $serialReadyMs = $sr
-            }
+        $resolvedSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq -DevType $DevType
+
+        $genpkgArgs = @('dfu', 'genpkg', '--dev-type', $DevType)
+        if (-not [string]::IsNullOrWhiteSpace($resolvedSdReq)) {
+            $genpkgArgs += @('--sd-req', $resolvedSdReq)
         }
-        Wait-SerialPortReady -PortName $Port -Purpose 'Adafruit DFU control port' -TimeoutMs $serialReadyMs
-    } catch {
-        Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output $_.Exception.Message -Exe $tool)
+        $genpkgArgs += @('--application', $HexPath, $zipPath)
+
+        Write-NiusTiming 'deploy-enter (genpkg start)'
+        if ($script:NiusVerbose) { Write-Stage -Percent 55 -Label 'Generating Adafruit DFU package (genpkg)' }
+        Invoke-CommandChecked -Exe $tool -Arguments $genpkgArgs -FailureKind 'adafruit-genpkg' -ProgressPercent 60 -ProgressLabel 'genpkg synthesizing DFU package'
+
+        if (-not (Test-Path -LiteralPath $zipPath)) {
+            throw ('adafruit-nrfutil genpkg did not produce expected output: {0}' -f $zipPath)
+        }
+        Write-NiusTiming 'genpkg-done'
+
+        try {
+            $serialReadyMs = 12000
+            if (-not [string]::IsNullOrWhiteSpace($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS)) {
+                $sr = -1
+                if ([int]::TryParse($env:NIUS_ADAFRUIT_WAIT_SERIAL_READY_MS, [ref]$sr) -and $sr -gt 0) {
+                    $serialReadyMs = $sr
+                }
+            }
+            Wait-SerialPortReady -PortName $Port -Purpose 'Adafruit DFU control port' -TimeoutMs $serialReadyMs
+        } catch {
+            Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 1 -Output $_.Exception.Message -Exe $tool)
+        }
+        Write-NiusTiming 'serial-ready'
+
+        # Derive the real firmware size so the progress bar can track transferred
+        # bytes instead of guessing. adafruit-nrfutil sends one HCI data frame per
+        # DFU_PACKET_MAX_SIZE (512 B) chunk and echoes one '#' per frame, so
+        # frames = ceil(bytes / 512). A '#' count / frame count gives true %.
+        $fw = Get-NiusDfuFirmwareInfo -ZipPath $zipPath
+        $totalFrames = if ($fw) { [int]$fw.Frames } else { 0 }
+        $fwBytes = if ($fw) { [int]$fw.Bytes } else { 0 }
+
+        # Visible transfer start: byte bar begins at 0% here, then advances as
+        # nrfutil streams '#' frame markers (see Invoke-CommandChecked byteProgress).
+        $startDetail = if ($fwBytes -gt 0) { '0.0/{0} KB' -f [Math]::Round($fwBytes / 1024.0, 1) } else { '' }
+        Write-Stage -Percent 0 -Label 'Uploading' -Detail $startDetail
+        Write-NiusTiming 'transfer-start'
+        Invoke-CommandChecked -Exe $tool -Arguments @('--verbose', 'dfu', 'serial', '-pkg', $zipPath, '-p', $Port, '-b', [string]$BaudRate, '-sb') -FailureKind 'adafruit-dfu' -ProgressPercent 90 -ProgressLabel 'Uploading' -TotalFrames $totalFrames -FirmwareBytes $fwBytes
+        Write-NiusTiming 'transfer-done'
     }
-    Write-NiusTiming 'serial-ready'
-
-    # Derive the real firmware size so the progress bar can track transferred
-    # bytes instead of guessing. adafruit-nrfutil sends one HCI data frame per
-    # DFU_PACKET_MAX_SIZE (512 B) chunk and echoes one '#' per frame, so
-    # frames = ceil(bytes / 512). A '#' count / frame count gives true %.
-    $fw = Get-NiusDfuFirmwareInfo -ZipPath $zipPath
-    $totalFrames = if ($fw) { [int]$fw.Frames } else { 0 }
-    $fwBytes = if ($fw) { [int]$fw.Bytes } else { 0 }
-
-    # Visible transfer start: byte bar begins at 0% here, then advances as
-    # nrfutil streams '#' frame markers (see Invoke-CommandChecked byteProgress).
-    $startDetail = if ($fwBytes -gt 0) { '0.0/{0} KB' -f [Math]::Round($fwBytes / 1024.0, 1) } else { '' }
-    Write-Stage -Percent 0 -Label 'Uploading' -Detail $startDetail
-    Write-NiusTiming 'transfer-start'
-    Invoke-CommandChecked -Exe $tool -Arguments @('--verbose', 'dfu', 'serial', '-pkg', $zipPath, '-p', $Port, '-b', [string]$BaudRate, '-sb') -FailureKind 'adafruit-dfu' -ProgressPercent 90 -ProgressLabel 'Uploading' -TotalFrames $totalFrames -FirmwareBytes $fwBytes
-    Write-NiusTiming 'transfer-done'
+    finally {
+        if ([System.IO.File]::Exists($zipPath)) {
+            try { [System.IO.File]::Delete($zipPath) } catch { }
+        }
+    }
 }
 
 function Get-NiusDfuFirmwareInfo {
@@ -2214,6 +2273,41 @@ function Invoke-CommandChecked {
         if (-not [string]::IsNullOrWhiteSpace($override)) {
             $parsedTimeout = -1
             if ([int]::TryParse($override, [ref]$parsedTimeout)) {
+                if ($parsedTimeout -eq 0) {
+                    $configuredTimeoutMs = 0
+                }
+                elseif ($parsedTimeout -gt 0) {
+                    $configuredTimeoutMs = $parsedTimeout
+                }
+            }
+        }
+        if ($configuredTimeoutMs -gt 0) {
+            $deadline = (Get-Date).AddMilliseconds($configuredTimeoutMs)
+        }
+    }
+    elseif ($FailureKind -eq 'openocd') {
+        $configuredTimeoutMs = 120000
+        $override = $env:NIUS_OPENOCD_PROCESS_TIMEOUT_MS
+        if (-not [string]::IsNullOrWhiteSpace($override)) {
+            $parsedTimeout = -1
+            if ([int]::TryParse($override, [ref]$parsedTimeout)) {
+                if ($parsedTimeout -eq 0) {
+                    $configuredTimeoutMs = 0
+                }
+                elseif ($parsedTimeout -gt 0) {
+                    $configuredTimeoutMs = $parsedTimeout
+                }
+            }
+        }
+        if ($configuredTimeoutMs -gt 0) {
+            $deadline = (Get-Date).AddMilliseconds($configuredTimeoutMs)
+        }
+    }
+    elseif ($FailureKind -eq 'uf2-convert' -or $FailureKind -eq 'image-preflight') {
+        $configuredTimeoutMs = 60000
+        if (-not [string]::IsNullOrWhiteSpace($env:NIUS_LOCAL_TOOL_PROCESS_TIMEOUT_MS)) {
+            $parsedTimeout = -1
+            if ([int]::TryParse($env:NIUS_LOCAL_TOOL_PROCESS_TIMEOUT_MS, [ref]$parsedTimeout)) {
                 if ($parsedTimeout -eq 0) {
                     $configuredTimeoutMs = 0
                 }
@@ -2403,6 +2497,11 @@ function Invoke-CommandChecked {
         $output = (($stdoutText, (@($streamSync.Lines) -join [Environment]::NewLine)) -join [Environment]::NewLine).Trim()
     }
     else {
+        # Drain both redirected pipes while the tool runs. Waiting for process
+        # exit before ReadToEnd can deadlock when verbose OpenOCD, J-Link, or
+        # package generation fills an OS pipe buffer.
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
         while ($true) {
             if ($process.WaitForExit(120)) {
                 break
@@ -2425,8 +2524,23 @@ function Invoke-CommandChecked {
             $tick += 1
         }
 
-        $stdout = $process.StandardOutput.ReadToEnd()
-        $stderr = $process.StandardError.ReadToEnd()
+        if ($timedOut) {
+            # Output-drain faults must not replace the primary process timeout.
+            $stdout = ''
+            $stderr = ''
+            try {
+                if ($stdoutTask.Wait(2000)) { $stdout = $stdoutTask.GetAwaiter().GetResult() }
+            }
+            catch { }
+            try {
+                if ($stderrTask.Wait(2000)) { $stderr = $stderrTask.GetAwaiter().GetResult() }
+            }
+            catch { }
+        }
+        else {
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+        }
         $output = (($stdout, $stderr) -join [Environment]::NewLine).Trim()
     }
 
@@ -2447,7 +2561,15 @@ function Invoke-CommandChecked {
     }
 
     if ($timedOut) {
-        $label = if ($FailureKind -eq 'adafruit-genpkg') { 'adafruit-nrfutil genpkg' } else { 'adafruit-nrfutil serial DFU' }
+        $label = switch ($FailureKind) {
+            'adafruit-genpkg' { 'adafruit-nrfutil genpkg' }
+            'adafruit-dfu' { 'adafruit-nrfutil serial DFU' }
+            'jlink' { 'SEGGER J-Link' }
+            'openocd' { 'OpenOCD' }
+            'uf2-convert' { 'UF2 converter' }
+            'image-preflight' { 'application image preflight' }
+            default { $FailureKind }
+        }
         $summaryOutput = if ([string]::IsNullOrWhiteSpace($output)) {
             ('{0} exceeded process timeout ({1} ms); killed to release COM port.' -f $label, $configuredTimeoutMs)
         }
@@ -2800,7 +2922,10 @@ function New-Uf2Artifact {
     $python = Resolve-PythonLaunch
     $converter = Join-Path $PSScriptRoot 'build_uf2.py'
     Assert-ToolExists -Path $converter
-    $uf2Path = [System.IO.Path]::ChangeExtension($HexPath, '.uf2')
+    # Keep converter output invocation-owned. A failed conversion/copy must not
+    # leave a stale sibling of the compiled HEX that a later upload can reuse.
+    $uf2Path = Join-Path ([System.IO.Path]::GetTempPath()) `
+        ('arduinonrf-app-{0}.uf2' -f ([Guid]::NewGuid().ToString('n')))
     $args = @()
     $args += $python.PrefixArgs
     $args += @(
@@ -2812,8 +2937,16 @@ function New-Uf2Artifact {
         '--max-size', $MaxSize,
         '--ram-end', $RamEnd
     )
-    Invoke-CommandChecked -Exe $python.Exe -Arguments $args -FailureKind 'uf2-convert'
-    return $uf2Path
+    try {
+        Invoke-CommandChecked -Exe $python.Exe -Arguments $args -FailureKind 'uf2-convert'
+        return $uf2Path
+    }
+    catch {
+        if ([System.IO.File]::Exists($uf2Path)) {
+            try { [System.IO.File]::Delete($uf2Path) } catch { }
+        }
+        throw
+    }
 }
 
 function Assert-NiusApplicationImage {

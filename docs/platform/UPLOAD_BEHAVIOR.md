@@ -1,6 +1,6 @@
 # Upload Behavior
 
-Date: 2026-08-17
+Date: 2026-08-21
 
 This document records the current upload truth exposed by the package. It does not claim that every clone board is fully verified.
 
@@ -126,6 +126,19 @@ choices because it has no native USB upload path in this package.
 - Pre-existing `adafruit-nrfutil` processes are never killed or treated as owned
   merely because their parent exited. The wrapper fails before touching USB; timeout
   cleanup may terminate only the exact child process tree launched by this upload.
+- Every Windows child tool is launched with CRT-correct argument escaping, including
+  empty arguments, embedded quotes, and paths whose final character is a backslash.
+  Verbose stdout and stderr are drained concurrently so a full pipe cannot freeze an
+  otherwise completed OpenOCD, J-Link, package-generation, or conversion process.
+- OpenOCD and J-Link have finite 120-second process deadlines; local image-preflight
+  and UF2-conversion helpers have a finite 60-second deadline. Advanced diagnostic
+  sessions may override these with `NIUS_OPENOCD_PROCESS_TIMEOUT_MS`,
+  `NIUS_JLINK_PROCESS_TIMEOUT_MS`, or `NIUS_LOCAL_TOOL_PROCESS_TIMEOUT_MS` (`0`
+  disables that one deadline). Timeout cleanup remains limited to the child tree
+  launched by the current upload.
+- Generated serial-DFU ZIP and UF2 files are unique, invocation-owned temporary
+  artifacts and are removed on both success and failure. The wrapper never reuses a
+  package left by an earlier incomplete upload.
 
 ## Linux and macOS wrapper behavior
 
