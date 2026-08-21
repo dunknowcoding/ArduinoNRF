@@ -1960,7 +1960,8 @@ function Stop-NiusLingeringAdafruitNrfutil {
     # after intentionally handing work to a child. Only Stop-NiusProcessTree may
     # terminate the exact PID tree started by this uploader. Any pre-existing
     # nrfutil is an external owner and fails closed without touching it.
-    $processes = @(Get-CimInstance Win32_Process -Filter "Name='adafruit-nrfutil.exe'" -ErrorAction SilentlyContinue)
+    $processes = @(Get-CimInstance Win32_Process -Filter "Name='adafruit-nrfutil.exe'" `
+            -OperationTimeoutSec 2 -ErrorAction SilentlyContinue)
     $lingering = @($processes)
     if ($lingering.Count -eq 0) {
         return
@@ -1992,7 +1993,10 @@ function Stop-NiusProcessTree {
         return
     }
 
-    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    # Process discovery is diagnostic/cleanup plumbing, not authority to wait
+    # forever. If CIM cannot return promptly, the exact root PID is still killed
+    # below; only descendant enumeration is omitted.
+    $all = @(Get-CimInstance Win32_Process -OperationTimeoutSec 2 -ErrorAction SilentlyContinue)
     $childrenByParent = @{}
     foreach ($proc in $all) {
         $parentId = [int]$proc.ParentProcessId

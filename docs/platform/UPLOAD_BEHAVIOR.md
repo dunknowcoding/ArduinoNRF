@@ -198,7 +198,9 @@ choices because it has no native USB upload path in this package.
   child tree launched by the current upload. The same PID-scoped cleanup runs
   from the command's `finally` boundary on cancellation or an unexpected host
   exception, so those exits cannot strand a launched helper on a COM/probe
-  endpoint.
+  endpoint. Process-tree discovery itself has a two-second CIM operation bound;
+  if descendant enumeration is unavailable, cleanup still targets the exact
+  launched root PID rather than blocking indefinitely or widening ownership.
 - Windows always takes both a selected-target upload lock and a host-wide DFU
   serialization lock before any target-visible action. Their wait intervals may
   be tuned only within 0-10 seconds and 0-600 seconds respectively; lock creation
