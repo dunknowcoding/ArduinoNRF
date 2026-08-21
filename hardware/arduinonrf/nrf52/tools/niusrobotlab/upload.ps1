@@ -3486,11 +3486,7 @@ function Invoke-Touch1200Transition {
     # ArduinoNRF bootloader-entry contract. Never issue a second inferred pulse
     # when host evidence is delayed: the first request may already be executing,
     # and a new COM with the same name may belong to the bootloader session.
-    $touchModes = @(
-        [pscustomobject]@{
-            Label = 'single 1200 touch'
-        }
-    )
+    $touchMode = [pscustomobject]@{ Label = 'single 1200 touch' }
 
     # Per-mode transition-detect timeout. A successful touch normally produces
     # scoped bootloader evidence quickly.
@@ -3518,8 +3514,7 @@ function Invoke-Touch1200Transition {
         ((Normalize-NiusUsbId -Value $BootloaderVid) -eq (Normalize-NiusUsbId -Value $RuntimeVid)) -and
         ((Normalize-NiusUsbId -Value $BootloaderPid) -eq (Normalize-NiusUsbId -Value $RuntimePid))
 
-    foreach ($touchMode in $touchModes) {
-        Write-NiusTiming ('touch mode start: {0}' -f $touchMode.Label)
+    Write-NiusTiming ('touch mode start: {0}' -f $touchMode.Label)
         $touchAttempt = Touch-SerialPort1200 `
             -PortName $PortName `
             -ObservePostTouchResetCycle:$sameUsbIdentity
@@ -3534,8 +3529,8 @@ function Invoke-Touch1200Transition {
                 }
             }
             # A disappearing USB CDC can leave SerialPort.Dispose blocked even
-            # though the DTR touch reached the MCU. Before issuing a duplicate
-            # pulse, check the exact board scope for the transition produced by
+            # though the DTR touch reached the MCU. Before declaring failure,
+            # check the exact board scope for the transition produced by
             # that timed-out helper.
             if ($hasBootloaderIdentity) {
                 try {
@@ -3564,7 +3559,13 @@ function Invoke-Touch1200Transition {
                 catch {
                 }
             }
-            continue
+            return [pscustomobject]@{
+                Triggered = $false
+                Candidate = $touchMode
+                Transition = $null
+                FailureKind = $touchAttempt.FailureKind
+                Error = $touchAttempt.Error
+            }
         }
 
         if ($touchAttempt.SawResetCycle -and
@@ -3636,8 +3637,6 @@ function Invoke-Touch1200Transition {
                 Write-NiusDetail ('[warn] {0} on {1} did not produce a confirmed bootloader transition: {2}' -f $touchMode.Label, $PortName, $_.Exception.Message) -ForegroundColor DarkYellow
             }
         }
-    }
-
     return [pscustomobject]@{
         Triggered = $false
         Candidate = $null
