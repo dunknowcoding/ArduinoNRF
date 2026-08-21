@@ -3455,65 +3455,17 @@ public static class NiusNativeSerialTouch {
         }
     }
 
-    $pulseBudgetMs = 2000
-    $pulseBudgetOverride = $env:NIUS_TOUCH_PULSE_BUDGET_MS
-    if (-not [string]::IsNullOrWhiteSpace($pulseBudgetOverride)) {
-        $parsedBudget = -1
-        if ([int]::TryParse($pulseBudgetOverride, [ref]$parsedBudget) -and
-            $parsedBudget -ge 2000 -and $parsedBudget -le 10000) {
-            $pulseBudgetMs = $parsedBudget
-        }
+    Write-NiusDetail ('[nius] One 1200bps touch attempt on {0} (bounded open timeout)...' -f $PortName) -ForegroundColor DarkGray
+    $touchPulse = Invoke-TouchPulse -BaudRate 1200
+    if (-not $touchPulse.Triggered) {
+        Write-NiusDetail ('[warn] 1200bps touch failed on {0}: {1}' -f $PortName, $touchPulse.Error)
+        return $touchPulse
     }
-    Write-NiusDetail ('[nius] 1200bps touch on {0} (~{1}ms pulse budget; Open timeout via NIUS_TOUCH_SERIAL_OPEN_TIMEOUT_MS)...' -f $PortName, $pulseBudgetMs) -ForegroundColor DarkGray
-
-    $pulseLogPhase = ''
-    $pulseLogUtc = [datetime]::UtcNow.AddMinutes(-5)
-
-    $deadline = (Get-Date).AddMilliseconds($pulseBudgetMs)
-    $lastError = ''
-    $lastHeartbeat = Get-Date
-    while ((Get-Date) -lt $deadline) {
-        if (((Get-Date) - $lastHeartbeat).TotalMilliseconds -ge 2000) {
-            $remainSec = [int][Math]::Max(0, [Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds))
-            Write-NiusDetail ('[nius]   touch still running on {0} (~{1}s left)...' -f $PortName, $remainSec) -ForegroundColor DarkGray
-            $lastHeartbeat = Get-Date
-        }
-
-        try {
-            $utcPulse = [datetime]::UtcNow
-            $phase1200Changed = ($pulseLogPhase -ne '1200')
-            $pulseElapsedMs = ($utcPulse - $pulseLogUtc).TotalMilliseconds
-            if ($phase1200Changed -or $pulseElapsedMs -ge 3500) {
-                Write-NiusDetail ('[nius]   touch pulse 1200 on {0}...' -f $PortName) -ForegroundColor DarkGray
-                $pulseLogPhase = '1200'
-                $pulseLogUtc = $utcPulse
-            }
-            $touchPulse = Invoke-TouchPulse -BaudRate 1200
-            if (-not $touchPulse.Triggered) {
-                if ($touchPulse.FailureKind -eq 'busy') {
-                    return $touchPulse
-                }
-                throw '1200 phase failed'
-            }
-            if ($ObservePostTouchResetCycle) {
-                $touchPulse.SawResetCycle = Watch-SerialPortPostTouchResetCycle -PortName $PortName
-            }
-            Start-Sleep -Milliseconds 200
-            return $touchPulse
-        }
-        catch {
-            $lastError = $_.Exception.Message
-            Start-Sleep -Milliseconds 450
-        }
+    if ($ObservePostTouchResetCycle) {
+        $touchPulse.SawResetCycle = Watch-SerialPortPostTouchResetCycle -PortName $PortName
     }
-
-    Write-NiusDetail ('[warn] 1200bps touch skipped on {0}: {1}' -f $PortName, $lastError)
-    return [pscustomobject]@{
-        Triggered = $false
-        SawResetCycle = $false
-        FailureKind = 'touch-failed'
-        Error = $lastError
-    }
+    Start-Sleep -Milliseconds 200
+    return $touchPulse
 }
 
 function Invoke-Touch1200Transition {

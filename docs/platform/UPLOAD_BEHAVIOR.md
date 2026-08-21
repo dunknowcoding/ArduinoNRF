@@ -185,9 +185,12 @@ choices because it has no native USB upload path in this package.
   serialization lock before any target-visible action. Their wait intervals may
   be tuned only within 0-10 seconds and 0-600 seconds respectively; lock creation
   or acquisition failure is terminal before USB is touched.
-- Touch/open/transition/settle tuning is finite and range-checked. The uploader
+- Open/transition/settle tuning is finite and range-checked. The uploader
   always uses identity-aware adaptive settlement; a caller cannot replace it with
   an unbounded or blind fixed sleep.
+- Each upload invocation makes at most one 1200-bps/DTR touch attempt. A helper
+  timeout, partial host result, or lost confirmation is terminal rather than a
+  reason to pulse a board that may already be resetting.
 - Generated serial-DFU ZIP and UF2 files are unique, invocation-owned temporary
   artifacts and are removed on both success and failure. The wrapper never reuses a
   package left by an earlier incomplete upload.
