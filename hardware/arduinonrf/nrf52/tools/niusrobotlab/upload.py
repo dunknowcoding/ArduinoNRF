@@ -283,6 +283,23 @@ def advance_runtime_stability(ready: bool, now: float, ready_since, stable_s: fl
     return started, now - started >= stable_s
 
 
+def effective_touch_baud(
+    requested: int,
+    endpoint_vid: int,
+    endpoint_pid: int,
+    boot_vid: int,
+    boot_pid: int,
+    runtime_vid: int,
+    runtime_pid: int,
+) -> int:
+    """Skip 1200 touch when a distinct bootloader endpoint is already selected."""
+    boot_identity = (boot_vid, boot_pid)
+    runtime_identity = (runtime_vid, runtime_pid)
+    if boot_identity != runtime_identity and (endpoint_vid, endpoint_pid) == boot_identity:
+        return 0
+    return requested
+
+
 def runtime_endpoint_ready(candidates) -> bool:
     """Require the maintenance CDC when interface metadata is available.
 
@@ -352,7 +369,7 @@ def capture_target_identity(
     boot_pid: int,
     runtime_vid: int,
     runtime_pid: int,
-) -> tuple[str, str]:
+) -> tuple[str, str, int, int]:
     allowed = {(boot_vid, boot_pid), (runtime_vid, runtime_pid)}
     if sys.platform.startswith("linux"):
         identity = linux_tty_usb_identity(port)
@@ -368,7 +385,7 @@ def capture_target_identity(
             )
         if not identity[2] and not identity[5]:
             fail("selected serial port has no stable USB topology or serial identity", code=4)
-        return identity[2], identity[5]
+        return identity[2], identity[5], identity[0], identity[1]
     if sys.platform == "darwin":
         matches = [d for d in mac_serial_devices()
                    if same_mac_serial_endpoint(d[3], port)]
@@ -386,7 +403,7 @@ def capture_target_identity(
             )
         if not matches[0][2] and not matches[0][5]:
             fail("selected serial endpoint has no stable USB topology or serial identity", code=4)
-        return matches[0][2], matches[0][5]
+        return matches[0][2], matches[0][5], matches[0][0], matches[0][1]
     fail("unsupported host for identity-verified serial DFU: " + sys.platform, code=4)
 
 
@@ -470,6 +487,15 @@ def main() -> int:
         assert parse_usb_id("0xffff") == 0xFFFF
         assert parse_bounded_int("1200", "touch baud", 0, 4_000_000) == 1200
         assert parse_bounded_float("0.3", "stable duration", 0.0, 5.0) == 0.3
+        assert effective_touch_baud(
+            1_200, 0x239A, 0x00B3, 0x239A, 0x00B3, 0x239A, 0x00B4
+        ) == 0
+        assert effective_touch_baud(
+            1_200, 0x239A, 0x00B4, 0x239A, 0x00B3, 0x239A, 0x00B4
+        ) == 1_200
+        assert effective_touch_baud(
+            1_200, 0x239A, 0x00B3, 0x239A, 0x00B3, 0x239A, 0x00B3
+        ) == 1_200
         for rejected in ("nan", "inf", "-1"):
             try:
                 parse_bounded_float(rejected, "timeout", 0.1, 600.0)
@@ -483,6 +509,25 @@ def main() -> int:
             pass
         else:
             raise AssertionError("oversized USB identity accepted")
+        valid_52833 = (
+            (0x2002_0000).to_bytes(4, "little")
+            + (0x0000_1009).to_bytes(4, "little")
+            + b"\x00"
+        )
+        validate_application_layout([(0x1000, valid_52833)], 0x1000, 0x1000, 0x2002_0000)
+        invalid_52833 = (
+            (0x2004_0000).to_bytes(4, "little")
+            + (0x0000_1009).to_bytes(4, "little")
+            + b"\x00"
+        )
+        try:
+            validate_application_layout(
+                [(0x1000, invalid_52833)], 0x1000, 0x1000, 0x2002_0000
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("nRF52840 stack ceiling accepted for an nRF52833 target")
         if os.name == "posix":
             lock_id = "upload-selftest-" + str(os.getpid())
             with exclusive_target_lock(lock_id):
@@ -518,6 +563,7 @@ def main() -> int:
     )
     ap.add_argument("--app-start", required=True, help="required application vector address")
     ap.add_argument("--max-size", required=True, help="maximum application bytes from --app-start")
+    ap.add_argument("--ram-end", required=True, help="exclusive upper SRAM address for the selected target")
     ap.add_argument("--runtime-timeout", default="30", help="seconds to wait for identity-verified application USB")
     ap.add_argument("--runtime-stable-ms", default="300", help="continuous milliseconds the same application USB identity must remain present")
     ap.add_argument("--sd-req", default="0xFFFE", help="adafruit-nrfutil genpkg --sd-req (SoftDevice req hash; 0xFFFE = wildcard)")
@@ -560,10 +606,13 @@ def main() -> int:
         runtime_pid = parse_usb_id(args.runtime_pid)
         app_start = int(args.app_start, 0)
         max_size = int(args.max_size, 0)
+        ram_end = int(args.ram_end, 0)
         if not 0 <= app_start <= 0xFFFF_FFFF or not 1 <= max_size <= 0x1_0000_0000:
             raise ValueError("invalid application range")
         if app_start + max_size > 0x1_0000_0000:
             raise ValueError("application range exceeds the 32-bit address space")
+        if not 0x2000_0000 < ram_end <= 0x2004_0000:
+            raise ValueError("invalid target SRAM end")
         runtime_timeout = parse_bounded_float(
             args.runtime_timeout, "runtime timeout", 0.1, 600.0
         )
@@ -583,7 +632,7 @@ def main() -> int:
         fail("input hex not found: " + args.hex)
     try:
         validate_application_layout(
-            parse_hex_segments(Path(args.hex)), app_start, max_size
+            parse_hex_segments(Path(args.hex)), app_start, max_size, ram_end
         )
     except (OSError, ValueError) as error:
         fail("application image preflight failed: " + str(error), code=2)
@@ -598,7 +647,7 @@ def main() -> int:
             code=3,
         )
 
-    target_serial, target_stable_id = capture_target_identity(
+    target_serial, target_stable_id, _, _ = capture_target_identity(
         args.port, boot_vid, boot_pid, runtime_vid, runtime_pid
     )
     control_port = resolve_service_serial_port(
@@ -617,7 +666,7 @@ def main() -> int:
         # Identity discovery happens before the lock only to derive its stable key.
         # Re-prove the selected endpoint after acquiring ownership so a detach,
         # renumber, or peer replacement in that window cannot redirect the transfer.
-        current_serial, current_stable_id = capture_target_identity(
+        current_serial, current_stable_id, current_vid, current_pid = capture_target_identity(
             control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
         )
         if not same_captured_target(
@@ -637,6 +686,19 @@ def main() -> int:
                 f"using same-device SERVICE CDC {locked_control_port}\n"
             )
             control_port = locked_control_port
+            current_serial, current_stable_id, current_vid, current_pid = (
+                capture_target_identity(
+                    control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
+                )
+            )
+            if not same_captured_target(
+                target_serial, target_stable_id, current_serial, current_stable_id
+            ):
+                fail(
+                    "resolved maintenance endpoint does not belong to the selected "
+                    "physical target; no touch or transfer was attempted",
+                    code=4,
+                )
 
         pkg = os.path.join(td, "app.zip")
 
@@ -665,8 +727,17 @@ def main() -> int:
             "-b", str(baud),
             "--singlebank",
         ]
-        if touch > 0:
-            dfu += ["-t", str(touch)]
+        transfer_touch = effective_touch_baud(
+            touch,
+            current_vid,
+            current_pid,
+            boot_vid,
+            boot_pid,
+            runtime_vid,
+            runtime_pid,
+        )
+        if transfer_touch > 0:
+            dfu += ["-t", str(transfer_touch)]
         if args.verbose:
             sys.stderr.write("[nius-upload] + " + " ".join(dfu) + "\n")
         try:

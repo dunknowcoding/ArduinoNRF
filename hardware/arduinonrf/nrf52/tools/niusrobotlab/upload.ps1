@@ -50,6 +50,8 @@ param(
     [AllowEmptyString()]
     [string]$MaximumSize = '',
     [AllowEmptyString()]
+    [string]$RamEnd = '',
+    [AllowEmptyString()]
     [string]$Uf2VolumeLabel = '',
     [AllowEmptyString()]
     [string]$Uf2Model = '',
@@ -1787,6 +1789,7 @@ function Invoke-Uf2Deploy {
         [string]$FamilyId,
         [string]$AppStart,
         [string]$MaxSize,
+        [string]$RamEnd,
         [string]$DrivePath
     )
 
@@ -1795,7 +1798,8 @@ function Invoke-Uf2Deploy {
         -HexPath $HexPath `
         -FamilyId $FamilyId `
         -AppStart $AppStart `
-        -MaxSize $MaxSize
+        -MaxSize $MaxSize `
+        -RamEnd $RamEnd
     Write-NiusTiming 'UF2 conversion done'
     $destination = Join-Path $DrivePath ([System.IO.Path]::GetFileName($uf2Path))
     Write-NiusTiming 'UF2 copy start'
@@ -2776,7 +2780,8 @@ function New-Uf2Artifact {
         [string]$HexPath,
         [string]$FamilyId,
         [string]$AppStart,
-        [string]$MaxSize
+        [string]$MaxSize,
+        [string]$RamEnd
     )
 
     if ([string]::IsNullOrWhiteSpace($HexPath) -or -not (Test-Path -LiteralPath $HexPath)) {
@@ -2787,8 +2792,9 @@ function New-Uf2Artifact {
         throw 'UF2 upload was selected, but no UF2 family ID was provided by the board recipe.'
     }
     if ([string]::IsNullOrWhiteSpace($AppStart) -or
-        [string]::IsNullOrWhiteSpace($MaxSize)) {
-        throw 'UF2 upload was selected, but the board recipe did not provide an application range.'
+        [string]::IsNullOrWhiteSpace($MaxSize) -or
+        [string]::IsNullOrWhiteSpace($RamEnd)) {
+        throw 'UF2 upload was selected, but the board recipe did not provide a complete application memory contract.'
     }
 
     $python = Resolve-PythonLaunch
@@ -2803,7 +2809,8 @@ function New-Uf2Artifact {
         '--output-uf2', $uf2Path,
         '--family-id', $FamilyId,
         '--app-start', $AppStart,
-        '--max-size', $MaxSize
+        '--max-size', $MaxSize,
+        '--ram-end', $RamEnd
     )
     Invoke-CommandChecked -Exe $python.Exe -Arguments $args -FailureKind 'uf2-convert'
     return $uf2Path
@@ -2814,7 +2821,8 @@ function Assert-NiusApplicationImage {
         [string]$HexPath,
         [string]$FamilyId,
         [string]$AppStart,
-        [string]$MaxSize
+        [string]$MaxSize,
+        [string]$RamEnd
     )
 
     Assert-InputArtifact -Path $HexPath -Label 'hex'
@@ -2822,8 +2830,9 @@ function Assert-NiusApplicationImage {
         $FamilyId = '0xADA52840'
     }
     if ([string]::IsNullOrWhiteSpace($AppStart) -or
-        [string]::IsNullOrWhiteSpace($MaxSize)) {
-        throw 'The board recipe did not provide a complete application flash range.'
+        [string]::IsNullOrWhiteSpace($MaxSize) -or
+        [string]::IsNullOrWhiteSpace($RamEnd)) {
+        throw 'The board recipe did not provide a complete application memory contract.'
     }
 
     $python = Resolve-PythonLaunch
@@ -2836,6 +2845,7 @@ function Assert-NiusApplicationImage {
         '--family-id', $FamilyId,
         '--app-start', $AppStart,
         '--max-size', $MaxSize,
+        '--ram-end', $RamEnd,
         '--validate-only'
     )
     Invoke-CommandChecked -Exe $python.Exe -Arguments $args -FailureKind 'image-preflight'
@@ -3922,12 +3932,13 @@ try {
     # or resetting any USB interface. A wrong layout, corrupt HEX record, bad
     # vector table, or oversized image must leave the running board untouched.
     $enterBootloaderOnlyRequested = (($EnterBootloaderOnly -eq 'true') -or ($EnterBootloaderOnly -eq '1'))
-    if ($Mode -eq 'dfu' -and -not $enterBootloaderOnlyRequested) {
+    if ($Mode -in @('dfu', 'openocd', 'jlink') -and -not $enterBootloaderOnlyRequested) {
         Assert-NiusApplicationImage `
             -HexPath $Hex `
             -FamilyId $Uf2FamilyId `
             -AppStart $Uf2AppStart `
-            -MaxSize $MaximumSize
+            -MaxSize $MaximumSize `
+            -RamEnd $RamEnd
         Write-NiusTiming 'application image preflight done'
     }
 
@@ -4822,6 +4833,7 @@ try {
                 -FamilyId $Uf2FamilyId `
                 -AppStart $Uf2AppStart `
                 -MaxSize $MaximumSize `
+                -RamEnd $RamEnd `
                 -DrivePath $detectedBootloader.Summary.Drive
             Write-Stage -Percent 94 -Label 'Verifying'
             $null = Invoke-NiusMisflashGuardAfterSamePidUpload `

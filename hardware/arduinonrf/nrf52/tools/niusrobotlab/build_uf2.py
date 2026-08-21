@@ -28,6 +28,10 @@ def parse_args() -> argparse.Namespace:
         help="maximum application bytes from --app-start; must be paired with --app-start",
     )
     parser.add_argument(
+        "--ram-end",
+        help="exclusive upper SRAM address for vector validation; required with --app-start",
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="validate Intel HEX and application layout without writing UF2",
@@ -148,13 +152,15 @@ def _bytes_at(
 
 
 def validate_application_layout(
-    segments: list[tuple[int, bytes]], app_start: int, max_size: int
+    segments: list[tuple[int, bytes]], app_start: int, max_size: int, ram_end: int
 ) -> None:
     """Reject an image that cannot be the selected nRF52 application layout."""
     if not 0 <= app_start <= 0xFFFF_FFFF:
         raise ValueError("Application start is outside the 32-bit address space")
     if max_size <= 0 or app_start + max_size > 0x1_0000_0000:
         raise ValueError("Application maximum size is invalid")
+    if not 0x2000_0000 < ram_end <= 0x2004_0000:
+        raise ValueError("Application SRAM end is invalid for a supported nRF52 target")
 
     image_start = min(address for address, _ in segments)
     image_end = max(address + len(data) for address, data in segments)
@@ -172,9 +178,10 @@ def validate_application_layout(
 
     vector = _bytes_at(segments, app_start, 8)
     stack_pointer, reset_vector = struct.unpack("<II", vector)
-    if not 0x2000_0000 < stack_pointer <= 0x2004_0000 or stack_pointer & 0x7:
+    if not 0x2000_0000 < stack_pointer <= ram_end or stack_pointer & 0x7:
         raise ValueError(
-            f"Initial stack pointer 0x{stack_pointer:08X} is not valid nRF52 SRAM"
+            f"Initial stack pointer 0x{stack_pointer:08X} exceeds the selected "
+            f"target SRAM ending at 0x{ram_end:08X}"
         )
     if reset_vector & 1 == 0:
         raise ValueError(
@@ -248,11 +255,17 @@ def main() -> None:
     if not 0 <= family_id <= 0xFFFF_FFFF:
         raise ValueError("UF2 family ID is outside the 32-bit range")
     segments = parse_hex_segments(args.input_hex)
-    if (args.app_start is None) != (args.max_size is None):
-        raise ValueError("--app-start and --max-size must be supplied together")
+    layout_values = (args.app_start, args.max_size, args.ram_end)
+    if any(value is not None for value in layout_values) and not all(
+        value is not None for value in layout_values
+    ):
+        raise ValueError("--app-start, --max-size, and --ram-end must be supplied together")
     if args.app_start is not None:
         validate_application_layout(
-            segments, int(args.app_start, 0), int(args.max_size, 0)
+            segments,
+            int(args.app_start, 0),
+            int(args.max_size, 0),
+            int(args.ram_end, 0),
         )
     if not args.validate_only:
         uf2 = build_uf2_blocks(segments, family_id)
