@@ -4,9 +4,9 @@
 Mirrors the proven Adafruit nRF52 BSP pattern (adafruit-nrfutil dfu genpkg + dfu
 serial), used on Linux and macOS where the Windows-specific upload.ps1 is not
 available. ArduinoNRF deliberately disables Arduino CLI's generic 1200-bps
-touch and lets this identity-aware uploader perform it through
-adafruit-nrfutil. That prevents a host-side port scan from selecting a peer
-board during simultaneous USB re-enumeration.
+touch. This wrapper owns the touch, waits for the captured physical target's
+bootloader endpoint, and then launches adafruit-nrfutil without its unscoped
+touch/reopen behavior.
 
 Requires Python 3.7+ and adafruit-nrfutil on PATH:
     pip3 install --user adafruit-nrfutil   # Linux / macOS
@@ -316,6 +316,163 @@ def runtime_endpoint_ready(candidates) -> bool:
     return known_interfaces.count(0) == 1
 
 
+def serial_identities():
+    """Enumerate current USB-backed serial endpoints on the active Unix host."""
+    if sys.platform.startswith("linux"):
+        identities = []
+        for tty_node in Path("/sys/class/tty").glob("*"):
+            identity = linux_tty_usb_identity("/dev/" + tty_node.name)
+            if identity:
+                identities.append(identity)
+        return identities
+    if sys.platform == "darwin":
+        return mac_serial_devices()
+    return []
+
+
+def select_scoped_control_port(
+    identities,
+    vid: int,
+    pid: int,
+    serial: str,
+    stable_id: str,
+):
+    """Return one exact maintenance endpoint, or None while it is ambiguous."""
+    matches = [
+        identity for identity in identities
+        if (identity[0], identity[1]) == (vid, pid)
+        and matches_target_scope(identity, serial, stable_id)
+    ]
+    interface_zero = [identity for identity in matches if identity[4] == 0]
+    if interface_zero:
+        matches = interface_zero
+    elif any(identity[4] is not None for identity in matches):
+        return None
+    unique_ports = []
+    for identity in matches:
+        port = identity[3]
+        if port not in unique_ports:
+            unique_ports.append(port)
+    return unique_ports[0] if len(unique_ports) == 1 else None
+
+
+def touch_serial_port(port: str, baud: int) -> None:
+    """Send one POSIX 1200-baud/DTR falling edge on the selected endpoint."""
+    if baud != 1200:
+        raise ValueError("bootloader touch must be 0 or 1200 baud")
+
+    import fcntl
+    import struct
+    import termios
+
+    flags = os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    descriptor = os.open(port, flags)
+    delivered = False
+    try:
+        attributes = termios.tcgetattr(descriptor)
+        attributes[0] = 0
+        attributes[1] = 0
+        attributes[2] = termios.CS8 | termios.CREAD | termios.CLOCAL
+        attributes[3] = 0
+        attributes[4] = termios.B1200
+        attributes[5] = termios.B1200
+        termios.tcsetattr(descriptor, termios.TCSANOW, attributes)
+
+        dtr = struct.pack("I", termios.TIOCM_DTR)
+        fcntl.ioctl(descriptor, termios.TIOCMBIS, dtr)
+        time.sleep(0.12)
+        fcntl.ioctl(descriptor, termios.TIOCMBIC, dtr)
+        delivered = True
+        time.sleep(0.10)
+    except OSError:
+        # Native USB can disappear immediately after the DTR edge. Once that
+        # edge was delivered, close-time EIO is transition evidence, not a
+        # reason to issue a duplicate touch.
+        if not delivered:
+            raise
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+
+
+def wait_for_bootloader_control_port(
+    current_port: str,
+    boot_vid: int,
+    boot_pid: int,
+    runtime_vid: int,
+    runtime_pid: int,
+    serial: str,
+    stable_id: str,
+    timeout_s: float,
+    identity_source=None,
+    monotonic=None,
+    sleep=None,
+) -> str:
+    """Wait for one stable, identity-scoped bootloader maintenance endpoint."""
+    identity_source = identity_source or serial_identities
+    monotonic = monotonic or time.monotonic
+    sleep = sleep or time.sleep
+    deadline = monotonic() + timeout_s
+    same_identity = (boot_vid, boot_pid) == (runtime_vid, runtime_pid)
+    saw_absence = not same_identity
+    stable_port = None
+    stable_since = None
+
+    while monotonic() < deadline:
+        identities = identity_source()
+        candidate = select_scoped_control_port(
+            identities, boot_vid, boot_pid, serial, stable_id
+        )
+        if same_identity and not saw_absence:
+            current_present = any(
+                same_mac_serial_endpoint(identity[3], current_port)
+                if sys.platform == "darwin" else identity[3] == current_port
+                for identity in identities
+                if matches_target_scope(identity, serial, stable_id)
+            )
+            if not current_present:
+                saw_absence = True
+            candidate = None
+
+        if saw_absence and candidate:
+            if candidate != stable_port:
+                stable_port = candidate
+                stable_since = monotonic()
+            elif monotonic() - stable_since >= 0.20:
+                return candidate
+        else:
+            stable_port = None
+            stable_since = None
+        sleep(0.05 if sys.platform.startswith("linux") else 0.20)
+
+    raise TimeoutError(
+        "selected board did not expose one stable identity-scoped bootloader "
+        "maintenance endpoint"
+    )
+
+
+def serial_dfu_command(
+    nrfutil: str,
+    verbose: bool,
+    package: str,
+    port: str,
+    baud: int,
+):
+    """Build the transfer command after this wrapper has completed the touch."""
+    command = [nrfutil]
+    if verbose:
+        command.append("--verbose")
+    command += [
+        "dfu", "serial", "-pkg", package, "-p", port,
+        "-b", str(baud), "--singlebank",
+    ]
+    return command
+
+
 def resolve_service_serial_port(
     port: str,
     runtime_vid: int,
@@ -477,6 +634,66 @@ def main() -> int:
             (0x239A, 0x0001, "runtime", "/dev/ttyACM1", 0, "scope"),
             (0x239A, 0x0001, "runtime", "/dev/ttyACM2", 0, "scope"),
         ])
+        assert select_scoped_control_port(
+            [
+                changed_serial,
+                (0x239A, 0x0001, "peer", "/dev/ttyACM2", 0,
+                 "/sys/devices/usb1/1-3"),
+            ],
+            0x239A, 0x0001, "runtime", "",
+        ) == "/dev/ttyACM1"
+        assert select_scoped_control_port(
+            [changed_serial, peer], 0x239A, 0x0001, "",
+            "/sys/devices/usb1/1-2",
+        ) == "/dev/ttyACM1"
+        assert select_scoped_control_port(
+            [
+                (0x239A, 0x0001, "runtime", "/dev/ttyACM1", 0, "scope"),
+                (0x239A, 0x0001, "runtime", "/dev/ttyACM3", 0, "scope"),
+            ],
+            0x239A, 0x0001, "", "scope",
+        ) is None
+        assert select_scoped_control_port(
+            [(0x239A, 0x0001, "runtime", "/dev/ttyACM2", 2, "scope")],
+            0x239A, 0x0001, "", "scope",
+        ) is None
+        transfer_command = serial_dfu_command(
+            "adafruit-nrfutil", True, "app.zip", "/dev/ttyACM7", 115200
+        )
+        assert transfer_command.count("--verbose") == 1
+        assert "-t" not in transfer_command and "--touch" not in transfer_command
+
+        def simulated_wait(samples, boot_pid, runtime_pid):
+            clock = [0.0]
+            index = [0]
+
+            def source():
+                return samples[min(index[0], len(samples) - 1)]
+
+            def sleeper(duration):
+                clock[0] += duration
+                index[0] += 1
+
+            return wait_for_bootloader_control_port(
+                "/dev/ttyACM1", 0x239A, boot_pid, 0x239A, runtime_pid,
+                "", "scope", 1.0,
+                identity_source=source,
+                monotonic=lambda: clock[0],
+                sleep=sleeper,
+            )
+
+        boot = (0x239A, 0x00B3, "boot", "/dev/ttyACM7", 0, "scope")
+        assert simulated_wait([[boot]] * 6, 0x00B3, 0x00B4) == "/dev/ttyACM7"
+        runtime_same = (
+            0x239A, 0x00B3, "runtime", "/dev/ttyACM1", 0, "scope"
+        )
+        boot_same = (0x239A, 0x00B3, "boot", "/dev/ttyACM9", 0, "scope")
+        assert simulated_wait(
+            [[runtime_same], [], [boot_same], [boot_same], [boot_same],
+             [boot_same], [boot_same]],
+            0x00B3,
+            0x00B3,
+        ) == "/dev/ttyACM9"
         since, stable = advance_runtime_stability(True, 1.0, None, 0.3)
         assert since == 1.0 and not stable
         since, stable = advance_runtime_stability(False, 1.2, since, 0.3)
@@ -579,6 +796,7 @@ def main() -> int:
     ap.add_argument("--ram-end", required=True, help="exclusive upper SRAM address for the selected target")
     ap.add_argument("--runtime-timeout", default="30", help="seconds to wait for identity-verified application USB")
     ap.add_argument("--runtime-stable-ms", default="300", help="continuous milliseconds the same application USB identity must remain present")
+    ap.add_argument("--bootloader-timeout", default="15", help="seconds to wait for the identity-scoped bootloader maintenance endpoint")
     ap.add_argument("--sd-req", default="0xFFFE", help="adafruit-nrfutil genpkg --sd-req (SoftDevice req hash; 0xFFFE = wildcard)")
     ap.add_argument("--dev-type", default="0x0052", help="adafruit-nrfutil genpkg --dev-type (0x0052 = nRF52)")
     ap.add_argument("--baud", default="115200", help="serial DFU baud (Adafruit fork uses 115200)")
@@ -632,10 +850,15 @@ def main() -> int:
         runtime_stable_s = parse_bounded_float(
             args.runtime_stable_ms, "runtime stable duration", 0.0, 5_000.0
         ) / 1000.0
+        bootloader_timeout = parse_bounded_float(
+            args.bootloader_timeout, "bootloader timeout", 0.5, 120.0
+        )
         if runtime_stable_s >= runtime_timeout:
             raise ValueError("runtime stable duration must be shorter than runtime timeout")
         baud = parse_bounded_int(args.baud, "DFU baud", 1, 4_000_000)
         touch = parse_bounded_int(args.touch, "touch baud", 0, 4_000_000)
+        if touch not in (0, 1200):
+            raise ValueError("touch baud must be 0 or 1200")
         dev_type = parse_bounded_int(args.dev_type, "device type", 0, 0xFFFF)
         sd_req = parse_bounded_int(args.sd_req, "SoftDevice requirement", 0, 0xFFFF)
     except ValueError as error:
@@ -733,13 +956,6 @@ def main() -> int:
         if rc != 0:
             return rc
 
-        dfu = [nrfutil] + verbose_flag + [
-            "dfu", "serial",
-            "-pkg", pkg,
-            "-p", control_port,
-            "-b", str(baud),
-            "--singlebank",
-        ]
         transfer_touch = effective_touch_baud(
             touch,
             current_vid,
@@ -750,7 +966,48 @@ def main() -> int:
             runtime_pid,
         )
         if transfer_touch > 0:
-            dfu += ["-t", str(transfer_touch)]
+            try:
+                touch_serial_port(control_port, transfer_touch)
+                control_port = wait_for_bootloader_control_port(
+                    control_port,
+                    boot_vid,
+                    boot_pid,
+                    runtime_vid,
+                    runtime_pid,
+                    target_serial,
+                    target_stable_id,
+                    bootloader_timeout,
+                )
+            except (OSError, TimeoutError, ValueError) as error:
+                fail(
+                    "identity-scoped bootloader transition failed before transfer: "
+                    + str(error),
+                    code=4,
+                )
+        elif (current_vid, current_pid) != (boot_vid, boot_pid):
+            fail(
+                "touch is disabled but the selected endpoint is not the declared "
+                "bootloader; no transfer was attempted",
+                code=4,
+            )
+
+        boot_serial, boot_stable_id, endpoint_vid, endpoint_pid = (
+            capture_target_identity(
+                control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
+            )
+        )
+        if (endpoint_vid, endpoint_pid) != (boot_vid, boot_pid) or not same_captured_target(
+            target_serial, target_stable_id, boot_serial, boot_stable_id
+        ):
+            fail(
+                "resolved bootloader endpoint does not belong to the selected "
+                "physical target; no transfer was attempted",
+                code=4,
+            )
+
+        dfu = serial_dfu_command(
+            nrfutil, args.verbose, pkg, control_port, baud
+        )
         if args.verbose:
             sys.stderr.write("[nius-upload] + " + " ".join(dfu) + "\n")
         try:

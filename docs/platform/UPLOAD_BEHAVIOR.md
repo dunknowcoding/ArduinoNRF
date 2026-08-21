@@ -137,6 +137,11 @@ choices because it has no native USB upload path in this package.
   invocation. A timeout, cable loss, protocol failure, or interrupted write is
   terminal and keeps its original error; the wrapper never infers that a
   second single-bank transfer or a wildcard SoftDevice requirement is safe.
+- Linux and macOS do not delegate 1200-baud transition ownership to
+  `adafruit-nrfutil`: upstream sleeps and reopens the same tty without checking
+  physical identity. ArduinoNRF sends one DTR edge, resolves exactly one
+  bootloader maintenance endpoint in the captured sysfs/IOUSB scope, re-proves
+  it, and launches the transfer without `--touch`.
 - The runtime DFU interface is hidden by default. Hands-free upload uses the
   service CDC's 1200-bps touch, so the extra driverless DFU-runtime node is not
   needed for ordinary use. Enable it explicitly only for a workflow that sends

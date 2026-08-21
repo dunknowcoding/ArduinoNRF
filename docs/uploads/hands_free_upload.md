@@ -87,18 +87,22 @@ Driven by `tools.niusdfu.upload.pattern.windows` in `platform.txt`.
 
 ## Linux / macOS — `upload.py`
 
-A small stdlib-only Python script that mirrors the proven Adafruit cross-platform recipe:
+A small stdlib-only Python script packages the image, sends one 1200-baud/DTR
+edge itself, waits for the captured physical target's bootloader maintenance
+endpoint, and then runs the Adafruit transport without its fixed-name touch:
 
 ```text
 adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req ... --application app.hex pkg.zip
-adafruit-nrfutil dfu serial -pkg pkg.zip -p {port} -b 115200 --singlebank -t 1200
+adafruit-nrfutil dfu serial -pkg pkg.zip -p {identity-scoped-bootloader-port} -b 115200 --singlebank
 ```
 
 Driven by `tools.niusdfu.upload.pattern.linux` / `.macosx`. Requires `adafruit-nrfutil` on `PATH`:
 
 On dual-CDC runtimes, Linux sysfs or the macOS IOUSB registry ties the selected
 serial endpoint to its exact USB composite and resolves interface zero before
-the 1200-bps touch. Post-upload verification accepts the returning composite
+the 1200-bps touch. The same scope must yield exactly one bootloader interface;
+the wrapper does not rely on upstream's 1.5-second sleep and same-tty reopen.
+Post-upload verification accepts the returning composite
 once its declared runtime identity and captured USB serial are present; it does
 not mistake the two CDC interfaces for two boards.
 
