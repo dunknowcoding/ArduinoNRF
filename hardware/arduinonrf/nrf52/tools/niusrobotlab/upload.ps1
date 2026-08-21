@@ -3163,48 +3163,6 @@ function Get-NiusUploadFailureFromCatch {
     return $null
 }
 
-function Test-NiusAdafruitDfuFailureIsTimeout {
-    param([object]$Failure)
-
-    if (-not $Failure) {
-        return $false
-    }
-
-    if ($Failure.Kind -ne 'adafruit-dfu' -and $Failure.Kind -ne 'adafruit-genpkg') {
-        return $false
-    }
-
-    $blob = ('{0} {1}' -f $Failure.Summary, (($Failure.Details | ForEach-Object { $_ }) -join ' ')).ToLowerInvariant()
-    return $blob -match 'stalled: no new|stalled: no stdout/stderr lines|serial dfu stalled|serial dfu timed out|no response from device|timed out waiting for bootloader response|exceeded process timeout|exit=124|exit=125'
-}
-
-function Test-NiusAdafruitDfuFailureNeedsAutoRetouch {
-    param([object]$Failure)
-
-    if ($env:NIUS_SKIP_AUTO_DFU_RETOUCH_RETRY -eq '1') {
-        return $false
-    }
-
-    if (-not $Failure) {
-        return $true
-    }
-
-    if ($Failure.Kind -ne 'adafruit-dfu' -and $Failure.Kind -ne 'adafruit-genpkg') {
-        return $false
-    }
-
-    if (Test-NiusAdafruitDfuFailureIsTimeout -Failure $Failure) {
-        return $false
-    }
-
-    $blob = ('{0} {1}' -f $Failure.Summary, (($Failure.Details | ForEach-Object { $_ }) -join ' ')).ToLowerInvariant()
-    if ($blob -match 'wrong com for adafruit serial dfu|user cdc serial cannot') {
-        return $false
-    }
-
-    return $blob -match 'could not open port|access is denied|permission denied|sharing violation|being used|busy|failed to upgrade|adafruit serial dfu command failed|exit code 1'
-}
-
 function Get-FailureSummary {
     param(
         [string]$Kind,
@@ -3331,7 +3289,6 @@ function Watch-SerialPortPostTouchResetCycle {
 function Touch-SerialPort1200 {
     param(
         [string]$PortName,
-        [bool]$IncludePrepulse115200 = $false,
         [bool]$ObservePostTouchResetCycle = $false
     )
 
@@ -3567,25 +3524,6 @@ public static class NiusNativeSerialTouch {
         }
 
         try {
-            if ($IncludePrepulse115200) {
-                $utcPulse = [datetime]::UtcNow
-                $phase115200Changed = ($pulseLogPhase -ne '115200')
-                $pulseElapsedMs = ($utcPulse - $pulseLogUtc).TotalMilliseconds
-                if ($phase115200Changed -or $pulseElapsedMs -ge 3500) {
-                    Write-NiusDetail ('[nius]   touch pulse 115200 on {0}...' -f $PortName) -ForegroundColor DarkGray
-                    $pulseLogPhase = '115200'
-                    $pulseLogUtc = $utcPulse
-                }
-                $touchPulse = Invoke-TouchPulse -BaudRate 115200
-                if (-not $touchPulse.Triggered) {
-                    if ($touchPulse.FailureKind -eq 'busy') {
-                        return $touchPulse
-                    }
-                    throw '115200 phase failed'
-                }
-                Start-Sleep -Milliseconds 200
-            }
-
             $utcPulse = [datetime]::UtcNow
             $phase1200Changed = ($pulseLogPhase -ne '1200')
             $pulseElapsedMs = ($utcPulse - $pulseLogUtc).TotalMilliseconds
@@ -3636,19 +3574,13 @@ function Invoke-Touch1200Transition {
         [string]$ExpectedBoardId = ''
     )
 
-    # A plain 1200 open already changes a normally configured service CDC from
-    # its 115200 default and then drops DTR, satisfying both standard Arduino
-    # touch and the no-SoftDevice transition contract with one handle. Prefer
-    # that fast path. Keep the explicit 115200 prepulse only as a compatibility
-    # fallback for firmware whose line coding was left in an unusual state.
+    # A single 1200-baud open followed by a DTR falling edge is the maintained
+    # ArduinoNRF bootloader-entry contract. Never issue a second inferred pulse
+    # when host evidence is delayed: the first request may already be executing,
+    # and a new COM with the same name may belong to the bootloader session.
     $touchModes = @(
         [pscustomobject]@{
             Label = 'single 1200 touch'
-            IncludePrepulse115200 = $false
-        },
-        [pscustomobject]@{
-            Label = 'legacy 115200->1200 touch'
-            IncludePrepulse115200 = $true
         }
     )
 
@@ -3682,7 +3614,6 @@ function Invoke-Touch1200Transition {
         Write-NiusTiming ('touch mode start: {0}' -f $touchMode.Label)
         $touchAttempt = Touch-SerialPort1200 `
             -PortName $PortName `
-            -IncludePrepulse115200:$touchMode.IncludePrepulse115200 `
             -ObservePostTouchResetCycle:$sameUsbIdentity
         if (-not $touchAttempt.Triggered) {
             if ($touchAttempt.FailureKind -eq 'busy') {
@@ -3784,15 +3715,13 @@ function Invoke-Touch1200Transition {
             Write-NiusTiming ('touch mode timed out: {0}' -f $touchMode.Label)
             if ($hasBootloaderIdentity) {
                 Write-NiusDetail ('[nius] {0} on {1} produced no scoped bootloader transition: {2}. The caller will perform one final identity check before deciding.' -f $touchMode.Label, $PortName, $_.Exception.Message) -ForegroundColor DarkGray
-                if ($touchMode.IncludePrepulse115200) {
-                    Write-NiusDetail '[nius] Skipping a duplicate touch after a successful pulse; the board may already be re-enumerating.' -ForegroundColor DarkGray
-                    return [pscustomobject]@{
-                        Triggered = $false
-                        Candidate = $null
-                        Transition = $null
-                        FailureKind = 'transition-unconfirmed'
-                        Error = $_.Exception.Message
-                    }
+                Write-NiusDetail '[nius] Skipping a duplicate touch after a successful pulse; the board may already be re-enumerating.' -ForegroundColor DarkGray
+                return [pscustomobject]@{
+                    Triggered = $false
+                    Candidate = $null
+                    Transition = $null
+                    FailureKind = 'transition-unconfirmed'
+                    Error = $_.Exception.Message
                 }
             }
             else {
@@ -3878,46 +3807,6 @@ function Wait-NiusBootloaderPortSettled {
         Start-Sleep -Milliseconds 120
     }
     Write-NiusDetail ('[nius] Bootloader COM {0} did not stabilize within ceiling {1} ms; proceeding anyway.' -f $PortName, $CeilingMs) -ForegroundColor DarkYellow
-}
-
-function Invoke-NiusAdafruitDfuRetouchWait {
-    param(
-        [string]$PortName,
-        [string]$Reason,
-        [string]$BootloaderVid = '',
-        [string]$BootloaderPid = '',
-        [string]$RuntimeVid = '',
-        [string]$RuntimePid = '',
-        [string]$InterfaceParentPrefix = '',
-        [string]$PreferredCompositeStableId = '',
-        [string]$ExpectedLabel = '',
-        [string]$ExpectedModel = '',
-        [string]$ExpectedBoardId = ''
-    )
-
-    if ([string]::IsNullOrWhiteSpace($PortName) -or $PortName.StartsWith('{')) {
-        return
-    }
-
-    Stop-NiusLingeringAdafruitNrfutil -Phase touch
-
-    Write-NiusDetail ('[nius] {0}' -f $Reason)
-    $touchTransition = Invoke-Touch1200Transition `
-        -PortName $PortName `
-        -BootloaderVid $BootloaderVid `
-        -BootloaderPid $BootloaderPid `
-        -RuntimeVid $RuntimeVid `
-        -RuntimePid $RuntimePid `
-        -InterfaceParentPrefix $InterfaceParentPrefix `
-        -PreferredCompositeStableId $PreferredCompositeStableId `
-        -ExpectedLabel $ExpectedLabel `
-        -ExpectedModel $ExpectedModel `
-        -ExpectedBoardId $ExpectedBoardId
-    if (-not $touchTransition.Triggered) {
-        Write-NiusDetail ('[warn] Re-touch failed on {0}; continuing in case the port is already in bootloader.' -f $PortName)
-        return $false
-    }
-    return $true
 }
 
 # Check serial port presence via WMI without opening the port.
@@ -4747,15 +4636,6 @@ try {
                     Write-NiusDetail ('[warn] Unable to confirm 1200 bps touch on {0}; proceeding with a direct serial DFU attempt in case the board is already in bootloader mode.' -f $adafruitControlPort) -ForegroundColor DarkYellow
                 }
             }
-            if ($touchPrepared -and -not $bootloaderTransitionConfirmed -and $BootloaderMode -eq 'adafruit-dfu' -and $env:NIUS_ENABLE_SECOND_TOUCH_PASS -eq '1') {
-                $halfPost = [int][Math]::Max(900, [Math]::Floor((Get-NiusPostTouchSleepMilliseconds) * 0.42))
-                Start-Sleep -Milliseconds $halfPost
-                Write-NiusDetail '[nius] Automatic second 1200bps touch pass (buttonless path; firmware debounce / USB settle).' -ForegroundColor DarkGray
-                $touchAttempt = Touch-SerialPort1200 -PortName $adafruitControlPort
-                if (-not $touchAttempt.Triggered) {
-                    Write-NiusDetail ('[warn] Second touch pass failed on {0} (USB may be re-enumerating); continuing with post-touch wait.' -f $adafruitControlPort) -ForegroundColor DarkYellow
-                }
-            }
         } else {
             Write-NiusDetail '[nius] 1200 bps touch skipped; using already-detected bootloader state.' -ForegroundColor DarkGray
         }
@@ -4860,15 +4740,6 @@ try {
         # over USB CDC, not the USB DFU class implemented by dfu-util.
         if ($BootloaderMode -eq 'adafruit-dfu' -or $BootloaderMode -eq 'nordic-dfu') {
             $initialSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq
-            $normalizedSdReq = ''
-            if (-not [string]::IsNullOrWhiteSpace($initialSdReq)) {
-                $normalizedSdReq = $initialSdReq.Trim().ToUpperInvariant()
-            }
-            # Nordic no-SoftDevice packages use sd-req 0x00 and must not be
-            # silently converted to Adafruit's wildcard compatibility retry.
-            $wildcardAttempted = ($normalizedSdReq -eq '0XFFFE') -or ($BootloaderMode -eq 'nordic-dfu')
-            $successfulAdafruitTransport = ''
-
             $bootloaderPortResolution = Wait-AdafruitBootloaderControlPort `
                 -SelectedPort $Port `
                 -CurrentPort $adafruitControlPort `
@@ -4906,143 +4777,13 @@ try {
                 }
             }
 
-            if ([string]::IsNullOrWhiteSpace($successfulAdafruitTransport)) {
-                # The byte-progress bar (driven from inside Invoke-AdafruitDfuDeploy)
-                # owns the visible 0..100 range; no coarse 50% pre-stage here.
-                Write-NiusDetail '[nius] Starting Adafruit serial DFU transfer...' -ForegroundColor DarkGray
-                try {
-                    Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq $initialSdReq
-                    $successfulAdafruitTransport = 'serial-dfu'
-                } catch {
-                    $fail = Get-NiusUploadFailureFromCatch -ErrorRecord $_
-                    $lastAdafruitError = $_
-                    $recoveredAfterRetouch = $false
-                    if ($UseTouch1200 -eq 'true' -and (Test-NiusAdafruitDfuFailureNeedsAutoRetouch -Failure $fail)) {
-                        Write-NiusDetail '[nius] Serial DFU failed; automatic re-touch + one repeat (same sd-req, buttonless recovery).' -ForegroundColor Yellow
-                        $retouchTriggered = Invoke-NiusAdafruitDfuRetouchWait `
-                            -PortName $adafruitControlPort `
-                            -Reason 'Auto re-touch before repeating adafruit-nrfutil serial DFU' `
-                            -BootloaderVid $UsbVid `
-                            -BootloaderPid $UsbPid `
-                            -RuntimeVid $effectiveRuntimeUsbVid `
-                            -RuntimePid $effectiveRuntimeUsbPid `
-                            -InterfaceParentPrefix $adafruitControlPortParentPrefix `
-                            -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
-                            -ExpectedLabel $Uf2VolumeLabel `
-                            -ExpectedModel $Uf2Model `
-                            -ExpectedBoardId $Uf2BoardId
-                        if ($retouchTriggered) {
-                            $bootloaderPortResolution = Wait-AdafruitBootloaderControlPort `
-                                -SelectedPort $Port `
-                                -CurrentPort $adafruitControlPort `
-                                -BootloaderVid $UsbVid `
-                                -BootloaderPid $UsbPid `
-                                -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
-                                -InterfaceParentPrefix $adafruitControlPortParentPrefix `
-                                -TimeoutMs (Get-NiusAdafruitSerialReadyMilliseconds)
-                            if ($bootloaderPortResolution -and $bootloaderPortResolution.Resolved -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
-                                $resolvedBootloaderPort = $bootloaderPortResolution.Port.Trim()
-                                if ($resolvedBootloaderPort.ToUpperInvariant() -ne $adafruitControlPort.Trim().ToUpperInvariant()) {
-                                    Write-NiusDetail ('[nius] serial DFU bootloader control port remap: using {0} instead of {1} ({2})' -f $resolvedBootloaderPort, $adafruitControlPort, $bootloaderPortResolution.Reason) -ForegroundColor DarkGray
-                                }
-                                $adafruitControlPort = $resolvedBootloaderPort
-                            }
-                            Wait-NiusBootloaderPortSettled -PortName $adafruitControlPort -CeilingMs (Get-NiusPostTouchSleepMilliseconds)
-                        }
-                        try {
-                            Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq $initialSdReq
-                            $recoveredAfterRetouch = $true
-                            $successfulAdafruitTransport = 'serial-dfu'
-                        } catch {
-                            $fail = Get-NiusUploadFailureFromCatch -ErrorRecord $_
-                            $lastAdafruitError = $_
-                            $recoveredAfterRetouch = $false
-                        }
-                    }
-
-                    if ($recoveredAfterRetouch) {
-                        # First-path success after automatic retry
-                    }
-                    else {
-                        $failureIsTimeout = Test-NiusAdafruitDfuFailureIsTimeout -Failure $fail
-                        if ($failureIsTimeout) {
-                            if ($wildcardAttempted) {
-                                Write-NiusDetail '[nius] Adafruit serial DFU timeout/stall is terminal for this run; wildcard retry was already attempted.' -ForegroundColor DarkYellow
-                                if ($fail) {
-                                    Throw-NiusUploadFailure $fail
-                                }
-                                if ($null -ne $lastAdafruitError) {
-                                    throw $lastAdafruitError
-                                }
-                                throw
-                            }
-                            Write-NiusDetail '[nius] Adafruit serial DFU stalled before wildcard retry; re-touching once and retrying with wildcard sd-req 0xFFFE.' -ForegroundColor DarkYellow
-                        }
-                        else {
-                            # A wrong SoftDevice requirement, invalid package,
-                            # or explicit compatibility rejection must remain
-                            # terminal.  Retrying it with a wildcard would hide
-                            # the recipe error and could deploy an unsafe image.
-                            if ($fail) {
-                                Throw-NiusUploadFailure $fail
-                            }
-                            if ($null -ne $lastAdafruitError) {
-                                throw $lastAdafruitError
-                            }
-                            throw
-                        }
-                        if ($wildcardAttempted) {
-                            throw
-                        }
-                        $uploadFailure = $fail
-                        if ($uploadFailure -and $uploadFailure.PSObject.Properties['Summary']) {
-                            Write-NiusDetail ('[nius] Adafruit serial DFU transfer failed before wildcard retry: {0}' -f $uploadFailure.Summary)
-                            foreach ($detail in @($uploadFailure.Details)) {
-                                Write-NiusDetail ('[nius]   {0}' -f $detail)
-                            }
-                        }
-                        else {
-                            Write-NiusDetail ('[nius] Adafruit serial DFU transfer failed before wildcard retry: {0}' -f $_.Exception.Message)
-                        }
-                        Write-NiusDetail '[nius] Adafruit serial DFU transfer failed; retrying with wildcard sd-req 0xFFFE'
-                        Write-Stage -Percent 90 -Label 'Finalizing'
-                        if ($UseTouch1200 -eq 'true') {
-                            $null = Invoke-NiusAdafruitDfuRetouchWait `
-                                -PortName $adafruitControlPort `
-                                -Reason 'Re-arming 1200 bps before wildcard sd-req retry (board may have left bootloader after failed transfer)' `
-                                -BootloaderVid $UsbVid `
-                                -BootloaderPid $UsbPid `
-                                -RuntimeVid $effectiveRuntimeUsbVid `
-                                -RuntimePid $effectiveRuntimeUsbPid `
-                                -InterfaceParentPrefix $adafruitControlPortParentPrefix `
-                                -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
-                                -ExpectedLabel $Uf2VolumeLabel `
-                                -ExpectedModel $Uf2Model `
-                                -ExpectedBoardId $Uf2BoardId
-                        }
-                        $bootloaderPortResolution = Wait-AdafruitBootloaderControlPort `
-                            -SelectedPort $Port `
-                            -CurrentPort $adafruitControlPort `
-                            -BootloaderVid $UsbVid `
-                            -BootloaderPid $UsbPid `
-                            -PreferredCompositeStableId $adafruitControlPortCompositeStableId `
-                            -InterfaceParentPrefix $adafruitControlPortParentPrefix `
-                            -TimeoutMs (Get-NiusAdafruitSerialReadyMilliseconds)
-                        if ($bootloaderPortResolution -and $bootloaderPortResolution.Resolved -and -not [string]::IsNullOrWhiteSpace($bootloaderPortResolution.Port)) {
-                            $resolvedBootloaderPort = $bootloaderPortResolution.Port.Trim()
-                            if ($resolvedBootloaderPort.ToUpperInvariant() -ne $adafruitControlPort.Trim().ToUpperInvariant()) {
-                                Write-NiusDetail ('[nius] serial DFU bootloader control port remap: using {0} instead of {1} ({2})' -f $resolvedBootloaderPort, $adafruitControlPort, $bootloaderPortResolution.Reason) -ForegroundColor DarkGray
-                            }
-                            $adafruitControlPort = $resolvedBootloaderPort
-                        }
-                        Wait-NiusBootloaderPortSettled -PortName $adafruitControlPort -CeilingMs (Get-NiusPostTouchSleepMilliseconds)
-                        Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq '0xFFFE'
-                        $wildcardAttempted = $true
-                        $normalizedSdReq = '0XFFFE'
-                        $successfulAdafruitTransport = 'serial-dfu'
-                    }
-                }
-            }
+            # A serial-DFU child can erase or write before it reports a failure.
+            # Retouching, repeating, or changing sd-req after that boundary is not
+            # demonstrably idempotent, particularly for single-bank bootloaders.
+            # Run exactly one identity-bound transfer and preserve any failure for
+            # explicit recovery instead of guessing that a retry is safe.
+            Write-NiusDetail '[nius] Starting one identity-bound Adafruit serial DFU transfer...' -ForegroundColor DarkGray
+            Invoke-AdafruitDfuDeploy -HexPath $Hex -Port $adafruitControlPort -SdReq $initialSdReq
             # One scoped guard is sufficient: it requires the expected runtime
             # VID/PID and preserved composite identity. It deliberately does
             # not open the fresh application COM, which would compete with the

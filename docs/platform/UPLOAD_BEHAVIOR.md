@@ -133,6 +133,10 @@ choices because it has no native USB upload path in this package.
   identity. Windows
   may assign a different number when the bootloader and application expose
   different composite interfaces; that remap is not an upload failure.
+- Serial DFU performs exactly one identity-bound mutating transfer per upload
+  invocation. A timeout, cable loss, protocol failure, or interrupted write is
+  terminal and keeps its original error; the wrapper never infers that a
+  second single-bank transfer or a wildcard SoftDevice requirement is safe.
 - The runtime DFU interface is hidden by default. Hands-free upload uses the
   service CDC's 1200-bps touch, so the extra driverless DFU-runtime node is not
   needed for ordinary use. Enable it explicitly only for a workflow that sends
