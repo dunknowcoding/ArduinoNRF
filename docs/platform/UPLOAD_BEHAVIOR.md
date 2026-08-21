@@ -62,7 +62,7 @@ choices because it has no native USB upload path in this package.
 - Arduino board recipes keep `upload.use_1200bps_touch=false`; this prevents
   Arduino CLI from issuing a second, unscoped touch before the identity-aware
   wrapper runs.
-- `Bootloader / DFU → Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use the packaged serial-DFU tool.
+- `Bootloader / DFU -> Auto-detect` prefers a matching UF2 mass-storage volume when the selected board is already in bootloader mode. Explicit serial-DFU menu entries still use the packaged serial-DFU tool.
 - Auto-detection never treats a known application PID as a bootloader. Bootloader
   IDs shared by more than one flash layout require scoped `INFO_UF2.TXT` evidence;
   when MSC metadata is unavailable, select the explicit serial-DFU layout instead
@@ -81,14 +81,17 @@ choices because it has no native USB upload path in this package.
   `SoftDevice` field to infer the mounted layout (`0x1000`, `0x26000`, or
   `0x27000`). If that layout conflicts with the app start used by the selected
   Arduino IDE `Bootloader / DFU` option, upload fails before copying firmware.
-  This applies to **UF2 deploy**, **serial DFU**, and the **UF2→serial fallback**
-  path. Serial-only bootloaders do not expose mass storage, so that path makes
-  an immediate identity-scoped `INFO_UF2.TXT` check when a matching volume is
-  already available, without delaying an otherwise valid serial transfer. When
-  no UF2 metadata exists, the exact app start and SoftDevice requirement come
-  from the selected board recipe. A discovered mismatch remains terminal before
-  firmware is written; Arduino compiles before upload, so the wrapper cannot
-  safely relocate an already-linked image.
+  This applies to **UF2 deploy**, **serial DFU**, and the **UF2-to-serial
+  fallback** path. Serial-only bootloaders do not expose mass storage, so an
+  explicit UF2 menu choice may use the selected board's identity-scoped
+  maintenance CDC when the matching UF2 volume is not mounted. That fallback
+  is admitted only after a confirmed reset transition and uses the recipe's
+  exact app start and SoftDevice requirement; it does not guess either value.
+  If a matching `INFO_UF2.TXT` is available, it is still checked and any
+  mismatch remains terminal before firmware is written. Auto-detection cannot
+  use this fallback for a shared bootloader ID without scoped UF2 layout
+  evidence. Arduino compiles before upload, so the wrapper cannot safely
+  relocate an already-linked image.
 - Before any Windows USB discovery or touch, the uploader independently validates every
   Intel HEX record checksum and length, rejects overlaps or records after EOF,
   and requires the actual vector table, Thumb reset entry, exact target stack pointer,

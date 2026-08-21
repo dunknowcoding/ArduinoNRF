@@ -1725,13 +1725,11 @@ function Invoke-Uf2SerialDfuFallback {
     Write-NiusDetail ('[nius] UF2 volume is unavailable; using bootloader serial DFU on {0} ({1}).' -f $fallbackPort, $portResolution.Reason) -ForegroundColor DarkYellow
     Invoke-NiusPreUploadLayoutGuard `
         -ExpectedAppStart $ExpectedAppStart `
-        -Context 'UF2 serial fallback pre-flash' `
+        -Context 'explicit UF2 recipe via serial transport' `
         -ExpectedLabel $ExpectedLabel `
         -ExpectedModel $ExpectedModel `
         -ExpectedBoardId $ExpectedBoardId `
         -PreferredCompositeStableId $PreferredCompositeStableId `
-        -RequireUf2Evidence `
-        -Uf2ProbeWaitMs 12000 `
         -PortName $fallbackPort
     $initialSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq
     Invoke-AdafruitDfuDeploy -HexPath $HexPath -Port $fallbackPort -SdReq $initialSdReq
