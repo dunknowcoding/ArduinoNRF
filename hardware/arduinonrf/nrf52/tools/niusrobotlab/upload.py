@@ -355,6 +355,24 @@ def runtime_endpoint_ready(candidates) -> bool:
     return known_interfaces.count(0) == 1
 
 
+def runtime_role_candidates(
+    candidates,
+    boot_vid: int,
+    boot_pid: int,
+    runtime_vid: int,
+    runtime_pid: int,
+    boot_session: str,
+):
+    """Discard a same-identity bootloader session from runtime evidence."""
+    if (boot_vid, boot_pid) != (runtime_vid, runtime_pid):
+        return candidates
+    return [
+        identity for identity in candidates
+        if boot_session and identity_session(identity)
+        and identity_session(identity) != boot_session
+    ]
+
+
 def serial_identities():
     """Enumerate current USB-backed serial endpoints on the active Unix host."""
     if sys.platform.startswith("linux"):
@@ -410,7 +428,7 @@ def select_scoped_control_port(
 def touch_serial_port(port: str, baud: int) -> None:
     """Send one POSIX 1200-baud/DTR falling edge on the selected endpoint."""
     if baud != 1200:
-        raise ValueError("bootloader touch must be 0 or 1200 baud")
+        raise ValueError("bootloader touch must be 1200 baud")
 
     import fcntl
     import struct
@@ -650,28 +668,35 @@ def wait_for_runtime(
     runtime_pid: int,
     serial: str,
     stable_id: str,
+    boot_vid: int,
+    boot_pid: int,
+    boot_session: str,
     timeout_s: float,
     stable_s: float,
 ) -> bool:
     deadline = time.monotonic() + timeout_s
     ready_since = None
     while time.monotonic() < deadline:
-        ready = False
+        candidates = []
         if sys.platform.startswith("linux"):
-            candidates = []
             for tty_node in Path("/sys/class/tty").glob("*"):
                 identity = linux_tty_usb_identity("/dev/" + tty_node.name)
                 if identity and identity[0] == runtime_vid and identity[1] == runtime_pid:
                     if matches_target_scope(identity, serial, stable_id):
                         candidates.append(identity)
-            ready = runtime_endpoint_ready(candidates)
         elif sys.platform == "darwin":
             candidates = [
                 d for d in mac_serial_devices()
                 if d[0] == runtime_vid and d[1] == runtime_pid
                 and matches_target_scope(d, serial, stable_id)
             ]
-            ready = runtime_endpoint_ready(candidates)
+        # A same-VID/PID bootloader CDC is not application evidence. The
+        # transfer must have produced a new device enumeration session;
+        # without host-provided session metadata its role is unprovable.
+        candidates = runtime_role_candidates(
+            candidates, boot_vid, boot_pid, runtime_vid, runtime_pid, boot_session
+        )
+        ready = runtime_endpoint_ready(candidates)
         ready_since, stable = advance_runtime_stability(
             ready, time.monotonic(), ready_since, stable_s
         )
@@ -711,6 +736,24 @@ def main() -> int:
         assert not runtime_endpoint_ready([
             (0x239A, 0x0001, "runtime", "/dev/ttyACM2", 2, "scope")
         ])
+        old_session = (
+            0x239A, 0x00B3, "boot", "/dev/ttyACM1", 0, "scope", "devnum:11"
+        )
+        new_session = (
+            0x239A, 0x00B3, "runtime", "/dev/ttyACM1", 0, "scope", "devnum:12"
+        )
+        assert runtime_role_candidates(
+            [old_session], 0x239A, 0x00B3, 0x239A, 0x00B3, "devnum:11"
+        ) == []
+        assert runtime_role_candidates(
+            [new_session], 0x239A, 0x00B3, 0x239A, 0x00B3, "devnum:11"
+        ) == [new_session]
+        assert runtime_role_candidates(
+            [new_session], 0x239A, 0x00B3, 0x239A, 0x00B3, ""
+        ) == []
+        assert runtime_role_candidates(
+            [old_session], 0x239A, 0x00B3, 0x239A, 0x00B4, "devnum:11"
+        ) == [old_session]
         assert not runtime_endpoint_ready([
             (0x239A, 0x0001, "runtime", "/dev/ttyACM1", 0, "scope"),
             (0x239A, 0x0001, "runtime", "/dev/ttyACM2", 0, "scope"),
@@ -914,12 +957,12 @@ def main() -> int:
     ap.add_argument("--max-size", required=True, help="maximum application bytes from --app-start")
     ap.add_argument("--ram-end", required=True, help="exclusive upper SRAM address for the selected target")
     ap.add_argument("--runtime-timeout", default="30", help="seconds to wait for identity-verified application USB")
-    ap.add_argument("--runtime-stable-ms", default="300", help="continuous milliseconds the same application USB identity must remain present")
+    ap.add_argument("--runtime-stable-ms", default="300", help="continuous milliseconds the same application USB identity must remain present (100..5000)")
     ap.add_argument("--bootloader-timeout", default="15", help="seconds to wait for the identity-scoped bootloader maintenance endpoint")
-    ap.add_argument("--sd-req", default="0xFFFE", help="adafruit-nrfutil genpkg --sd-req (SoftDevice req hash; 0xFFFE = wildcard)")
+    ap.add_argument("--sd-req", required=True, help="board-recipe SoftDevice compatibility id for genpkg (declared no-SoftDevice layouts use 0xFFFE)")
     ap.add_argument("--dev-type", default="0x0052", help="adafruit-nrfutil genpkg --dev-type (0x0052 = nRF52)")
     ap.add_argument("--baud", default="115200", help="serial DFU baud (Adafruit fork uses 115200)")
-    ap.add_argument("--touch", default="1200", help="open port at this baud before DFU; 0 disables")
+    ap.add_argument("--touch", default="1200", help="owned bootloader-entry baud (must be 1200; an already-selected distinct bootloader is detected automatically)")
     ap.add_argument("--nrfutil", default="adafruit-nrfutil", help="adafruit-nrfutil executable name or path")
     ap.add_argument("--verbose", action="store_true", help="pass --verbose to adafruit-nrfutil")
     args = ap.parse_args()
@@ -967,7 +1010,7 @@ def main() -> int:
             args.runtime_timeout, "runtime timeout", 0.1, 600.0
         )
         runtime_stable_s = parse_bounded_float(
-            args.runtime_stable_ms, "runtime stable duration", 0.0, 5_000.0
+            args.runtime_stable_ms, "runtime stable duration", 100.0, 5_000.0
         ) / 1000.0
         bootloader_timeout = parse_bounded_float(
             args.bootloader_timeout, "bootloader timeout", 0.5, 120.0
@@ -975,9 +1018,7 @@ def main() -> int:
         if runtime_stable_s >= runtime_timeout:
             raise ValueError("runtime stable duration must be shorter than runtime timeout")
         baud = parse_bounded_int(args.baud, "DFU baud", 1, 4_000_000)
-        touch = parse_bounded_int(args.touch, "touch baud", 0, 4_000_000)
-        if touch not in (0, 1200):
-            raise ValueError("touch baud must be 0 or 1200")
+        touch = parse_bounded_int(args.touch, "touch baud", 1200, 1200)
         dev_type = parse_bounded_int(args.dev_type, "device type", 0, 0xFFFF)
         sd_req = parse_bounded_int(args.sd_req, "SoftDevice requirement", 0, 0xFFFF)
     except ValueError as error:
@@ -1147,7 +1188,7 @@ def main() -> int:
                 code=4,
             )
 
-        boot_serial, boot_stable_id, endpoint_vid, endpoint_pid, _boot_session = (
+        boot_serial, boot_stable_id, endpoint_vid, endpoint_pid, boot_session = (
             capture_target_identity(
                 control_port, boot_vid, boot_pid, runtime_vid, runtime_pid
             )
@@ -1176,6 +1217,7 @@ def main() -> int:
             return rc
         if not wait_for_runtime(
             runtime_vid, runtime_pid, target_serial, target_stable_id,
+            boot_vid, boot_pid, boot_session,
             runtime_timeout, runtime_stable_s
         ):
             fail(

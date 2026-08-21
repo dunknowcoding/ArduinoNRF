@@ -114,8 +114,8 @@ choices because it has no native USB upload path in this package.
   for the selected board to return in application mode. The fast path checks
   the expected VID/PID and preserved physical-device identity without opening
   the newly enumerated application COM. If USB never comes back
-  (typical when app start was wrong), the wrapper attempts 1200 bps touch / UF2
-  recovery and fails with an IDE-visible message. This check is mandatory.
+  (typical when app start was wrong), the wrapper fails without issuing another
+  touch or transfer and reports explicit recovery choices. This check is mandatory.
   A reused COM number is not sufficient evidence: the endpoint must match the
   board recipe's runtime VID/PID. This prevents the departing bootloader CDC
   from being mistaken for a successfully started application.
@@ -149,10 +149,11 @@ choices because it has no native USB upload path in this package.
 - Serial DFU performs exactly one identity-bound mutating transfer per upload
   invocation. A timeout, cable loss, protocol failure, or interrupted write is
   terminal and keeps its original error; the wrapper never infers that a
-  second single-bank transfer or a wildcard SoftDevice requirement is safe.
+  second single-bank transfer or an inferred SoftDevice requirement is safe.
 - Each serial-DFU board/layout recipe must declare its exact `sd-req`. A missing
   or malformed value is terminal; the uploader does not infer a SoftDevice
-  generation from the MCU type.
+  generation from the MCU type. `0xFFFE` is the declared compatibility value
+  used by supported no-SoftDevice layouts, not an inferred retry value.
 - That sole transfer is launched only after the exact bootloader maintenance
   CDC is proven in the selected physical scope. An unconfirmed touch and an
   unresolved bootloader port are terminal; the old runtime COM is never used as
@@ -241,11 +242,16 @@ choices because it has no native USB upload path in this package.
   changes remain scoped without allowing a peer board to satisfy the check.
 - The same runtime identity must remain continuously present for 300 ms by default;
   a transient enumeration followed by an early application/watchdog failure is not
-  reported as upload success. `--runtime-stable-ms` may tune this bounded check.
+  reported as upload success. `--runtime-stable-ms` may tune this bounded check
+  only within 100..5000 ms; zero cannot disable it.
 - When the host exposes CDC interface numbers, post-upload verification requires
   exactly one maintenance interface zero. A surviving user CDC alone is not accepted
   as proof that the hands-free upload path was restored. Hosts that omit interface
   metadata fall back to the exact physical USB topology/serial identity.
+- When bootloader and application share one VID/PID, Linux/macOS additionally
+  require a new host enumeration session after transfer. A surviving bootloader
+  CDC from the old session is never accepted as application return; hosts that
+  cannot expose a session token fail closed for this ambiguous layout.
 - Windows likewise requires one identity-scoped maintenance COM to remain present
   for at least 300 ms; a composite parent or USER CDC alone is insufficient. A
   shared bootloader/runtime VID/PID also requires the bootloader MSC interface to

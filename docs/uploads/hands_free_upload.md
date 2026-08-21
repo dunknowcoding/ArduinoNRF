@@ -49,8 +49,8 @@ A hardened PowerShell pipeline drives the touch and DFU. Beyond the basics it pr
 - **One mutating transfer per invocation.** Once serial DFU launches, any
   timeout, disconnect, protocol rejection, or partial-transfer failure is
   terminal. The uploader does not re-touch, repeat a possibly partial
-  single-bank write, or replace the selected SoftDevice requirement with a
-  wildcard. Re-run only after recovering and re-identifying the same board.
+  single-bank write, or replace the selected SoftDevice requirement with an
+  inferred value. Re-run only after recovering and re-identifying the same board.
 - A per-port mutex so double-clicking **Upload** can't interleave two flashes.
 - A bridge-yield IPC so an active debug session releases the COM for the upload.
 - Identity-scoped user-to-service CDC resolution; ambiguous sibling or peer mappings fail before touch.

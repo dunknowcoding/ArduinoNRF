@@ -1199,71 +1199,6 @@ function Invoke-NiusPreUploadLayoutGuard {
     return
 }
 
-function Invoke-NiusRecoverBoardToBootloader {
-    param(
-        [string]$PortName,
-        [string]$ExpectedLabel = '',
-        [string]$ExpectedModel = '',
-        [string]$ExpectedBoardId = '',
-        [string]$PreferredCompositeStableId = '',
-        [string]$BootloaderVid = '',
-        [string]$BootloaderPid = '',
-        [int]$Uf2WaitMs = 18000
-    )
-
-    $recovered = $false
-    $detail = 'no recovery path attempted'
-
-    if (-not [string]::IsNullOrWhiteSpace($PortName)) {
-        $st = Get-SerialPortUsableState -PortName $PortName
-        $stableIdMatches = [string]::IsNullOrWhiteSpace($PreferredCompositeStableId) -or
-            ((Get-SerialPortUsbParentCompositeStableId -PortName $PortName -Fresh) -eq $PreferredCompositeStableId.Trim().ToUpperInvariant())
-        if ($st.Openable -and $stableIdMatches) {
-            Write-NiusDetail ('[nius] misflash recovery: 1200 bps touch on {0} to re-enter bootloader...' -f $PortName) -ForegroundColor Yellow
-            $touch = Touch-SerialPort1200 -PortName $PortName
-            if ($touch.Triggered) {
-                $detail = 'one 1200 bps touch sent on service COM'
-            }
-        }
-    }
-
-    $uf2Deadline = (Get-Date).AddMilliseconds($Uf2WaitMs)
-    while ((Get-Date) -lt $uf2Deadline) {
-        try {
-            $uf2 = Get-Uf2ProbeSummary -ExpectedLabel $ExpectedLabel -ExpectedModel $ExpectedModel -ExpectedBoardId $ExpectedBoardId -PreferredCompositeStableId $PreferredCompositeStableId
-            if ($uf2) {
-                $recovered = $true
-                $detail = ('UF2 drive mounted at {0}' -f $uf2.Drive)
-                Write-NiusBootloaderReady -Drive $uf2.Drive -Note 'Misflash recovery: board is back in UF2/DFU - fix Bootloader / DFU menu, recompile, upload again.'
-                break
-            }
-        }
-        catch {
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace($PortName) -and
-            -not [string]::IsNullOrWhiteSpace($BootloaderVid) -and
-            -not [string]::IsNullOrWhiteSpace($BootloaderPid)) {
-            $st = Get-SerialPortUsableState -PortName $PortName
-            $stableIdMatches = [string]::IsNullOrWhiteSpace($PreferredCompositeStableId) -or
-                ((Get-SerialPortUsbParentCompositeStableId -PortName $PortName -Fresh) -eq $PreferredCompositeStableId.Trim().ToUpperInvariant())
-            if ($st.Openable -and $stableIdMatches -and
-                (Test-SerialPortMatchesUsbIdentity -PortName $PortName -Vid $BootloaderVid -ProductId $BootloaderPid)) {
-                $recovered = $true
-                $detail = ('bootloader COM {0} is openable with the expected USB identity' -f $PortName)
-                break
-            }
-        }
-
-        Start-Sleep -Milliseconds 400
-    }
-
-    return [pscustomobject]@{
-        Recovered = $recovered
-        Detail = $detail
-    }
-}
-
 function Get-NiusRuntimeComNamesForIdentity {
     param(
         [string]$RuntimeVid,
@@ -1451,16 +1386,6 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         Start-Sleep -Milliseconds 150
     }
 
-    Write-NiusDetail '[nius] misflash guard: USB serial did not return after upload; attempting bootloader recovery...' -ForegroundColor Yellow
-    $recovery = Invoke-NiusRecoverBoardToBootloader `
-        -PortName $PortName `
-        -ExpectedLabel $ExpectedLabel `
-        -ExpectedModel $ExpectedModel `
-        -ExpectedBoardId $ExpectedBoardId `
-        -PreferredCompositeStableId $PreferredCompositeStableId `
-        -BootloaderVid $BootloaderVid `
-        -BootloaderPid $BootloaderPid
-
     $compiled = Normalize-NiusHexAddress -Value $ExpectedAppStart
     $lines = New-Object 'System.Collections.Generic.List[string]'
     $lines.Add('Upload finished, but the board USB serial never came back in application mode.')
@@ -1468,12 +1393,7 @@ function Invoke-NiusMisflashGuardAfterSamePidUpload {
         $lines.Add(('This sketch was compiled for app start {0}. A mismatch with the mounted bootloader (wrong Bootloader / DFU menu) often causes USB to disappear after flash.' -f $compiled))
     }
     $lines.Add('Select the matching Bootloader / DFU layout (no-SoftDevice clones: no SoftDevice / MBR only 0x1000), recompile, then upload again.')
-    if ($recovery.Recovered) {
-        $lines.Add(('Recovery: {0}. The board should be in UF2/DFU again - fix the menu option before the next upload.' -f $recovery.Detail))
-    }
-    else {
-        $lines.Add(('Recovery failed ({0}). Double-tap RESET, re-plug USB, or use SWD/J-Link, then enter UF2/DFU manually.' -f $recovery.Detail))
-    }
+    $lines.Add('No second reset or transfer was attempted. Inspect the current bootloader state, then use explicit UF2 or SWD recovery before retrying.')
     $lines.Add('ZH: Upload finished but USB serial never returned - usually wrong Bootloader / DFU app start. For no-SoftDevice clones use 0x1000, recompile, upload again.')
 
     Throw-NiusUploadFailure (New-UploadFailure -Kind 'misflash' -ExitCode 1 -Output ($lines.ToArray() -join [Environment]::NewLine) -Exe $toolPath)
@@ -2599,10 +2519,10 @@ function Invoke-CommandChecked {
             'non-DEBUG/INFO adafruit-nrfutil output lines'
         }
         $summaryOutput = if ([string]::IsNullOrWhiteSpace($output)) {
-            ('adafruit-nrfutil stalled: no new {0} for {1} ms (upload failed). Tune NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS; NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS=0 disables idle watchdog. NIUS_ADAFRUIT_DFU_IDLE_RESET_ON_ANY_LINE=1 makes DEBUG/INFO lines reset the idle clock (legacy; can spin forever if logs spam).' -f $idleKind, $idleMs)
+            ('adafruit-nrfutil stalled: no new {0} for {1} ms (upload failed). NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS accepts only 1000..120000; invalid values use the 30000 ms default. NIUS_ADAFRUIT_DFU_IDLE_RESET_ON_ANY_LINE=1 makes DEBUG/INFO lines reset the idle clock, while the finite process deadline still applies.' -f $idleKind, $idleMs)
         }
         else {
-            ('adafruit-nrfutil stalled: no new {0} for {1} ms (upload failed). Tune NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS; NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS=0 disables idle watchdog. NIUS_ADAFRUIT_DFU_IDLE_RESET_ON_ANY_LINE=1 restores DEBUG/INFO-sensitive idle reset. Partial output:{2}{3}' -f $idleKind, $idleMs, [Environment]::NewLine, $output)
+            ('adafruit-nrfutil stalled: no new {0} for {1} ms (upload failed). NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS accepts only 1000..120000; invalid values use the 30000 ms default. NIUS_ADAFRUIT_DFU_IDLE_RESET_ON_ANY_LINE=1 restores DEBUG/INFO-sensitive idle reset while the finite process deadline still applies. Partial output:{2}{3}' -f $idleKind, $idleMs, [Environment]::NewLine, $output)
         }
         Throw-NiusUploadFailure (New-UploadFailure -Kind 'adafruit-dfu' -ExitCode 125 -Output $summaryOutput -Exe $Exe)
     }
@@ -2923,8 +2843,8 @@ function Get-FailureHints {
             if ($normalized -match 'stalled: no new|stalled: no stdout/stderr lines') {
                 return @(
                     'nrfutil idle watchdog: no non-DEBUG/INFO lines for NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS (default 30000 ms) means the transfer is treated as stuck.',
-                    'Increase the timeout on slow USB links; NIUS_ADAFRUIT_DFU_IDLE_TIMEOUT_MS=0 disables idle detection (process wall timeout still applies).',
-                    'NIUS_ADAFRUIT_DFU_IDLE_RESET_ON_ANY_LINE=1 restores counting DEBUG/INFO lines toward idle reset (can spin forever if logs spam).',
+                    'Increase the timeout on slow USB links within 1000..120000 ms; zero, malformed, and out-of-range values use the 30000 ms default.',
+                    'NIUS_ADAFRUIT_DFU_IDLE_RESET_ON_ANY_LINE=1 restores counting DEBUG/INFO lines toward idle reset; the finite process wall timeout still applies.',
                     'Otherwise: bootloader not responding, wrong COM, broken adafruit-nrfutil/Python env (reinstall with `pip install -U adafruit-nrfutil`), or another program holding the serial port.'
                 )
             }
@@ -2938,7 +2858,7 @@ function Get-FailureHints {
         'post-verify' {
             return @(
                 'The transfer finished, but the board stayed in the UF2/serial-DFU bootloader instead of launching the flashed application.',
-                'If this clone sometimes mounts a UF2 drive letter (for example J:), use the explicit UF2 bootloader menu entry or let the wrapper''s UF2 fallback retry path handle it.',
+                'If this clone sometimes mounts a UF2 drive letter (for example J:), use the explicit UF2 bootloader menu entry or the single identity-scoped UF2-to-serial fallback.',
                 'On clone boards this usually means the bootloader never marked the app as valid; switch to SWD upload/recovery to separate firmware issues from bootloader/settings corruption.',
                 'If the board has no button, USB-only recovery is limited once the bootloader keeps re-entering itself on every power cycle.'
             )
