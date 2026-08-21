@@ -80,6 +80,12 @@ valid module reuses the interface number. An invalid optional module therefore
 cannot truncate the configuration header or prevent the maintenance CDC from
 enumerating.
 
+The same transaction rule applies after enumeration. A module that owns a
+control-IN request must append exactly the positive byte count it reports. A
+zero return must append nothing. Negative, overflowed, or mismatched responses
+are rolled back and stalled, and dispatch stops at the first valid owner instead
+of concatenating two modules' replies or exposing stale EP0 buffer bytes.
+
 So debugging rides the *same* enumeration-from-ISR USB core as `Serial` and the
 uploader; there is no second USB implementation. Application `Serial` (user CDC)
 stays separate — don't multiplex sketch `printf` onto the service CDC during a

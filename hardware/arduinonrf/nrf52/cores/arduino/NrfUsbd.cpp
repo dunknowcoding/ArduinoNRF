@@ -1914,9 +1914,18 @@ bool NrfUsbdDriver::initDescriptors() {
     ++interfaceCount;
 #endif
 
-    PluggableUSB().beginDescriptorBuild(configurationDescriptor_, sizeof(configurationDescriptor_), configurationDescriptorLength_);
-    configurationDescriptorLength_ = static_cast<uint16_t>(configurationDescriptorLength_ + PluggableUSB().getInterface(&interfaceCount));
-    configurationDescriptorLength_ = static_cast<uint16_t>(PluggableUSB().endDescriptorBuild());
+    const size_t baseDescriptorLength = configurationDescriptorLength_;
+    PluggableUSB().beginDescriptorBuild(configurationDescriptor_,
+                                        sizeof(configurationDescriptor_),
+                                        baseDescriptorLength);
+    const int pluggableLength = PluggableUSB().getInterface(&interfaceCount);
+    const size_t builtDescriptorLength = PluggableUSB().endDescriptorBuild();
+    if (pluggableLength < 0 ||
+        builtDescriptorLength != baseDescriptorLength + static_cast<size_t>(pluggableLength) ||
+        builtDescriptorLength > sizeof(configurationDescriptor_)) {
+        return false;
+    }
+    configurationDescriptorLength_ = static_cast<uint16_t>(builtDescriptorLength);
 
     configurationDescriptor_[2] = static_cast<uint8_t>(configurationDescriptorLength_ & 0xFFU);
     configurationDescriptor_[3] = static_cast<uint8_t>((configurationDescriptorLength_ >> 8U) & 0xFFU);
@@ -2510,8 +2519,9 @@ void NrfUsbdDriver::handleStandardRequest(uint8_t request, uint16_t value, uint1
             USBSetup setup = {static_cast<uint8_t>(reg32(USBD_BASE, BMREQUESTTYPE) & 0xFFUL), request, value, index, length};
             PluggableUSB().beginDescriptorBuild(controlInBuffer_, sizeof(controlInBuffer_));
             const int descriptorLength = PluggableUSB().getDescriptor(setup);
-            (void)PluggableUSB().endDescriptorBuild();
-            if (descriptorLength > 0) {
+            const size_t builtLength = PluggableUSB().endDescriptorBuild();
+            if (descriptorLength > 0 &&
+                builtLength == static_cast<size_t>(descriptorLength)) {
                 size_t responseLength = length;
                 if (responseLength > static_cast<size_t>(descriptorLength)) {
                     responseLength = static_cast<size_t>(descriptorLength);
@@ -2869,8 +2879,9 @@ void NrfUsbdDriver::handleClassRequest(uint8_t requestType, uint8_t request, uin
         if (directionIn) {
             PluggableUSB().beginDescriptorBuild(controlInBuffer_, sizeof(controlInBuffer_));
             const int responseLength = PluggableUSB().getSetupResponse(setup);
-            (void)PluggableUSB().endDescriptorBuild();
-            if (responseLength > 0) {
+            const size_t builtLength = PluggableUSB().endDescriptorBuild();
+            if (responseLength > 0 &&
+                builtLength == static_cast<size_t>(responseLength)) {
                 size_t actualLength = length;
                 if (actualLength > static_cast<size_t>(responseLength)) {
                     actualLength = static_cast<size_t>(responseLength);

@@ -120,26 +120,52 @@ int PluggableUSB_::getInterface(uint8_t *interfaceCount) {
 }
 
 int PluggableUSB_::getDescriptor(USBSetup &setup) {
-    int total = 0;
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
         if (!node->descriptorAdmitted) {
             continue;
         }
-        total += node->getDescriptor(setup);
+        const size_t beforeLength = descriptorLength_;
+        descriptorOverflowed_ = false;
+        const int reported = node->getDescriptor(setup);
+        const bool lengthMonotonic = descriptorLength_ >= beforeLength;
+        const size_t written = lengthMonotonic ? descriptorLength_ - beforeLength : 0U;
+        if (reported == 0 && written == 0U && !descriptorOverflowed_ && lengthMonotonic) {
+            continue;
+        }
+        if (reported <= 0 || descriptorOverflowed_ || !lengthMonotonic ||
+            static_cast<size_t>(reported) != written) {
+            descriptorLength_ = beforeLength;
+            descriptorOverflowed_ = false;
+            return -1;
+        }
+        // A control request has exactly one owner. Stop at the first complete,
+        // internally consistent response instead of concatenating responses
+        // from two modules that accidentally claim the same selector.
+        return reported;
     }
-    return total;
+    return 0;
 }
 
 int PluggableUSB_::getSetupResponse(USBSetup &setup) {
-    int total = 0;
     for (PluggableUSBModule *node = rootNode_; node != nullptr; node = node->next) {
         if (!node->descriptorAdmitted) {
             continue;
         }
-        total += node->getSetupResponse(setup);
-        if (total > 0) {
-            return total;
+        const size_t beforeLength = descriptorLength_;
+        descriptorOverflowed_ = false;
+        const int reported = node->getSetupResponse(setup);
+        const bool lengthMonotonic = descriptorLength_ >= beforeLength;
+        const size_t written = lengthMonotonic ? descriptorLength_ - beforeLength : 0U;
+        if (reported == 0 && written == 0U && !descriptorOverflowed_ && lengthMonotonic) {
+            continue;
         }
+        if (reported <= 0 || descriptorOverflowed_ || !lengthMonotonic ||
+            static_cast<size_t>(reported) != written) {
+            descriptorLength_ = beforeLength;
+            descriptorOverflowed_ = false;
+            return -1;
+        }
+        return reported;
     }
     return 0;
 }
@@ -194,7 +220,10 @@ bool PluggableUSB_::appendDescriptor(const void *data, size_t length) {
     if (descriptorBuffer_ == nullptr || data == nullptr || length == 0U) {
         return false;
     }
-    if ((descriptorLength_ + length) > descriptorCapacity_) {
+    // Subtraction form also rejects SIZE_MAX-style lengths without allowing
+    // the addition to wrap and turn an overflow into an out-of-bounds copy.
+    if (descriptorLength_ > descriptorCapacity_ ||
+        length > (descriptorCapacity_ - descriptorLength_)) {
         descriptorOverflowed_ = true;
         return false;
     }
