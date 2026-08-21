@@ -141,6 +141,10 @@ choices because it has no native USB upload path in this package.
   CDC is proven in the selected physical scope. An unconfirmed touch and an
   unresolved bootloader port are terminal; the old runtime COM is never used as
   a speculative DFU endpoint.
+- When application and bootloader share one VID/PID, a matching COM node alone
+  cannot prove its role. The uploader additionally requires a confirmed reset
+  transition or stronger identity-scoped bootloader evidence; there is no
+  environment-variable override that converts an application COM into proof.
 - Linux and macOS do not delegate 1200-baud transition ownership to
   `adafruit-nrfutil`: upstream sleeps and reopens the same tty without checking
   physical identity. ArduinoNRF sends one DTR edge, resolves exactly one

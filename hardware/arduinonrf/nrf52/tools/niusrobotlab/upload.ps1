@@ -4305,6 +4305,7 @@ try {
     )
     $adafruitControlPort = $Port
     $controlPortAlreadyBootloader = $false
+    $bootloaderTransitionConfirmed = $false
     $explicitUf2UploadMode = ($BootloaderMode -eq 'uf2')
     $uf2AlreadyMountedSummary = $null
     if (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid) -and -not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid)) {
@@ -4441,11 +4442,6 @@ try {
                 Write-NiusDetail ('[nius] Same-PID upload path: treating {0} as runtime service CDC and keeping 1200 touch enabled.' -f $adafruitControlPort) -ForegroundColor DarkGray
             }
         }
-        if ($env:NIUS_ASSUME_SELECTED_PORT_BOOTLOADER -eq '1') {
-            $controlPortAlreadyBootloader = $true
-            $runtimeSharesUploadIdentity = $false
-            Write-NiusDetail ('[nius] NIUS_ASSUME_SELECTED_PORT_BOOTLOADER=1 - treating {0} as an already-running bootloader port.' -f $adafruitControlPort) -ForegroundColor DarkGray
-        }
     }
 
     Write-NiusTiming 'identity/bootloader checks done'
@@ -4522,6 +4518,9 @@ try {
                     -ExpectedLabel $Uf2VolumeLabel `
                     -ExpectedModel $Uf2Model `
                     -ExpectedBoardId $Uf2BoardId
+                if ($touchTransition.Triggered) {
+                    $bootloaderTransitionConfirmed = $true
+                }
                 if (-not $touchTransition.Triggered) {
                     Write-NiusDetail ('[warn] 1200 bps touch on {0} did not confirm a host-visible transition; probing scoped bootloader anyway (same-PID clones may keep the COM name).' -f $adafruitControlPort) -ForegroundColor DarkYellow
                 }
@@ -4559,6 +4558,11 @@ try {
             $Uf2VolumeLabel = $resolved.VolumeLabel
             $Uf2Model = $resolved.Model
             $Uf2BoardId = $resolved.BoardId
+            $runtimeSharesUploadIdentity =
+                (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbVid)) -and
+                (-not [string]::IsNullOrWhiteSpace($effectiveRuntimeUsbPid)) -and
+                ($effectiveRuntimeUsbVid.Trim().ToUpperInvariant() -eq $UsbVid.Trim().ToUpperInvariant()) -and
+                ($effectiveRuntimeUsbPid.Trim().ToUpperInvariant() -eq $UsbPid.Trim().ToUpperInvariant())
             # Touch already attempted (or skipped because the device was already in
             # bootloader mode); don't re-touch on the legacy path below.
             $UseTouch1200 = 'false'
@@ -4585,7 +4589,6 @@ try {
         }
 
         $touchPrepared = $false
-        $bootloaderTransitionConfirmed = $false
         $touchDetectedBootloader = $null
         if ($BootloaderMode -eq 'adafruit-dfu' -and $UseTouch1200 -eq 'true' -and $controlPortAlreadyBootloader) {
             Write-NiusDetail '[nius] Entering bootloader (1200 bps touch)...' -ForegroundColor DarkGray
@@ -4729,6 +4732,10 @@ try {
         # Nordic's PCA10059 bootloader uses the same Secure DFU packet protocol
         # over USB CDC, not the USB DFU class implemented by dfu-util.
         if ($BootloaderMode -eq 'adafruit-dfu' -or $BootloaderMode -eq 'nordic-dfu') {
+            if ($BootloaderMode -eq 'adafruit-dfu' -and $runtimeSharesUploadIdentity -and
+                -not $bootloaderTransitionConfirmed -and -not $controlPortAlreadyBootloader) {
+                Throw-NiusUploadFailure (New-UploadFailure -Kind 'dfu-wait' -ExitCode 1 -Output ('The runtime and bootloader share one VID/PID, but neither a reset transition nor stronger identity-scoped bootloader evidence was proven for {0}. Refusing a speculative protocol probe on the application COM; no mutating transfer was launched.' -f $adafruitControlPort) -Exe $toolPath)
+            }
             $initialSdReq = Resolve-AdafruitInitialSdReq -SdReq $SdReq
             $bootloaderPortResolution = Wait-AdafruitBootloaderControlPort `
                 -SelectedPort $Port `
