@@ -3683,11 +3683,13 @@ function Wait-NiusBootloaderPortSettled {
     )
 
     if ([string]::IsNullOrWhiteSpace($PortName) -or $PortName.StartsWith('{')) {
-        # No concrete port to probe; fall back to a short blind settle.
-        Start-Sleep -Milliseconds ([Math]::Min($CeilingMs, 1500))
-        return
+        throw 'Bootloader settlement requires one concrete serial endpoint; no blind delay was used.'
     }
-    if ($CeilingMs -lt $FloorMs) { $FloorMs = $CeilingMs }
+    if ($CeilingMs -lt 500 -or $CeilingMs -gt 15000 -or
+        $FloorMs -lt 0 -or $StableMs -lt 1 -or
+        $FloorMs -gt $CeilingMs -or $StableMs -gt $CeilingMs) {
+        throw 'Invalid bounded bootloader settlement interval.'
+    }
 
     $start = Get-Date
     $floorDeadline = $start.AddMilliseconds($FloorMs)
@@ -3712,7 +3714,7 @@ function Wait-NiusBootloaderPortSettled {
         }
         Start-Sleep -Milliseconds 120
     }
-    Write-NiusDetail ('[nius] Bootloader COM {0} did not stabilize within ceiling {1} ms; proceeding anyway.' -f $PortName, $CeilingMs) -ForegroundColor DarkYellow
+    throw ('Bootloader COM {0} did not remain present and openable for {1} ms within the {2} ms ceiling; no transfer was launched.' -f $PortName, $StableMs, $CeilingMs)
 }
 
 # Check serial port presence via WMI without opening the port.

@@ -187,7 +187,9 @@ choices because it has no native USB upload path in this package.
   or acquisition failure is terminal before USB is touched.
 - Open/transition/settle tuning is finite and range-checked. The uploader
   always uses identity-aware adaptive settlement; a caller cannot replace it with
-  an unbounded or blind fixed sleep.
+  an unbounded or blind fixed sleep. A missing concrete endpoint or a port that
+  never remains present and openable through the stability window is terminal
+  before transfer.
 - Each upload invocation makes at most one 1200-bps/DTR touch attempt. A helper
   timeout, partial host result, or lost confirmation is terminal rather than a
   reason to pulse a board that may already be resetting.
